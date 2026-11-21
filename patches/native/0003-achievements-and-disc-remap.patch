@@ -1,0 +1,873 @@
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+index bfde299..542933f 100644
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -543,7 +543,7 @@ if(PS2_GENERATED)
+     endif()
+     find_package(SDL2 QUIET)
+     if(SDL2_FOUND AND NOT EMSCRIPTEN)
+-        target_sources(ps2run PRIVATE host/window.cpp host/keymap.cpp host/quickmenu.cpp host/stretch.cpp host/recomp_options.cpp)
++        target_sources(ps2run PRIVATE host/window.cpp host/keymap.cpp host/quickmenu.cpp host/stretch.cpp host/recomp_options.cpp host/achievements.cpp)
+         target_compile_definitions(ps2run PRIVATE PS2_WINDOW)
+         if(WIN32 AND PS2_WIN_STATIC AND TARGET SDL2::SDL2-static)
+             target_link_libraries(ps2run PRIVATE SDL2::SDL2-static)
+@@ -567,7 +567,7 @@ if(PS2_GENERATED)
+             set_target_properties(ps2run PROPERTIES WIN32_EXECUTABLE ON)
+         endif()
+         # the game controller path tested with SDL's virtual controllers, no game needed: ninja -C build/native-<game> ps2padtest
+-        add_executable(ps2padtest EXCLUDE_FROM_ALL host/pad_test.cpp host/window.cpp host/keymap.cpp host/quickmenu.cpp host/stretch.cpp host/recomp_options.cpp)
++        add_executable(ps2padtest EXCLUDE_FROM_ALL host/pad_test.cpp host/window.cpp host/keymap.cpp host/quickmenu.cpp host/stretch.cpp host/recomp_options.cpp host/achievements.cpp)
+         target_include_directories(ps2padtest PRIVATE runtime/src)
+         target_link_libraries(ps2padtest PRIVATE ps2runtime SDL2::SDL2)
+     endif()
+diff --git a/host/achievements.cpp b/host/achievements.cpp
+new file mode 100644
+index 0000000..655c636
+--- /dev/null
++++ b/host/achievements.cpp
+@@ -0,0 +1,441 @@
++#include "achievements.hpp"
++
++#include "ps2/memory.hpp"
++
++#include <chrono>
++#include <cstdint>
++#include <cstdio>
++#include <cstdlib>
++#include <ctime>
++#include <fstream>
++#include <mutex>
++#include <set>
++#include <sstream>
++
++namespace achievements {
++namespace {
++
++enum class Size { b8, b16, b32, bit0, bit1, bit2, bit3, bit4, bit5, bit6, bit7, low4, high4 };
++enum class Kind { value, mem, delta, prior };
++
++struct Operand {
++    Kind kind = Kind::value;
++    Size size = Size::b8;
++    std::uint32_t address = 0, value = 0;
++    // per-frame memory of a memory operand (delta / prior)
++    std::uint32_t last = 0, prior = 0;
++    bool seen = false;
++};
++
++enum class Flag { none, reset, pause, add_source, sub_source, and_next, or_next, add_hits, add_address };
++enum class Cmp { eq, ne, lt, le, gt, ge, none };
++
++struct Cond {
++    Flag flag = Flag::none;
++    Operand left, right;
++    Cmp cmp = Cmp::none;
++    std::uint32_t target = 0, hits = 0;  // .N. (0: no hit count)
++};
++
++struct Group {
++    std::vector<Cond> conds;
++};
++
++struct Achievement {
++    std::string id, title, description;
++    int points = 0;
++    std::vector<Group> groups;  // [0] core, then alternatives
++    bool unlocked = false, primed = false;  // primed: seen false once since loading
++};
++
++std::vector<Achievement> g_list;
++std::string g_unlocks_path, g_note;
++std::mutex g_lock;
++bool g_loaded = false;
++
++std::string trim(const std::string &s) {
++    const auto a = s.find_first_not_of(" \t\r\n"), b = s.find_last_not_of(" \t\r\n");
++    return a == std::string::npos ? std::string() : s.substr(a, b - a + 1);
++}
++
++// ---- reading the conditions ------------------------------------------------------------------------------------------
++
++bool parse_operand(const std::string &t, std::size_t &i, Operand &o) {
++    auto hex = [&](std::uint32_t &v) {
++        std::size_t start = i;
++        v = 0;
++        while (i < t.size() && std::isxdigit(static_cast<unsigned char>(t[i]))) v = v * 16 + static_cast<std::uint32_t>(std::stoi(std::string(1, t[i++]), nullptr, 16));
++        return i > start;
++    };
++    o = Operand();
++    Kind k = Kind::mem;
++    if (i < t.size() && (t[i] == 'd' || t[i] == 'p' || t[i] == 'b')) {
++        k = t[i] == 'd' ? Kind::delta : t[i] == 'p' ? Kind::prior : Kind::mem;  // b (BCD) read as plain
++        ++i;
++    }
++    if (t.compare(i, 2, "0x") == 0) {
++        i += 2;
++        o.kind = k;
++        o.size = Size::b16;
++        if (i < t.size()) {
++            const char c = t[i];
++            switch (c) {
++            case 'H': case 'h': o.size = Size::b8; ++i; break;
++            case 'X': case 'x': o.size = Size::b32; ++i; break;
++            case ' ': o.size = Size::b16; ++i; break;
++            case 'M': o.size = Size::bit0; ++i; break;
++            case 'N': o.size = Size::bit1; ++i; break;
++            case 'O': o.size = Size::bit2; ++i; break;
++            case 'P': o.size = Size::bit3; ++i; break;
++            case 'Q': o.size = Size::bit4; ++i; break;
++            case 'R': o.size = Size::bit5; ++i; break;
++            case 'S': o.size = Size::bit6; ++i; break;
++            case 'T': o.size = Size::bit7; ++i; break;
++            case 'L': o.size = Size::low4; ++i; break;
++            case 'U': o.size = Size::high4; ++i; break;
++            default: break;  // 0x1234: 16 bit
++            }
++        }
++        return hex(o.address);
++    }
++    o.kind = Kind::value;
++    if (i < t.size() && (t[i] == 'h' || t[i] == 'H')) {
++        ++i;
++        return hex(o.value);
++    }
++    if (i < t.size() && (t[i] == 'v' || t[i] == 'V')) ++i;  // v123
++    std::size_t start = i;
++    std::uint64_t v = 0;
++    while (i < t.size() && std::isdigit(static_cast<unsigned char>(t[i]))) v = v * 10 + static_cast<unsigned>(t[i++] - '0');
++    o.value = static_cast<std::uint32_t>(v);
++    return i > start;
++}
++
++bool parse_cond(const std::string &t, Cond &c) {
++    std::size_t i = 0;
++    c = Cond();
++    if (t.size() > 2 && t[1] == ':') {
++        switch (t[0]) {
++        case 'R': c.flag = Flag::reset; break;
++        case 'P': c.flag = Flag::pause; break;
++        case 'A': c.flag = Flag::add_source; break;
++        case 'B': c.flag = Flag::sub_source; break;
++        case 'N': c.flag = Flag::and_next; break;
++        case 'O': c.flag = Flag::or_next; break;
++        case 'C': c.flag = Flag::add_hits; break;
++        case 'I': c.flag = Flag::add_address; break;
++        default: break;  // M: Q: T: Z: K: ...: evaluated as plain conditions
++        }
++        i = 2;
++    }
++    if (!parse_operand(t, i, c.left)) return false;
++    if (i >= t.size()) return true;  // a lone operand (A:/B:/I: lines)
++    if (t.compare(i, 2, "!=") == 0) { c.cmp = Cmp::ne; i += 2; }
++    else if (t.compare(i, 2, "<=") == 0) { c.cmp = Cmp::le; i += 2; }
++    else if (t.compare(i, 2, ">=") == 0) { c.cmp = Cmp::ge; i += 2; }
++    else if (t[i] == '=') { c.cmp = Cmp::eq; ++i; }
++    else if (t[i] == '<') { c.cmp = Cmp::lt; ++i; }
++    else if (t[i] == '>') { c.cmp = Cmp::gt; ++i; }
++    else if (t[i] == '*' || t[i] == '/' || t[i] == '&' || t[i] == '^') return true;  // arithmetic modifiers: not supported, read as the left side
++    else return false;
++    if (!parse_operand(t, i, c.right)) return false;
++    if (i < t.size() && (t[i] == '.' || t[i] == '(')) {
++        ++i;
++        std::uint32_t h = 0;
++        while (i < t.size() && std::isdigit(static_cast<unsigned char>(t[i]))) h = h * 10 + static_cast<unsigned>(t[i++] - '0');
++        c.target = h;
++    }
++    return true;
++}
++
++bool parse_logic(const std::string &logic, std::vector<Group> &groups) {
++    groups.clear();
++    std::string group;
++    std::stringstream gs(logic);
++    bool first = true;
++    while (std::getline(gs, group, 'S')) {
++        if (!first && group.empty()) continue;
++        first = false;
++        Group g;
++        std::stringstream cs(group);
++        std::string cond;
++        while (std::getline(cs, cond, '_')) {
++            if (cond.empty()) continue;
++            Cond c;
++            if (!parse_cond(cond, c)) return false;
++            g.conds.push_back(c);
++        }
++        groups.push_back(g);
++    }
++    return !groups.empty();
++}
++
++// ---- checking them ---------------------------------------------------------------------------------------------------
++
++std::uint32_t read_mem(Size s, std::uint32_t a) {
++    a &= 0x01FFFFFFu;  // EE main memory
++    switch (s) {
++    case Size::b8: return ps2::ld8(a);
++    case Size::b16: return ps2::ld16(a & ~1u);
++    case Size::b32: return ps2::ld32(a & ~3u);
++    case Size::low4: return ps2::ld8(a) & 0xF;
++    case Size::high4: return ps2::ld8(a) >> 4;
++    default: return (ps2::ld8(a) >> (static_cast<int>(s) - static_cast<int>(Size::bit0))) & 1;
++    }
++}
++
++// The operand's value this frame; memory operands also move their delta / prior history (once per frame: `step`).
++std::uint32_t value_of(Operand &o, std::uint32_t offset, bool step) {
++    if (o.kind == Kind::value) return o.value;
++    const std::uint32_t now = read_mem(o.size, o.address + offset);
++    std::uint32_t result = now;
++    if (o.kind == Kind::delta) result = o.seen ? o.last : now;
++    else if (o.kind == Kind::prior) result = o.seen ? o.prior : now;
++    if (step) {
++        if (o.seen && now != o.last) o.prior = o.last;
++        o.last = now;
++        o.seen = true;
++    }
++    return result;
++}
++
++bool compare(Cmp c, std::uint32_t a, std::uint32_t b) {
++    switch (c) {
++    case Cmp::eq: return a == b;
++    case Cmp::ne: return a != b;
++    case Cmp::lt: return a < b;
++    case Cmp::le: return a <= b;
++    case Cmp::gt: return a > b;
++    case Cmp::ge: return a >= b;
++    default: return a != 0;
++    }
++}
++
++// One group: true when every plain condition holds (hit counts reached); reset / pause seen separately.
++bool check_group(Group &g, bool &reset, bool &paused) {
++    bool all = true;
++    std::int64_t add = 0;
++    std::uint32_t address_offset = 0;
++    int chain = -1;  // -1 none, 0 false, 1 true: AndNext / OrNext carried into the next condition
++    std::uint32_t extra_hits = 0;
++    // pause conditions first, as RetroAchievements does: a paused group keeps its hit counts and is not true
++    for (Cond &c : g.conds)
++        if (c.flag == Flag::pause) {
++            const std::uint32_t l = value_of(c.left, 0, false), r = value_of(c.right, 0, false);
++            if (compare(c.cmp, l, r)) paused = true;
++        }
++    if (paused) {
++        for (Cond &c : g.conds) { value_of(c.left, 0, true); value_of(c.right, 0, true); }
++        return false;
++    }
++    for (Cond &c : g.conds) {
++        const std::uint32_t l = value_of(c.left, address_offset, true);
++        if (c.flag == Flag::add_address) { address_offset = l; continue; }
++        const std::uint32_t r = value_of(c.right, address_offset, true);
++        address_offset = 0;
++        if (c.flag == Flag::add_source) { add += l; continue; }
++        if (c.flag == Flag::sub_source) { add -= l; continue; }
++        const std::uint32_t left = static_cast<std::uint32_t>(static_cast<std::int64_t>(l) + add);
++        add = 0;
++        bool truth = compare(c.cmp, left, r);
++        if (chain == 0 && c.flag != Flag::or_next) truth = false;
++        if (c.flag == Flag::and_next) { chain = truth && chain != 0 ? 1 : 0; continue; }
++        if (c.flag == Flag::or_next) { chain = truth || chain == 1 ? 1 : 0; continue; }
++        if (chain == 1) truth = truth || false;
++        chain = -1;
++        if (c.flag == Flag::add_hits) { if (truth) ++extra_hits; continue; }
++        if (c.flag == Flag::pause) continue;
++        if (c.flag == Flag::reset) { if (truth) reset = true; continue; }
++        if (c.target) {
++            if (truth && c.hits < c.target) ++c.hits;
++            if (c.hits + extra_hits < c.target) all = false;
++            extra_hits = 0;
++        } else if (!truth) {
++            all = false;
++        }
++    }
++    return all;
++}
++
++void clear_hits(Achievement &a) {
++    for (Group &g : a.groups)
++        for (Cond &c : g.conds) c.hits = 0;
++}
++
++bool check(Achievement &a) {
++    bool reset = false, paused = false;
++    bool core = check_group(a.groups[0], reset, paused);
++    bool any_alt = a.groups.size() == 1;
++    for (std::size_t i = 1; i < a.groups.size(); ++i) {
++        bool p = false;
++        if (check_group(a.groups[i], reset, p)) any_alt = true;
++    }
++    if (reset) { clear_hits(a); return false; }
++    return core && any_alt && !paused;
++}
++
++void save_unlock(const Achievement &a) {
++    if (g_unlocks_path.empty()) return;
++    std::ofstream f(g_unlocks_path, std::ios::app);
++    const std::time_t now = std::time(nullptr);
++    char when[32];
++    std::strftime(when, sizeof when, "%Y-%m-%d %H:%M", std::localtime(&now));
++    f << a.id << "\t" << when << "\t" << a.title << "\n";
++}
++
++// ---- the two file forms ----------------------------------------------------------------------------------------------
++
++// RACache\Data\<id>.json: only the fields used here, read without a JSON library (strings with \" and \\ escapes)
++std::string json_field(const std::string &obj, const std::string &key) {
++    const std::string k = "\"" + key + "\"";
++    std::size_t at = obj.find(k);
++    if (at == std::string::npos) return "";
++    at = obj.find(':', at + k.size());
++    if (at == std::string::npos) return "";
++    ++at;
++    while (at < obj.size() && (obj[at] == ' ' || obj[at] == '\t' || obj[at] == '\n' || obj[at] == '\r')) ++at;
++    if (at < obj.size() && obj[at] == '"') {
++        std::string out;
++        for (++at; at < obj.size() && obj[at] != '"'; ++at) {
++            if (obj[at] == '\\' && at + 1 < obj.size()) { ++at; out += obj[at] == 'n' ? '\n' : obj[at]; }
++            else out += obj[at];
++        }
++        return out;
++    }
++    std::size_t end = at;
++    while (end < obj.size() && obj[end] != ',' && obj[end] != '}') ++end;
++    return trim(obj.substr(at, end - at));
++}
++
++void load_json(const std::string &text) {
++    std::size_t at = text.find("\"Achievements\"");
++    if (at == std::string::npos) return;
++    at = text.find('[', at);
++    int depth = 0;
++    std::size_t start = 0;
++    for (std::size_t i = at; i < text.size(); ++i) {
++        if (text[i] == '"') { for (++i; i < text.size() && text[i] != '"'; ++i) if (text[i] == '\\') ++i; continue; }
++        if (text[i] == '{') { if (depth++ == 0) start = i; }
++        else if (text[i] == '}') {
++            if (--depth == 0) {
++                const std::string obj = text.substr(start, i - start + 1);
++                Achievement a;
++                a.id = json_field(obj, "ID");
++                a.title = json_field(obj, "Title");
++                a.description = json_field(obj, "Description");
++                a.points = std::atoi(json_field(obj, "Points").c_str());
++                if (json_field(obj, "Flags") == "5") continue;  // unofficial ones
++                if (parse_logic(json_field(obj, "MemAddr"), a.groups)) g_list.push_back(a);
++                else std::fprintf(stderr, "[achievements] %s: condition not understood, skipped\n", a.title.c_str());
++            }
++        } else if (text[i] == ']' && depth == 0) break;
++    }
++}
++
++void load_text(const std::string &text) {
++    std::stringstream in(text);
++    std::string line, logic;
++    Achievement cur;
++    bool have = false;
++    auto flush = [&] {
++        if (have && parse_logic(logic, cur.groups)) g_list.push_back(cur);
++        else if (have) std::fprintf(stderr, "[achievements] %s: condition not understood, skipped\n", cur.title.c_str());
++        cur = Achievement();
++        logic.clear();
++        have = false;
++    };
++    while (std::getline(in, line)) {
++        const std::string t = trim(line);
++        if (t.empty() || t[0] == '#') continue;
++        if (t.front() == '[' && t.back() == ']') {
++            flush();
++            cur.id = t.substr(1, t.size() - 2);
++            have = true;
++            continue;
++        }
++        const auto eq = t.find('=');
++        if (eq == std::string::npos) continue;
++        const std::string k = trim(t.substr(0, eq)), v = trim(t.substr(eq + 1));
++        if (k == "title") cur.title = v;
++        else if (k == "description") cur.description = v;
++        else if (k == "points") cur.points = std::atoi(v.c_str());
++        else if (k == "logic") logic = v;
++    }
++    flush();
++}
++
++}  // namespace
++
++bool load(const char *set_path, const std::string &unlocks_path) {
++    std::lock_guard<std::mutex> hold(g_lock);
++    g_list.clear();
++    g_loaded = false;
++    if (!set_path || !*set_path) return false;
++    std::ifstream in(set_path, std::ios::binary);
++    if (!in) {
++        std::fprintf(stderr, "[achievements] no set file %s\n", set_path);
++        return false;
++    }
++    std::stringstream ss;
++    ss << in.rdbuf();
++    const std::string text = ss.str();
++    if (text.find("\"Achievements\"") != std::string::npos) load_json(text);
++    else load_text(text);
++    g_unlocks_path = unlocks_path;
++    std::set<std::string> done;
++    std::ifstream u(unlocks_path);
++    std::string line;
++    while (std::getline(u, line)) done.insert(line.substr(0, line.find('\t')));
++    for (Achievement &a : g_list) a.unlocked = done.count(a.id) != 0;
++    g_loaded = !g_list.empty();
++    std::fprintf(stderr, "[achievements] %zu achievements from %s, %zu already unlocked\n", g_list.size(), set_path, done.size());
++    return g_loaded;
++}
++
++void frame() {
++    if (!g_loaded) return;
++    std::lock_guard<std::mutex> hold(g_lock);
++    for (Achievement &a : g_list) {
++        if (a.unlocked) continue;
++        const bool now = check(a);
++        if (!now) { a.primed = true; continue; }
++        if (!a.primed) continue;  // true from the first frame on (a loaded save): wait for it to be false once
++        a.unlocked = true;
++        save_unlock(a);
++        g_note = "Achievement unlocked: " + a.title + (a.points ? " (" + std::to_string(a.points) + ")" : "");
++        std::fprintf(stderr, "[achievements] unlocked %s - %s\n", a.id.c_str(), a.title.c_str());
++    }
++}
++
++std::vector<Row> rows() {
++    std::lock_guard<std::mutex> hold(g_lock);
++    std::vector<Row> out;
++    for (const Achievement &a : g_list) out.push_back({a.title, a.description, a.points, a.unlocked});
++    return out;
++}
++
++std::string take_note() {
++    std::lock_guard<std::mutex> hold(g_lock);
++    std::string n;
++    n.swap(g_note);
++    return n;
++}
++
++bool loaded() { return g_loaded; }
++
++int unlocked_count() {
++    std::lock_guard<std::mutex> hold(g_lock);
++    int n = 0;
++    for (const Achievement &a : g_list) n += a.unlocked;
++    return n;
++}
++
++int total_points(bool unlocked_only) {
++    std::lock_guard<std::mutex> hold(g_lock);
++    int n = 0;
++    for (const Achievement &a : g_list)
++        if (!unlocked_only || a.unlocked) n += a.points;
++    return n;
++}
++
++}  // namespace achievements
+diff --git a/host/achievements.hpp b/host/achievements.hpp
+new file mode 100644
+index 0000000..26d8ca6
+--- /dev/null
++++ b/host/achievements.hpp
+@@ -0,0 +1,43 @@
++#pragma once
++
++// rawdanger-recomp: offline achievements. The game's memory is checked once per frame against the conditions of an
++// achievement set; an achievement unlocks when its conditions become true (after having been false at least once, so a
++// loaded save does not unlock everything at once), a note shows it over the picture, and the unlocks are kept in a file
++// next to the saves. Nothing goes over the network.
++//
++// The set comes from PS2_ACHIEVEMENTS=<file>, in either form:
++//   - our own text form (RawDangerPC.exe ships one):
++//       [id]
++//       title = Into the water
++//       description = ...
++//       points = 5
++//       logic = 0xX48F488=21          (the condition, in RetroAchievements' memory syntax, below)
++//   - a RetroAchievements cache file of the player's own (RACache\Data\<game id>.json, written by a RetroAchievements
++//     emulator after logging in): its "Achievements" list with ID, Title, Description, Points and MemAddr is read as is.
++//
++// Supported condition syntax (RetroAchievements memory strings): sizes 0xH (8 bit), 0x / 0x  (16 bit), 0xX (32 bit),
++// 0xM..0xT (bit 0..7), 0xL / 0xU (low / high nibble); d (delta: last frame's value) and p (prior: the value before it
++// last changed) prefixes; values as decimal or hFF; = != < <= > >=; hit counts .N.; flags R: (reset) P: (pause)
++// A: (add source) B: (sub source) N: (and next) O: (or next) C: (add hits) I: (add address) M: Q: T: (as plain);
++// core group and alternatives separated by S. PS2 addresses are EE main memory (0 ... 0x1FFFFFF).
++
++#include <string>
++#include <vector>
++
++namespace achievements {
++
++struct Row {
++    std::string title, description;
++    int points = 0;
++    bool unlocked = false;
++};
++
++bool load(const char *set_path, const std::string &unlocks_path);  // false: no set
++void frame();                                                         // once per video frame: check, unlock
++std::vector<Row> rows();                                              // for the menu page
++std::string take_note();                                              // "Achievement unlocked: ..." once, then empty
++bool loaded();
++int unlocked_count();
++int total_points(bool unlocked_only);
++
++}  // namespace achievements
+diff --git a/host/quickmenu.cpp b/host/quickmenu.cpp
+index d0c120a..b54d7a9 100644
+--- a/host/quickmenu.cpp
++++ b/host/quickmenu.cpp
+@@ -107,11 +107,11 @@ constexpr const char *kFont[95] = {
+     "..... ..... .#... #.#.# ...#. ..... ..... .....",  // ~
+ };
+ 
+-constexpr int kEntries = 11;
+-constexpr Command kCommands[kEntries] = {Command::resume,   Command::save,       Command::load, Command::recomp, Command::look,        Command::scale,
+-                                         Command::sharp_2d, Command::fullscreen, Command::keys, Command::change_keys, Command::quit};
++constexpr int kEntries = 12;
++constexpr Command kCommands[kEntries] = {Command::resume,   Command::save,       Command::load,       Command::recomp, Command::achievements, Command::look,
++                                         Command::scale,    Command::sharp_2d,   Command::fullscreen, Command::keys,   Command::change_keys,  Command::quit};
+ // the program's key for the same thing, shown dim at the right end of the entry
+-constexpr const char *kKeys[kEntries] = {"F1", "F5", "F8", "F3", "F2", "", "", "F11", "", "", ""};
++constexpr const char *kKeys[kEntries] = {"F1", "F5", "F8", "F3", "F4", "F2", "", "", "F11", "", "", ""};
+ constexpr int kVisibleRows = 11;  // lines of the keys page shown at once; the page scrolls
+ constexpr int kKeysPageChars = 58;
+ 
+@@ -146,6 +146,7 @@ std::string entry_text(int i, const Values &v, bool quit_armed) {
+     case Command::save: return "Quick save";
+     case Command::load: return "Quick load";
+     case Command::recomp: return "Recomp options";
++    case Command::achievements: return "Achievements";
+     case Command::look: return "Picture look:  < " + v.look + " >";
+     case Command::scale: {
+         const std::string now = std::to_string(v.scale_now) + "x";
+@@ -168,7 +169,7 @@ std::string entry_text(int i, const Values &v, bool quit_armed) {
+ 
+ }  // namespace
+ 
+-int Menu::count() const { return page_ == Page::keys ? key_rows_ + 2 : page_ == Page::recomp ? recomp_rows_ + 1 : kEntries; }
++int Menu::count() const { return page_ == Page::keys ? key_rows_ + 2 : page_ == Page::recomp || page_ == Page::achievements ? recomp_rows_ + 1 : kEntries; }
+ 
+ void Menu::fit() {
+     const int shown = std::min(key_rows_, kVisibleRows);
+@@ -212,6 +213,10 @@ Command Menu::choose() {
+         back();
+         return Command::none;
+     }
++    if (page_ == Page::achievements) {
++        if (selected_ >= recomp_rows_) back();
++        return Command::none;
++    }
+     if (page_ == Page::keys) {
+         if (selected_ < key_rows_) {
+             capturing_ = true;
+@@ -235,6 +240,13 @@ Command Menu::choose() {
+         selected_ = 0;
+         return c;
+     }
++    if (c == Command::achievements) {
++        main_selected_ = selected_;
++        page_ = Page::achievements;
++        selected_ = 0;
++        top_ = 0;
++        return c;
++    }
+     if (c == Command::change_keys) {
+         main_selected_ = selected_;
+         page_ = Page::keys;
+@@ -257,9 +269,11 @@ Command Menu::side() const {
+ }
+ 
+ bool Menu::select_at(int x, int y) {
+-    if (page_ == Page::recomp) {
+-        if (entry_h_ <= 0 || x < entry_x_ || x >= entry_x_ + entry_w_ || y < rows_y_ || y >= rows_y_ + (recomp_rows_ + 1) * entry_h_) return false;
+-        selected_ = (y - rows_y_) / entry_h_;
++    if (page_ == Page::recomp || page_ == Page::achievements) {
++        const int shown = std::min(recomp_rows_, 14);
++        if (entry_h_ <= 0 || x < entry_x_ || x >= entry_x_ + entry_w_ || y < rows_y_ || y >= rows_y_ + (shown + 1) * entry_h_) return false;
++        const int slot = (y - rows_y_) / entry_h_;
++        selected_ = slot < shown ? top_ + slot : recomp_rows_;
+         return true;
+     }
+     if (page_ == Page::keys) {
+@@ -346,10 +360,20 @@ void Menu::draw_keys(int window_width, int window_height, const Values &values,
+ 
+ // The Recomp options page: the game's patches, the live ones switchable here (and in RawDangerPC.exe, same file).
+ void Menu::draw_recomp(int window_width, int window_height, const Values &values, Picture &out) {
+-    static const std::string kTitleText = "Recomp options - rawdanger-recomp", kHint = "Enter / Cross: switch     Esc / Circle: back",
+-                             kBuilt = "Built in: chosen in RawDangerPC.exe, changed by building again";
++    const bool ach = page_ == Page::achievements;
++    const std::string kTitleText = ach ? "Achievements - offline, rawdanger-recomp" : "Recomp options - rawdanger-recomp",
++                      kHint = ach ? "Up / Down: scroll     Esc / Circle: back" : "Enter / Cross: switch     Esc / Circle: back",
++                      kBuilt = ach ? "* unlocked. Kept next to the saves; nothing goes online" : "Built in: chosen in RawDangerPC.exe, changed by building again";
+     recomp_rows_ = static_cast<int>(values.recomp_rows.size());
+-    const int n = recomp_rows_;
++    const int all = recomp_rows_;
++    // long lists scroll: the highlighted line stays in view
++    const int shown_max = 14;
++    if (selected_ < all) {
++        if (selected_ < top_) top_ = selected_;
++        if (selected_ >= top_ + shown_max) top_ = selected_ - shown_max + 1;
++    }
++    top_ = std::clamp(top_, 0, std::max(0, all - shown_max));
++    const int n = std::min(all, shown_max);
+     const int pad = 8, bar_h = 12, bar_pad = 5, chars = 62;
+     const int units_w = 2 * pad + 2 * bar_pad + chars * 6;
+     const int units_h = pad + 8 + 12 + (n + 1) * bar_h + 3 + 11 + 12 + 12 + 12 + 8 + pad;
+@@ -383,13 +407,13 @@ void Menu::draw_recomp(int window_width, int window_height, const Values &values
+         if (!right.empty()) c.text(out.width - text_x - static_cast<int>(right.size()) * 6 * s + s, y + 2 * s, s, right, lit ? kBarDim : color);
+         y += bar_h * s;
+     };
+-    if (n == 0) c.text(text_x, y + 2 * s, s, "No options file (the game was not built by RawDangerPC.exe)", kDim);
++    if (n == 0) c.text(text_x, y + 2 * s, s, ach ? "No achievements loaded" : "No options file (the game was not built by RawDangerPC.exe)", kDim);
+     for (int r = 0; r < n; ++r) {
+-        const Values::RecompRow &row = values.recomp_rows[r];
+-        line(r, row.label, row.state, !row.live);
++        const Values::RecompRow &row = values.recomp_rows[top_ + r];
++        line(top_ + r, row.label, row.state, !row.live);
+     }
+     if (n == 0) y += bar_h * s;
+-    line(n, "Back", "", false);
++    line(all, "Back", "", false);
+     y += 3 * s;
+     c.fill(pad * s, y, inner_w, std::max(1, s / 2), kFrame);
+     y += 6 * s;
+@@ -401,7 +425,7 @@ void Menu::draw_recomp(int window_width, int window_height, const Values &values
+ }
+ 
+ void Menu::draw(int window_width, int window_height, const Values &values, Picture &out) {
+-    if (page_ == Page::recomp) {
++    if (page_ == Page::recomp || page_ == Page::achievements) {
+         draw_recomp(window_width, window_height, values, out);
+         return;
+     }
+diff --git a/host/quickmenu.hpp b/host/quickmenu.hpp
+index 7f2773b..fa8bc94 100644
+--- a/host/quickmenu.hpp
++++ b/host/quickmenu.hpp
+@@ -18,7 +18,8 @@ enum class Command {
+     key_edit,      // keys page: the highlighted line waits for a key (capturing() is true from now on)
+     key_defaults,  // keys page: put back the default keys (asked once, like Quit)
+     recomp,        // rawdanger-recomp: the main menu's entry that opens the Recomp options page
+-    recomp_toggle  // Recomp options page: switch the highlighted option (recomp_row())
++    recomp_toggle, // Recomp options page: switch the highlighted option (recomp_row())
++    achievements   // rawdanger-recomp: the main menu's entry that opens the achievements page
+ };
+ 
+ // What the entries show; the window fills it in before each drawing.
+@@ -64,6 +65,8 @@ public:
+     // --- the keys page (Change keys): the same panel, one line per button ---
+     bool on_keys_page() const { return page_ == Page::keys; }
+     bool on_recomp_page() const { return page_ == Page::recomp; }
++    bool on_achievements_page() const { return page_ == Page::achievements; }
++    void show_achievements() { main_selected_ = 4; page_ = Page::achievements; selected_ = 0; top_ = 0; }
+     void set_recomp_rows(int count) { recomp_rows_ = count; }
+     int recomp_row() const { return selected_; }
+     void show_recomp() { main_selected_ = 3; page_ = Page::recomp; selected_ = 0; }  // F3: straight to the Recomp options page
+@@ -80,7 +83,7 @@ private:
+     bool open_ = false;
+     int selected_ = 0;
+     bool quit_armed_ = false;  // Quit was chosen once; the next Enter ends the game, anything else takes it back
+-    enum class Page { main, keys, recomp } page_ = Page::main;
++    enum class Page { main, keys, recomp, achievements } page_ = Page::main;
+     int recomp_rows_ = 0;
+     void draw_recomp(int window_width, int window_height, const Values &values, Picture &out);
+     int main_selected_ = 0;    // the main page's highlight while the keys page is shown
+diff --git a/host/recomp_options.cpp b/host/recomp_options.cpp
+index 24b83d4..dc79949 100644
+--- a/host/recomp_options.cpp
++++ b/host/recomp_options.cpp
+@@ -1,5 +1,6 @@
+ #include "recomp_options.hpp"
+ 
++#include "ps2/disc.hpp"
+ #include "ps2/memory.hpp"
+ #include "ps2/system.hpp"
+ 
+@@ -85,6 +86,10 @@ bool load(const char *path) {
+         else if (k == "live") cur->live = v == "1";
+         else if (k == "on") cur->on = v != "0";
+         else if (k == "aspect") cur->aspect169 = v == "16:9";
++        else if (k == "remap_off") {
++            unsigned f = 0, t = 0, n = 0;
++            if (std::sscanf(v.c_str(), "%u %u %u", &f, &t, &n) == 3) { cur->remap_from = f; cur->remap_to = t; cur->remap_count = n; }
++        }
+         else if (k == "word") {
+             Word w;
+             unsigned a = 0, p = 0, o = 0;
+@@ -108,6 +113,7 @@ void apply_startup() {
+             for (ps2::Patch &p : ps2::g_options.patches)
+                 if (p.address == w.address && p.bytes == 4) p.value = s.on ? w.patched : w.original;
+         if (s.aspect169) ps2::g_options.widescreen = s.on;
++        if (s.remap_count) ps2::disc::set_remap(s.remap_from, s.remap_to, s.remap_count, !s.on);
+         std::fprintf(stderr, "[recomp] %s: %s\n", s.label.c_str(), s.on ? "on" : "off");
+     }
+ }
+@@ -122,6 +128,7 @@ bool toggle(std::size_t index, std::string &note) {
+     s.on = !s.on;
+     set_words(s, s.on);
+     if (s.aspect169) ps2::g_options.widescreen = s.on;
++    if (s.remap_count) ps2::disc::set_remap(s.remap_from, s.remap_to, s.remap_count, !s.on);
+     save();
+     note = s.label + (s.on ? ": on" : ": off");
+     std::fprintf(stderr, "[recomp] %s switched %s in the game\n", s.label.c_str(), s.on ? "on" : "off");
+diff --git a/host/recomp_options.hpp b/host/recomp_options.hpp
+index 0966444..c05fe28 100644
+--- a/host/recomp_options.hpp
++++ b/host/recomp_options.hpp
+@@ -11,6 +11,7 @@
+ //   on    = 1                      the player's choice (live sections); built-in ones are always as built
+ //   aspect = 16:9                  the section also sets the picture's shape
+ //   word  = 003A83E0 43E00000 43A00000    address, patched value, original value (live sections)
++//   remap_off = 791280 1173090 381810     disc sectors read elsewhere while the option is off (live, no words needed)
+ // Code patches (live = 0) are compiled into the game: the menu lists them as built in.
+ 
+ #include <string>
+@@ -27,6 +28,9 @@ struct Section {
+     std::string name, label;
+     bool live = false, on = true, aspect169 = false;
+     std::vector<Word> words;
++    // remap_off = FROM TO COUNT: while the option is off, disc reads of sectors FROM.. come from TO.. (the Enhanced Edition's
++    // voices: on = Japanese, the area STR.DAT points to; off = English, the same layout further on)
++    std::uint32_t remap_from = 0, remap_to = 0, remap_count = 0;
+ };
+ 
+ bool load(const char *path);                // false when there is no file (then the menu page says so)
+diff --git a/host/window.cpp b/host/window.cpp
+index 395c74c..a40d7fc 100644
+--- a/host/window.cpp
++++ b/host/window.cpp
+@@ -3,6 +3,7 @@
+ #include "stick_map.hpp"
+ 
+ #include "recomp_options.hpp"
++#include "achievements.hpp"
+ 
+ #include "ps2/system.hpp"
+ 
+@@ -915,7 +916,19 @@ void menu_paint(bool show_again = true) {
+             for (int a = 0; a < keymap::kChangeableCount; ++a) v.key_rows.push_back({keymap::action_label(a), keymap::keys_text(g_keys, a)});
+             v.key_note = g_key_note;
+         }
+-        if (g_menu.on_recomp_page()) {
++        if (g_menu.on_achievements_page()) {
++            for (const achievements::Row &r : achievements::rows()) {
++                quickmenu::Values::RecompRow row;
++                row.label = (r.unlocked ? "* " : "  ") + r.title;
++                row.state = std::to_string(r.points);
++                row.live = r.unlocked;
++                v.recomp_rows.push_back(row);
++            }
++            g_menu.set_recomp_rows(static_cast<int>(v.recomp_rows.size()));
++            v.recomp_note = achievements::loaded() ? std::to_string(achievements::unlocked_count()) + " of " + std::to_string(v.recomp_rows.size()) + " unlocked, " +
++                                                         std::to_string(achievements::total_points(true)) + " of " + std::to_string(achievements::total_points(false)) + " points"
++                                                   : "No achievement set: start the game from RawDangerPC.exe";
++        } else if (g_menu.on_recomp_page()) {
+             for (const recomp::Section &sec : recomp::sections()) {
+                 quickmenu::Values::RecompRow row;
+                 row.label = sec.label;
+@@ -1299,6 +1312,12 @@ void show_notice() {
+         g_note_text.clear();
+         if (!g_menu.is_open()) menu_paint(false);
+     }
++    // rawdanger-recomp: an achievement just unlocked
++    if (const std::string a = achievements::take_note(); !a.empty() && !g_menu.is_open()) {
++        g_note_text = a;
++        g_note_until = SDL_GetTicks() + 4500;
++        menu_paint(false);
++    }
+ }
+ 
+ // PS2_HITCH_LOG=<ms>: SDL_PollEvent also pumps the system's messages and looks for controllers; say when it, or the handling of
+@@ -1346,6 +1365,11 @@ void poll() {
+             if (is_help_key(e.key.keysym.scancode))
+                 show_key_card((std::string("key ") + SDL_GetScancodeName(e.key.keysym.scancode) + " went down").c_str());
+             if (e.key.keysym.scancode == SDL_SCANCODE_F2) cycle_look();
++            if (e.key.keysym.scancode == SDL_SCANCODE_F4) {  // rawdanger-recomp: the achievements page at once
++                open_menu("F4");
++                g_menu.show_achievements();
++                menu_paint();
++            }
+             if (e.key.keysym.scancode == SDL_SCANCODE_F3) {  // rawdanger-recomp: the Recomp options page at once
+                 open_menu("F3");
+                 g_menu.show_recomp();
+@@ -1464,6 +1488,7 @@ void wait_until(std::uint64_t target) {
+ }
+ 
+ void pace() {
++    achievements::frame();  // rawdanger-recomp: once per video frame, with or without a sound device
+     if (no_limit()) return;
+     static bool stuck = false;  // the device took no sound for a second; the clock paces the game until it takes some again
+     if (g_audio && !audio_paced() && !stuck) {
+@@ -2063,6 +2088,11 @@ void watchdog() {
+ int run_window(const std::function<int()> &emulate) {
+     // rawdanger-recomp: the game's patch options (games\\<name>\\recomp.ini, from RawDangerPC.exe), applied before the game starts
+     if (recomp::load(std::getenv("PS2_RECOMP_OPTIONS"))) recomp::apply_startup();
++    // rawdanger-recomp: offline achievements (PS2_ACHIEVEMENTS=<set file>; unlocks kept in PS2_ACHIEVEMENTS_UNLOCKS or next to the set)
++    if (const char *set = std::getenv("PS2_ACHIEVEMENTS")) {
++        const char *u = std::getenv("PS2_ACHIEVEMENTS_UNLOCKS");
++        achievements::load(set, u && *u ? std::string(u) : std::string(set) + ".unlocked");
++    }
+     ps2::init_graphics();
+     g_gpu_present = attach_gpu();
+     std::fprintf(stderr, "[window] %s\n", g_gpu_present ? "presenting through WebGPU" : "presenting through SDL");
+diff --git a/runtime/include/ps2/disc.hpp b/runtime/include/ps2/disc.hpp
+index b652ad5..2e4c936 100644
+--- a/runtime/include/ps2/disc.hpp
++++ b/runtime/include/ps2/disc.hpp
+@@ -24,6 +24,9 @@ bool open(const std::string &path);
+ bool open(const std::string &name, std::uint64_t size, Reader reader, Probe probe = {});
+ bool is_open();
+ bool read(std::uint32_t sector, std::uint32_t count, void *out);
++// rawdanger-recomp: reads of [from, from + count) come from [to, to + count) while on (the Enhanced Edition's voice
++// language: two voice areas with the same layout). One mapping; set_remap(..., false) turns it off.
++void set_remap(std::uint32_t from, std::uint32_t to, std::uint32_t count, bool on);
+ bool ready(std::uint32_t sector, std::uint32_t count);
+ std::optional<Entry> find(const std::string &path);  // layer 0's file system first, as cdvdman's sceCdSearchFile
+ std::optional<Entry> find(const std::string &path, int layer);  // sceCdLayerSearchFile: layer 1's entry when it has one
+diff --git a/runtime/src/disc.cpp b/runtime/src/disc.cpp
+index 701f6b3..4945112 100644
+--- a/runtime/src/disc.cpp
++++ b/runtime/src/disc.cpp
+@@ -1,3 +1,4 @@
++#include <atomic>
+ #include "ps2/disc.hpp"
+ #include "ps2/disc_bundle.hpp"
+ #include "ps2/hitch.hpp"
+@@ -178,13 +179,33 @@ bool open(const std::string &name, std::uint64_t size, Reader reader, Probe prob
+ 
+ bool is_open() { return static_cast<bool>(g_reader); }
+ 
++namespace {
++std::atomic<bool> g_remap_on{false};
++std::atomic<std::uint32_t> g_remap_from{0}, g_remap_to{0}, g_remap_count{0};
++}  // namespace
++
++void set_remap(std::uint32_t from, std::uint32_t to, std::uint32_t count, bool on) {
++    g_remap_from = from;
++    g_remap_to = to;
++    g_remap_count = count;
++    g_remap_on = on && count > 0;
++}
++
+ bool read(std::uint32_t sector, std::uint32_t count, void *out) {
+     if (!g_reader) return false;
++    if (g_remap_on.load(std::memory_order_relaxed)) {
++        const std::uint32_t from = g_remap_from, n = g_remap_count;
++        if (sector >= from && sector < from + n) sector = sector - from + g_remap_to;  // a read never spans the two areas' edge in practice
++    }
+     const cost::Timer time_it(cost::kDisc);
+     const std::size_t want = static_cast<std::size_t>(count) * kSector;
+     if (cost::g_on) cost::g_disc_bytes += want;
+     const auto started = hitch::on() ? hitch::Clock::now() : hitch::Clock::time_point{};
+     const std::size_t got = g_reader(static_cast<std::uint64_t>(sector) * kSector, out, want);
++    {   // rawdanger-recomp: PS2_TRACE_DISC_ALL=1 prints every disc read (start sector, count), e.g. to check a rebuilt image
++        static const bool all = !os::env("PS2_TRACE_DISC_ALL").empty();
++        if (all) std::fprintf(stderr, "[disc-read] sector %u count %u\n", sector, count);
++    }
+     if (hitch::on()) {  // PS2_HITCH_LOG=<ms>: a disc read that held the game up (one third of the limit, since a frame has other work too)
+         const double ms = hitch::ms_since(started);
+         if (ms > hitch::threshold_ms() / 3) std::fprintf(stderr, "[hitch] disc read of %u sectors at sector %u (%.1f MB) took %.1f ms\n", count, sector, want / 1048576.0, ms);

@@ -1,0 +1,138 @@
+From 35fa6f6608ab941b8ae10534f6b285e9d4be044d Mon Sep 17 00:00:00 2001
+From: rawdanger-recomp <rawdanger-recomp@users.noreply.github.com>
+Date: Thu, 19 Nov 2026 02:27:30 +0000
+Subject: [PATCH] 0013-language-switch-entry.patch
+
+---
+ host/quickmenu.cpp | 17 +++++++++++------
+ host/quickmenu.hpp |  4 +++-
+ host/window.cpp    | 19 +++++++++++++++++++
+ 3 files changed, 33 insertions(+), 7 deletions(-)
+
+diff --git a/host/quickmenu.cpp b/host/quickmenu.cpp
+index 74cd7b0..24572a7 100644
+--- a/host/quickmenu.cpp
++++ b/host/quickmenu.cpp
+@@ -108,11 +108,11 @@ constexpr const char *kFont[95] = {
+ };
+ 
+ // rawdanger-recomp: the menu laid out for Raw Danger - the game's own options first, then the picture, then controls.
+-constexpr int kEntries = 9;
++constexpr int kEntries = 10;
+ constexpr Command kCommands[kEntries] = {Command::resume,   Command::save,         Command::load,  Command::recomp,      Command::graphics,
+-                                         Command::achievements, Command::keys,     Command::change_keys, Command::quit};
++                                         Command::achievements, Command::language, Command::keys,     Command::change_keys, Command::quit};
+ // the program's key for the same thing, shown dim at the right end of the entry
+-constexpr const char *kKeys[kEntries] = {"F1", "F5", "F8", "F3", "", "F4", "", "", ""};
++constexpr const char *kKeys[kEntries] = {"F1", "F5", "F8", "F3", "", "F4", "", "", "", ""};
+ // the Graphics page
+ constexpr int kGraphicsEntries = 11;
+ constexpr Command kGraphics[kGraphicsEntries] = {Command::scale,      Command::look,      Command::antialias,     Command::integer_scale,   Command::sharp_2d, Command::fullscreen,
+@@ -199,6 +199,11 @@ std::string entry_text(Command c, const Values &v, bool quit_armed) {
+     case Command::keys: return "Key card";
+     case Command::change_keys: return "Change keys";
+     case Command::quit: return quit_armed ? "Quit to desktop?  Enter / Cross again" : "Quit to desktop";
++    case Command::language:
++        if (v.language_other.empty())
++            return "Language: " + (v.language_now.empty() ? std::string("this version only") : v.language_now) + "  (build the other disc for more)";
++        return quit_armed ? "Restart in " + v.language_other + "?  Save in the game first.  Enter / Cross again"
++                          : "Language: " + v.language_now + "  > play in " + v.language_other + " (restarts, saves carried over)";
+     default: return "";
+     }
+ }
+@@ -306,7 +311,7 @@ Command Menu::choose() {
+         defaults_armed_ = false;
+         return c;
+     }
+-    if (c != Command::quit) return c;
++    if (c != Command::quit && c != Command::language) return c;
+     if (quit_armed_) return c;
+     quit_armed_ = true;  // asks once
+     return Command::none;
+@@ -546,7 +551,7 @@ void Menu::draw_list(int window_width, int window_height, const Values &values,
+     std::vector<std::string> lines(n);
+     std::size_t chars = std::max({kTitleText.size(), kHint.size(), kNote.size()});
+     for (int i = 0; i < n; ++i) {
+-        lines[i] = entry_text(commands[i], values, quit_armed_);
++        lines[i] = entry_text(commands[i], values, quit_armed_ && i == selected_);
+         chars = std::max(chars, lines[i].size() + 5);  // room for the dim key at the right end
+     }
+     // everything in font pixels first; one font pixel is `s` window pixels, as big as fits in about 80 % of the window
+@@ -579,7 +584,7 @@ void Menu::draw_list(int window_width, int window_height, const Values &values,
+         const bool lit = i == selected_;
+         const bool quit = commands[i] == Command::quit;
+         if (lit) c.fill(pad * s, y, out.width - 2 * pad * s, bar_h * s, quit ? kAlarm : kBar);
+-        const bool unusable = commands[i] == Command::widescreen && values.widescreen < 0;
++        const bool unusable = (commands[i] == Command::widescreen && values.widescreen < 0) || (commands[i] == Command::language && values.language_other.empty());
+         c.text((pad + bar_pad) * s, y + 3 * s, s, lines[i], lit ? (quit ? kText : kBarText) : unusable ? kDim : kText);
+         const std::string key = keys[i];
+         c.text(out.width - (pad + bar_pad) * s - static_cast<int>(key.size()) * 6 * s + s, y + 3 * s, s, key, lit ? (quit ? kText : kBarDim) : kDim);
+diff --git a/host/quickmenu.hpp b/host/quickmenu.hpp
+index 51b096a..0d8c4e3 100644
+--- a/host/quickmenu.hpp
++++ b/host/quickmenu.hpp
+@@ -28,6 +28,7 @@ enum class Command {
+     antialias,     // Graphics and sound page: off / smooth edges / SMAA
+     lens_rain,     // Graphics and sound page: rain drops on the lens while playing (off / light / heavy)
+     master_volume, // Graphics and sound page: the volume of the game's sound (left / right: 10 % steps)
++    language,      // rawdanger-recomp: restart the game in its other language (the launcher's other build; asked once, like Quit)
+     back           // a page's Back line
+ };
+ 
+@@ -49,6 +50,7 @@ struct Values {
+     int lens_rain = 0;             // 0 off, 1 light, 2 heavy
+     bool lens_rain_known = true;   // the game says when it is playing (PS2_LENS_WHEN); false: the drops would also fall on menus
+     std::string title;             // the game's name for the panel's title ("Raw Danger! Enhanced Edition")
++    std::string language_now, language_other;  // "English", "Japanese": the other one is empty when the launcher has no other build
+     // the keys page: one row per button (label and its keys, in the order of keys.ini) and a message line (what the last change did)
+     struct KeyRow {
+         std::string label, keys;
+@@ -85,7 +87,7 @@ public:
+     void move(int delta);                      // up (-1) and down (+1), round at the ends
+     Command choose();                          // Enter, Cross, a click: what the highlighted entry does (Quit asks once: the first time it only arms itself)
+     Command side() const;                      // left and right: the entries that go through values (look, resolution), else none
+-    bool quit_armed() const { return quit_armed_; }
++    bool quit_armed() const { return quit_armed_; }   // Quit or Language waits for its second Enter
+     bool select_at(int x, int y);
+     // --- the keys page (Change keys): the same panel, one line per button ---
+     bool on_keys_page() const { return page_ == Page::keys; }
+diff --git a/host/window.cpp b/host/window.cpp
+index c39c0a1..4f70ef2 100644
+--- a/host/window.cpp
++++ b/host/window.cpp
+@@ -978,6 +978,9 @@ void menu_paint(bool show_again = true) {
+         v.lens_rain = lens_rain::level();
+         v.lens_rain_known = lens_rain::knows_when();
+         v.title = g_game_title.substr(0, g_game_title.find("  -  "));  // "Raw Danger! Enhanced Edition", without the program's name
++        // rawdanger-recomp: the launcher names this build's language and the other build's (PS2_LANGUAGE, PS2_LANGUAGE_OTHER)
++        if (const char *now = std::getenv("PS2_LANGUAGE")) v.language_now = now;
++        if (const char *other = std::getenv("PS2_LANGUAGE_OTHER")) if (std::getenv("PS2_LANGUAGE_SWITCH_FILE")) v.language_other = other;
+         v.widescreen = -1;
+         for (const recomp::Section &sec : recomp::sections())
+             if (sec.aspect169 && sec.live) v.widescreen = sec.on ? 1 : 0;
+@@ -1311,6 +1314,22 @@ void menu_command(quickmenu::Command c, int step) {
+         // the menu stays open behind the card (the game keeps holding); the card's own buttons close it when they save or load
+         show_key_card("Keys in the quick menu");
+         break;
++    case Command::language: {
++        // rawdanger-recomp: the launcher started this game with PS2_LANGUAGE_SWITCH_FILE; the file tells it, once the game has
++        // ended, to carry the saves over to the other build's memory card and start that one (tools\rd_card.py)
++        const char *file = std::getenv("PS2_LANGUAGE_SWITCH_FILE");
++        const char *other = std::getenv("PS2_LANGUAGE_OTHER");
++        if (!file || !*file || !other) { menu_paint(); return; }
++        if (std::FILE *f = std::fopen(file, "wb")) {
++            std::fprintf(f, "%s\n", other);
++            std::fclose(f);
++        }
++        std::fprintf(stderr, "[menu] Language: restart in %s; the memory card is written, the game ends\n", other);
++        ps2::flush_memory_card();
++        ps2::halt("language switch from the quick menu");
++        close_menu("Language");
++        return;
++    }
+     case Command::quit:
+         std::fprintf(stderr, "[menu] Quit to desktop: the memory card is written, the game ends\n");
+         ps2::flush_memory_card();  // right away, as when the window is closed
+-- 
+2.43.0
+

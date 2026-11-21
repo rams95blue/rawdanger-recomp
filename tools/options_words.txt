@@ -1,0 +1,104 @@
+# The words of the PC rows of the game's Options list (rd_options.py paints them; the engine's rows ask for them by name).
+# L = a row's name (white), V = a value shown when picked (dark on the glow), B = a value of a two-value row (white and dark).
+# The labels of the Game options (recomp.ini sections) are added from recomp.ini.
+L	Resolution
+L	Window size
+L	Full screen
+L	Widescreen 16:9
+L	Whole-number scaling
+L	Pause in background
+L	Game runs behind F1
+L	Menu look
+L	Pop-up size
+L	Upscale filter
+L	Anti-aliasing
+L	Sharpen
+L	Text and menus
+L	Cutscene bars
+L	Lens rain
+L	Master volume
+L	Reverb
+L	Mouse look
+L	Mouse speed
+L	Mouse left/right
+L	Mouse up/down
+L	Key names in texts
+L	Keys on screen
+L	PS2 post processing
+V	1x
+V	2x
+V	3x
+V	4x
+V	5x
+V	6x
+V	8x
+V	AUTO
+V	1280 x 720
+V	1600 x 900
+V	1920 x 1080
+V	2560 x 1440
+V	3840 x 2160
+V	960 x 720
+V	1200 x 900
+V	1440 x 1080
+V	1920 x 1440
+V	2880 x 2160
+V	FULL SCREEN
+V	CUSTOM
+V	HAZARD
+V	JAPANESE
+V	GAME
+V	RAW
+V	SOFT
+V	SHARP
+V	FSR 1
+V	OFF
+V	EDGES
+V	SMAA LOW
+V	SMAA MEDIUM
+V	SMAA HIGH
+V	SMAA ULTRA
+V	LOW
+V	MEDIUM
+V	HIGH
+V	SHARPEST
+V	LIGHT
+V	HEAVY
+V	MUTE
+V	0 %
+V	10 %
+V	20 %
+V	30 %
+V	40 %
+V	50 %
+V	60 %
+V	70 %
+V	80 %
+V	90 %
+V	100 %
+V	0.2
+V	0.4
+V	0.6
+V	0.8
+V	1.0
+V	1.2
+V	1.4
+V	1.6
+V	1.8
+V	2.0
+V	2.2
+V	2.4
+V	2.6
+V	2.8
+V	3.0
+V	3.2
+V	3.4
+V	3.6
+V	3.8
+V	4.0
+V	SMALL
+V	NORMAL
+V	LARGE
+V	HUGE
+B	NORMAL
+B	INVERTED

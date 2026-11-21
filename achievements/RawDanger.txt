@@ -1,0 +1,71 @@
+# rawdanger-recomp offline achievements - our own set (US and Enhanced; the JP program's addresses still to check).
+# Each entry: [id], title, description, points, logic (RetroAchievements memory syntax, see host/achievements.hpp).
+# 0x0048F488 (32 bit) is the game's current scene: 9 opening movie, 10 ending movie, 21 game, 22 game over, 23 item menu,
+# 25 cooking, 27 map, 32 chapter result, 33 showcase, 34 radio, 35/36 memories, 37 compass.
+# The d (delta) half makes each one fire on the frame the scene starts, not while it is already open.
+
+[rd01]
+title = Into the Flood
+description = Step into Geo City for the first time
+points = 5
+logic = 0xX48F488=21_d0xX48F488!=21
+
+[rd02]
+title = Take Stock
+description = Open the item menu
+points = 5
+logic = 0xX48F488=23_d0xX48F488!=23
+
+[rd03]
+title = Kitchen Under Water
+description = Cook something to eat
+points = 10
+logic = 0xX48F488=25_d0xX48F488!=25
+
+[rd04]
+title = Where Am I?
+description = Open the map
+points = 5
+logic = 0xX48F488=27_d0xX48F488!=27
+
+[rd05]
+title = Tuned In
+description = Listen to the radio
+points = 5
+logic = 0xX48F488=34_d0xX48F488!=34
+
+[rd06]
+title = True North
+description = Check the compass
+points = 5
+logic = 0xX48F488=37_d0xX48F488!=37
+
+[rd07]
+title = Looking Back
+description = Look through your memories
+points = 10
+logic = 0xX48F488=36_d0xX48F488!=36S0xX48F488=35_d0xX48F488!=35
+
+[rd08]
+title = Window Shopping
+description = Open the showcase
+points = 10
+logic = 0xX48F488=33_d0xX48F488!=33
+
+[rd09]
+title = Swept Away
+description = See the game over screen
+points = 5
+logic = 0xX48F488=22_d0xX48F488!=22
+
+[rd10]
+title = Chapter Closed
+description = Reach a chapter's result screen
+points = 25
+logic = 0xX48F488=32_d0xX48F488!=32
+
+[rd11]
+title = Survivor
+description = Reach an ending
+points = 50
+logic = 0xX48F488=10_d0xX48F488!=10

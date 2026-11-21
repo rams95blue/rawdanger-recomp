@@ -1,0 +1,13 @@
+# never commit game data or generated code
+/work/
+/ps2recomp/
+/recomp/out/
+*.iso
+*.bin
+*.elf
+SLUS_*
+SLPS_*
+__pycache__/
+/recomp/game/rd_build_info.h
+/recomp/game/rd_patch_table.inc
+!/tools/options_art.bin

@@ -1,0 +1,311 @@
+diff --git a/ps2xRuntime/include/runtime/gs/gs_frontend.h b/ps2xRuntime/include/runtime/gs/gs_frontend.h
+index 4c3f641..bfcdd8b 100644
+--- a/ps2xRuntime/include/runtime/gs/gs_frontend.h
++++ b/ps2xRuntime/include/runtime/gs/gs_frontend.h
+@@ -6,6 +6,8 @@
+ #include <cstdint>
+ #include <memory>
+ #include <mutex>
++#include <cstdio>
++#include <string>
+ #include <vector>
+ 
+ #include "runtime/gs/gs_backend.h"
+@@ -143,6 +145,19 @@ public:
+ 
+     uint32_t consumeLocalToHostBytes(uint8_t *dst, uint32_t maxBytes);
+ 
++    // GS capture (Raw Danger recomp, patch 0010): records everything that
++    // reaches the GS for `frames` presented frames, starting at the next frame
++    // boundary, into a .gsr file: register state + 4 MiB local memory at the
++    // start, then every GIF packet, image upload, register write and the
++    // privileged display registers at each frame. tools/gs_replay renders it
++    // offline - the way to debug the renderer without the game or the disc.
++    bool requestCapture(const std::string &path, uint32_t frames);
++    bool isCapturing() const;
++    // Ends a running capture at the next frame boundary (F9 pressed again).
++    void stopCapture();
++    // Replay side: restore the state written at the start of a capture.
++    void restoreCaptureState(const uint64_t *rawRegs, size_t count, const uint8_t *localMemory, size_t bytes);
++
+     void refreshDisplaySnapshot();
+ 
+     void WriteVram(uint32_t psm, uint32_t base, uint32_t bw, uint32_t x, uint32_t y, uint32_t value);
+@@ -242,6 +257,16 @@ private:
+     bool m_debugHistoryPaused = true;
+ 
+     std::unique_ptr<GSRasterBackend> m_backend;
++
++    // capture
++    std::array<uint64_t, 0x80> m_rawRegs{};
++    std::FILE *m_captureFile = nullptr;
++    std::string m_capturePendingPath;
++    uint32_t m_capturePendingFrames = 0u;
++    uint32_t m_captureFramesLeft = 0u;
++    bool m_captureStopRequested = false;
++    void captureRecordUnlocked(uint8_t type, const void *a, uint32_t aLen, const void *b = nullptr, uint32_t bLen = 0u);
++    void captureFrameBoundaryUnlocked();
+ };
+ 
+ #endif
+diff --git a/ps2xRuntime/src/lib/gs/gs_frontend.cpp b/ps2xRuntime/src/lib/gs/gs_frontend.cpp
+index 9281d5f..cc368c4 100644
+--- a/ps2xRuntime/src/lib/gs/gs_frontend.cpp
++++ b/ps2xRuntime/src/lib/gs/gs_frontend.cpp
+@@ -1,3 +1,4 @@
++#include <vector>
+ #include "runtime/gs/gs_frontend.h"
+ #include "runtime/gs/gs_cpu_backend.h"
+ #include "ps2_log.h"
+@@ -529,6 +530,7 @@ void GS::latchHostPresentationFrame()
+     GSPresentationRequest request{};
+     {
+         std::lock_guard<std::recursive_mutex> lock(m_stateMutex);
++        captureFrameBoundaryUnlocked();
+         if (!m_backend || !m_privRegs)
+         {
+             std::lock_guard<std::mutex> presentationLock(m_presentationMutex);
+@@ -641,6 +643,8 @@ bool GS::copyLatchedHostPresentationFrame(std::vector<uint8_t> &outPixels,
+ void GS::processGIFPacket(const uint8_t *data, uint32_t sizeBytes)
+ {
+     std::lock_guard<std::recursive_mutex> lock(m_stateMutex);
++    if (m_captureFile && data && sizeBytes)
++        captureRecordUnlocked(1, data, sizeBytes);
+     if (!data || sizeBytes < 16 || !m_backend)
+         return;
+ 
+@@ -740,6 +744,8 @@ void GS::processGIFPacket(const uint8_t *data, uint32_t sizeBytes)
+ bool GS::processNativePackedGIFPacket(const uint8_t *data, uint32_t sizeBytes)
+ {
+     std::lock_guard<std::recursive_mutex> lock(m_stateMutex);
++    if (m_captureFile && data && sizeBytes)
++        captureRecordUnlocked(2, data, sizeBytes);
+     if (!data || sizeBytes < 16u || !m_backend)
+         return false;
+ 
+@@ -785,6 +791,11 @@ void GS::uploadImageNative(uint64_t bitbltbuf,
+                            uint32_t sizeBytes)
+ {
+     std::lock_guard<std::recursive_mutex> lock(m_stateMutex);
++    if (m_captureFile && data && sizeBytes)
++    {
++        const uint64_t setup[4] = {bitbltbuf, trxpos, trxreg, trxdir};
++        captureRecordUnlocked(3, setup, sizeof(setup), data, sizeBytes);
++    }
+     uploadImageNativeUnlocked(bitbltbuf, trxpos, trxreg, trxdir, data, sizeBytes);
+ }
+ 
+@@ -1063,11 +1074,19 @@ void GS::writeRegisterPacked(uint8_t regDesc, uint64_t lo, uint64_t hi)
+ void GS::writeRegister(uint8_t regAddr, uint64_t value)
+ {
+     std::lock_guard<std::recursive_mutex> lock(m_stateMutex);
++    if (m_captureFile)
++    {
++        uint8_t rec[9];
++        rec[0] = regAddr;
++        std::memcpy(rec + 1, &value, 8);
++        captureRecordUnlocked(4, rec, sizeof(rec));
++    }
+     writeRegisterUnlocked(regAddr, value);
+ }
+ 
+ void GS::writeRegisterUnlocked(uint8_t regAddr, uint64_t value)
+ {
++    m_rawRegs[regAddr & 0x7Fu] = value;
+     const bool interestingReg =
+         regAddr == GS_REG_PRIM ||
+         regAddr == GS_REG_RGBAQ ||
+@@ -1618,12 +1637,19 @@ void GS::processImageData(const uint8_t *data, uint32_t sizeBytes)
+ bool GS::clearFramebufferContext(uint32_t contextIndex, uint32_t rgba)
+ {
+     std::lock_guard<std::recursive_mutex> lock(m_stateMutex);
++    if (m_captureFile)
++    {
++        const uint32_t rec[2] = {contextIndex, rgba};
++        captureRecordUnlocked(6, rec, sizeof(rec));
++    }
+     return m_backend && m_backend->ClearFramebuffer(m_ctx[(contextIndex != 0u) ? 1 : 0], rgba);
+ }
+ 
+ bool GS::clearActiveFramebuffer(uint32_t rgba)
+ {
+     std::lock_guard<std::recursive_mutex> lock(m_stateMutex);
++    if (m_captureFile)
++        captureRecordUnlocked(7, &rgba, sizeof(rgba));
+     return m_backend && m_backend->ClearFramebuffer(activeContext(), rgba);
+ }
+ 
+@@ -1671,6 +1697,11 @@ uint32_t GS::ReadVram(uint32_t psm, uint32_t base, uint32_t bw, uint32_t x, uint
+ void GS::WriteVram(uint32_t psm, uint32_t base, uint32_t bw, uint32_t x, uint32_t y, uint32_t value)
+ {
+     std::lock_guard<std::recursive_mutex> lock(m_stateMutex);
++    if (m_captureFile)
++    {
++        const uint32_t rec[6] = {psm, base, bw, x, y, value};
++        captureRecordUnlocked(8, rec, sizeof(rec));
++    }
+     if (m_backend)
+         m_backend->WriteVram(psm, base, bw, x, y, value);
+ }
+@@ -1734,3 +1765,161 @@ void GS::updatePreferredDisplaySourceForDraw(const GSPrimitiveBatch &batch)
+         m_hasPreferredDisplaySource = true;
+     }
+ }
++
++
++// ------------------------------------------------------------------ GS capture
++//
++// File layout (little endian):
++//   "RDGS" u32 version(1) u32 rawRegCount(0x80) u32 privRegCount(20) u32 vramBytes
++//   u64 rawRegs[0x80]  u64 privRegs[20]  u8 vram[vramBytes]
++//   then records: u8 type, u32 length, payload
++//     1 GIF packet (processGIFPacket)       2 native packed GIF packet
++//     3 image upload: u64 bitbltbuf,trxpos,trxreg,trxdir + data
++//     4 register write: u8 addr, u64 value  5 frame: u64 privRegs[20]
++//     6 clear context: u32 ctx, u32 rgba    7 clear active: u32 rgba
++//     8 WriteVram: u32 psm, base, bw, x, y, value
++//   ends with type 0xFF, length 0.
++
++namespace
++{
++    void captureCopyPrivRegs(const GSRegisters *regs, uint64_t out[20])
++    {
++        std::memset(out, 0, 20 * sizeof(uint64_t));
++        if (!regs)
++            return;
++        out[0] = regs->pmode;   out[1] = regs->smode1;  out[2] = regs->smode2;  out[3] = regs->srfsh;
++        out[4] = regs->synch1;  out[5] = regs->synch2;  out[6] = regs->syncv;   out[7] = regs->dispfb1;
++        out[8] = regs->display1; out[9] = regs->dispfb2; out[10] = regs->display2; out[11] = regs->extbuf;
++        out[12] = regs->extdata; out[13] = regs->extwrite; out[14] = regs->bgcolor;
++        out[15] = regs->csr.load(std::memory_order_relaxed);
++        out[16] = regs->vsyncTick.load(std::memory_order_relaxed);
++        out[17] = regs->imr;    out[18] = regs->busdir; out[19] = regs->siglblid;
++    }
++}
++
++bool GS::requestCapture(const std::string &path, uint32_t frames)
++{
++    std::lock_guard<std::recursive_mutex> lock(m_stateMutex);
++    if (m_captureFile || frames == 0u || path.empty())
++        return false;
++    m_capturePendingPath = path;
++    m_capturePendingFrames = frames;
++    return true;
++}
++
++void GS::stopCapture()
++{
++    std::lock_guard<std::recursive_mutex> lock(m_stateMutex);
++    if (m_captureFile)
++        m_captureStopRequested = true;
++    m_capturePendingPath.clear();
++}
++
++bool GS::isCapturing() const
++{
++    std::lock_guard<std::recursive_mutex> lock(m_stateMutex);
++    return m_captureFile != nullptr || !m_capturePendingPath.empty();
++}
++
++void GS::captureRecordUnlocked(uint8_t type, const void *a, uint32_t aLen, const void *b, uint32_t bLen)
++{
++    if (!m_captureFile)
++        return;
++    const uint32_t len = aLen + bLen;
++    std::fwrite(&type, 1, 1, m_captureFile);
++    std::fwrite(&len, 4, 1, m_captureFile);
++    if (aLen)
++        std::fwrite(a, 1, aLen, m_captureFile);
++    if (bLen)
++        std::fwrite(b, 1, bLen, m_captureFile);
++}
++
++void GS::captureFrameBoundaryUnlocked()
++{
++    if (m_captureFile)
++    {
++        uint64_t priv[20];
++        captureCopyPrivRegs(m_privRegs, priv);
++        captureRecordUnlocked(5, priv, sizeof(priv));
++        if (m_captureFramesLeft > 0u)
++            --m_captureFramesLeft;
++        if (m_captureFramesLeft == 0u || m_captureStopRequested)
++        {
++            m_captureStopRequested = false;
++            const uint8_t end = 0xFFu;
++            const uint32_t zero = 0u;
++            std::fwrite(&end, 1, 1, m_captureFile);
++            std::fwrite(&zero, 4, 1, m_captureFile);
++            std::fclose(m_captureFile);
++            m_captureFile = nullptr;
++            std::cout << "[gs-capture] done" << std::endl;
++        }
++        return;
++    }
++    if (m_capturePendingPath.empty())
++        return;
++
++    const std::string path = m_capturePendingPath;
++    m_captureFramesLeft = m_capturePendingFrames;
++    m_capturePendingPath.clear();
++    m_capturePendingFrames = 0u;
++
++    std::FILE *f = std::fopen(path.c_str(), "wb");
++    if (!f)
++    {
++        std::cout << "[gs-capture] can't open " << path << std::endl;
++        return;
++    }
++    std::vector<uint8_t> vram;
++    {
++        std::lock_guard<std::mutex> backendLock(m_backendLifetimeMutex);
++        if (m_backend)
++        {
++            m_backend->Flush();
++            m_backend->SnapshotVram(vram);
++        }
++    }
++    uint64_t priv[20];
++    captureCopyPrivRegs(m_privRegs, priv);
++    const uint32_t header[5] = {0x53474452u /* "RDGS" */, 1u, static_cast<uint32_t>(m_rawRegs.size()), 20u,
++                                static_cast<uint32_t>(vram.size())};
++    std::fwrite(header, sizeof(header), 1, f);
++    std::fwrite(m_rawRegs.data(), sizeof(uint64_t), m_rawRegs.size(), f);
++    std::fwrite(priv, sizeof(priv), 1, f);
++    if (!vram.empty())
++        std::fwrite(vram.data(), 1, vram.size(), f);
++    m_captureFile = f;
++    std::cout << "[gs-capture] recording " << m_captureFramesLeft << " frame(s) to " << path << std::endl;
++}
++
++void GS::restoreCaptureState(const uint64_t *rawRegs, size_t count, const uint8_t *localMemory, size_t bytes)
++{
++    std::lock_guard<std::recursive_mutex> lock(m_stateMutex);
++    if (localMemory && bytes && m_localMemoryStorage)
++    {
++        std::memcpy(m_localMemoryStorage, localMemory, std::min<size_t>(bytes, m_localMemorySize));
++        std::lock_guard<std::mutex> backendLock(m_backendLifetimeMutex);
++        if (m_backend)
++            m_backend->Initialize(m_localMemoryStorage, m_localMemorySize);
++    }
++    if (!rawRegs)
++        return;
++    // State registers only, in an order that rebuilds derived state: no vertex
++    // kicks (XYZ*), no transfer start (TRXDIR), no HWREG/SIGNAL/FINISH/LABEL,
++    // and TEX0 without CLUT load (CLD) - the CLUT buffer is whatever the
++    // first draws of the capture load.
++    static const uint8_t kOrder[] = {
++        0x1A, 0x1B, 0x00, 0x01, 0x02, 0x03, 0x06, 0x07, 0x08, 0x09, 0x0A, 0x14, 0x15, 0x16, 0x17,
++        0x18, 0x19, 0x1C, 0x1D, 0x22, 0x34, 0x35, 0x36, 0x37, 0x3B, 0x3D, 0x40, 0x41, 0x42, 0x43,
++        0x44, 0x45, 0x46, 0x47, 0x48, 0x49, 0x4A, 0x4B, 0x4C, 0x4D, 0x4E, 0x4F, 0x50, 0x51, 0x52,
++    };
++    for (uint8_t reg : kOrder)
++    {
++        if (reg >= count)
++            continue;
++        uint64_t v = rawRegs[reg];
++        if (reg == 0x06 || reg == 0x07)
++            v &= ~(7ull << 61); // CLD = 0
++        writeRegisterUnlocked(reg, v);
++    }
++}

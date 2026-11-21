@@ -1,0 +1,135 @@
+diff --git a/ps2xRuntime/include/runtime/gs/gs_frontend.h b/ps2xRuntime/include/runtime/gs/gs_frontend.h
+index bfcdd8b..a1b4322 100644
+--- a/ps2xRuntime/include/runtime/gs/gs_frontend.h
++++ b/ps2xRuntime/include/runtime/gs/gs_frontend.h
+@@ -8,6 +8,7 @@
+ #include <mutex>
+ #include <cstdio>
+ #include <string>
++#include <functional>
+ #include <vector>
+ 
+ #include "runtime/gs/gs_backend.h"
+@@ -155,6 +156,12 @@ public:
+     bool isCapturing() const;
+     // Ends a running capture at the next frame boundary (F9 pressed again).
+     void stopCapture();
++    // Extra records from outside the GS (patch 0014): returns false when no
++    // capture is running. Types >= 9 are ignored by gs_replay.
++    bool captureAppend(uint8_t type, const void *a, uint32_t aLen, const void *b = nullptr, uint32_t bLen = 0u);
++    // Called (under the GS lock) right after a capture's header is written, so
++    // the runtime can add its own start state (VU1 memory, VIF1 registers...).
++    void setCaptureStartHook(std::function<void()> hook);
+     // Replay side: restore the state written at the start of a capture.
+     void restoreCaptureState(const uint64_t *rawRegs, size_t count, const uint8_t *localMemory, size_t bytes);
+ 
+@@ -265,6 +272,7 @@ private:
+     uint32_t m_capturePendingFrames = 0u;
+     uint32_t m_captureFramesLeft = 0u;
+     bool m_captureStopRequested = false;
++    std::function<void()> m_captureStartHook;
+     void captureRecordUnlocked(uint8_t type, const void *a, uint32_t aLen, const void *b = nullptr, uint32_t bLen = 0u);
+     void captureFrameBoundaryUnlocked();
+ };
+diff --git a/ps2xRuntime/include/runtime/ps2_memory.h b/ps2xRuntime/include/runtime/ps2_memory.h
+index ea86a9c..6ee5414 100644
+--- a/ps2xRuntime/include/runtime/ps2_memory.h
++++ b/ps2xRuntime/include/runtime/ps2_memory.h
+@@ -343,6 +343,10 @@ public:
+     void processVIF0Data(const uint8_t *data, uint32_t sizeBytes);
+     void processVIF1Data(uint32_t srcPhysAddr, uint32_t sizeBytes);
+     void processVIF1Data(const uint8_t *data, uint32_t sizeBytes);
++    // Receives every VIF1 stream before it is decoded (GS capture, patch 0014).
++    using Vif1CaptureSink = std::function<void(const uint8_t *, uint32_t)>;
++    void setVif1CaptureSink(Vif1CaptureSink sink) { m_vif1CaptureSink = std::move(sink); }
++    Vif1CaptureSink m_vif1CaptureSink;
+     void processPendingTransfers();
+     std::vector<uint32_t> consumeCompletedDmacCauses();
+ 
+diff --git a/ps2xRuntime/src/lib/gs/gs_frontend.cpp b/ps2xRuntime/src/lib/gs/gs_frontend.cpp
+index cc368c4..1926d89 100644
+--- a/ps2xRuntime/src/lib/gs/gs_frontend.cpp
++++ b/ps2xRuntime/src/lib/gs/gs_frontend.cpp
+@@ -1778,6 +1778,8 @@ void GS::updatePreferredDisplaySourceForDraw(const GSPrimitiveBatch &batch)
+ //     4 register write: u8 addr, u64 value  5 frame: u64 privRegs[20]
+ //     6 clear context: u32 ctx, u32 rgba    7 clear active: u32 rgba
+ //     8 WriteVram: u32 psm, base, bw, x, y, value
++//     9 VIF1 stream (PS2Memory::processVIF1Data input, TTE VIFcodes included)
++//    10 VU1 start state: u32 codeBytes, code, u32 dataBytes, data, VIFRegisters, VU1State
+ //   ends with type 0xFF, length 0.
+ 
+ namespace
+@@ -1807,6 +1809,21 @@ bool GS::requestCapture(const std::string &path, uint32_t frames)
+     return true;
+ }
+ 
++bool GS::captureAppend(uint8_t type, const void *a, uint32_t aLen, const void *b, uint32_t bLen)
++{
++    std::lock_guard<std::recursive_mutex> lock(m_stateMutex);
++    if (!m_captureFile)
++        return false;
++    captureRecordUnlocked(type, a, aLen, b, bLen);
++    return true;
++}
++
++void GS::setCaptureStartHook(std::function<void()> hook)
++{
++    std::lock_guard<std::recursive_mutex> lock(m_stateMutex);
++    m_captureStartHook = std::move(hook);
++}
++
+ void GS::stopCapture()
+ {
+     std::lock_guard<std::recursive_mutex> lock(m_stateMutex);
+@@ -1889,6 +1906,8 @@ void GS::captureFrameBoundaryUnlocked()
+     if (!vram.empty())
+         std::fwrite(vram.data(), 1, vram.size(), f);
+     m_captureFile = f;
++    if (m_captureStartHook)
++        m_captureStartHook();
+     std::cout << "[gs-capture] recording " << m_captureFramesLeft << " frame(s) to " << path << std::endl;
+ }
+ 
+diff --git a/ps2xRuntime/src/lib/ps2_runtime.cpp b/ps2xRuntime/src/lib/ps2_runtime.cpp
+index c0eb99f..c7ac7ac 100644
+--- a/ps2xRuntime/src/lib/ps2_runtime.cpp
++++ b/ps2xRuntime/src/lib/ps2_runtime.cpp
+@@ -670,6 +670,24 @@ bool PS2Runtime::syncCoreSubsystems()
+     m_gifArbiter.setProcessPacketFn([this](const uint8_t *data, uint32_t size)
+                                     { m_gs.processGIFPacket(data, size); });
+     m_memory.setGifArbiter(&m_gifArbiter);
++    // GS capture (patch 0014): VIF1 streams and the VU1 start state go into the
++    // same .gsr, so the VU1 path can be replayed offline (tools/vu_replay).
++    m_memory.setVif1CaptureSink([this](const uint8_t *data, uint32_t size)
++                                { m_gs.captureAppend(9, data, size); });
++    m_gs.setCaptureStartHook([this]()
++                             {
++                                 std::vector<uint8_t> blob;
++                                 auto put32 = [&](uint32_t v) { blob.insert(blob.end(), reinterpret_cast<uint8_t *>(&v), reinterpret_cast<uint8_t *>(&v) + 4); };
++                                 put32(PS2_VU1_CODE_SIZE);
++                                 blob.insert(blob.end(), m_memory.getVU1Code(), m_memory.getVU1Code() + PS2_VU1_CODE_SIZE);
++                                 put32(PS2_VU1_DATA_SIZE);
++                                 blob.insert(blob.end(), m_memory.getVU1Data(), m_memory.getVU1Data() + PS2_VU1_DATA_SIZE);
++                                 const auto *vif = reinterpret_cast<const uint8_t *>(&m_memory.vif1_regs);
++                                 blob.insert(blob.end(), vif, vif + sizeof(VIFRegisters));
++                                 const auto *vu = reinterpret_cast<const uint8_t *>(&m_vu1.state());
++                                 blob.insert(blob.end(), vu, vu + sizeof(VU1State));
++                                 m_gs.captureAppend(10, blob.data(), static_cast<uint32_t>(blob.size()));
++                             });
+     m_memory.setVu1MscalCallback([this](uint32_t startPC, uint32_t top, uint32_t itop)
+                                  {
+                                      R5900Context *cpuContext = m_eeScheduler ? m_eeScheduler->currentContext() : nullptr;
+diff --git a/ps2xRuntime/src/lib/ps2_vif1_interpreter.cpp b/ps2xRuntime/src/lib/ps2_vif1_interpreter.cpp
+index 8c09c1d..c09edad 100644
+--- a/ps2xRuntime/src/lib/ps2_vif1_interpreter.cpp
++++ b/ps2xRuntime/src/lib/ps2_vif1_interpreter.cpp
+@@ -302,6 +302,9 @@ void PS2Memory::processVIF1Data(const uint8_t *data, uint32_t sizeBytes)
+     if (sizeBytes == 0u)
+         return;
+ 
++    if (m_vif1CaptureSink)
++        m_vif1CaptureSink(data, sizeBytes);
++
+     uint32_t pos = 0;
+ 
+     while (pos + 4 <= sizeBytes)

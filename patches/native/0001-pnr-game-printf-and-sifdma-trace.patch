@@ -1,0 +1,80 @@
+diff --git a/runtime/src/kernel.cpp b/runtime/src/kernel.cpp
+index c14aa21..0e182fe 100644
+--- a/runtime/src/kernel.cpp
++++ b/runtime/src/kernel.cpp
+@@ -720,6 +720,51 @@ std::string thread_report() {
+     return out;
+ }
+ 
++// PS2_GAME_PRINTF: a game's own debug printf, when a patch turns its body into "li v1,0x7D; syscall; jr ra" (rawdanger-recomp).
++// Retail builds compile printf to nothing; this prints what the developers' builds printed. Integer and string conversions only.
++void game_printf(Cpu &c) {
++    static const bool on = std::getenv("PS2_GAME_PRINTF") == nullptr || std::string(std::getenv("PS2_GAME_PRINTF")) != "0";
++    if (!on) { ret(c, 0); return; }
++    const int regs[] = {5, 6, 7, 8, 9, 10, 11};
++    std::size_t next = 0;
++    const auto take = [&]() -> std::uint64_t { return next < 7 ? c.r[regs[next++]].d[0] : 0; };
++    std::string out;
++    std::uint32_t f = arg(c, 0);
++    for (int guard = 0; guard < 4096; ++guard, ++f) {
++        const char ch = static_cast<char>(ld8(f));
++        if (!ch) break;
++        if (ch != '%') { out += ch; continue; }
++        std::string spec = "%";
++        char conv = 0;
++        while (++f, ++guard < 4096) {
++            conv = static_cast<char>(ld8(f));
++            if (!conv) break;
++            if (std::strchr("diouxXcspf%", conv)) break;
++            if (conv != 'l' && conv != 'h') spec += conv;
++        }
++        if (!conv) break;
++        char buf[512];
++        switch (conv) {
++        case '%': out += '%'; continue;
++        case 's': {
++            std::string str;
++            for (std::uint32_t a = static_cast<std::uint32_t>(take()), k = 0; k < 400; ++k) { const char x = static_cast<char>(ld8(a + k)); if (!x) break; str += x; }
++            std::snprintf(buf, sizeof buf, (spec + "s").c_str(), str.c_str());
++            break;
++        }
++        case 'c': std::snprintf(buf, sizeof buf, (spec + "c").c_str(), static_cast<int>(take())); break;
++        case 'f': std::snprintf(buf, sizeof buf, "%s", "<f>"); break;
++        case 'p': std::snprintf(buf, sizeof buf, "0x%08X", static_cast<unsigned>(take())); break;
++        case 'd': case 'i': std::snprintf(buf, sizeof buf, (spec + "d").c_str(), static_cast<int>(take())); break;
++        default: std::snprintf(buf, sizeof buf, (spec + conv).c_str(), static_cast<unsigned>(take())); break;
++        }
++        out += buf;
++    }
++    while (!out.empty() && (out.back() == '\n' || out.back() == '\r')) out.pop_back();
++    std::fprintf(stderr, "[game f%llu] %s\n", static_cast<unsigned long long>(frame_count()), out.c_str());
++    ret(c, 0);
++}
++
+ void handle_syscall(Cpu &c, std::uint32_t pc) {
+     std::uint32_t n = c.r[3].w[0];
+     const bool interrupt_variant = (n & 0x80000000u) != 0;
+@@ -1011,6 +1056,15 @@ void handle_syscall(Cpu &c, std::uint32_t pc) {
+         break;
+     case 0x76: ret(c, sif::dma_stat(arg(c, 0))); break;
+     case 0x77: {
++        if (std::getenv("PS2_TRACE_SIFDMA")) {
++            const std::uint32_t list = arg(c, 0), count = arg(c, 1);
++            for (std::uint32_t i = 0; i < count && i < 4; ++i) {
++                const std::uint32_t src = ld32(list + i * 16), dst = ld32(list + i * 16 + 4), size = ld32(list + i * 16 + 8);
++                std::fprintf(stderr, "[sifdma] f%llu ra 0x%08X %08X -> %08X size %u:", static_cast<unsigned long long>(frame_count()), c.r[31].w[0], src, dst, size);
++                for (std::uint32_t k = 0; k < size && k < 64; k += 4) std::fprintf(stderr, " %08X", ld32(src + k));
++                std::fprintf(stderr, "\n");
++            }
++        }
+         if (g_options.trace_io) {
+             const std::uint32_t list = arg(c, 0), count = arg(c, 1);
+             std::fprintf(stderr, "[sys] SifSetDma from pc 0x%08X: %u transfers\n", pc, count);
+@@ -1035,6 +1089,7 @@ void handle_syscall(Cpu &c, std::uint32_t pc) {
+         ret(c, fn >= 1 && fn <= 6 ? -1 : 0);
+         break;
+     }
++    case 0x7D: game_printf(c); break;
+     case 0x7E: ret(c, 0); break;
+     case 0x7F: ret(c, kRamSize); break;
+     default:

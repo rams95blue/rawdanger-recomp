@@ -1,0 +1,34 @@
+From ef55b7d1b976b362a8edba2ccd3dc56a6f5e07d7 Mon Sep 17 00:00:00 2001
+From: rawdanger-recomp <rawdanger-recomp@users.noreply.github.com>
+Date: Thu, 19 Nov 2026 02:15:21 +0000
+Subject: [PATCH] 0012-build-jobs-everywhere.patch
+
+---
+ scripts/port.sh | 4 ++--
+ 1 file changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/scripts/port.sh b/scripts/port.sh
+index e3cc2ca..39b9063 100755
+--- a/scripts/port.sh
++++ b/scripts/port.sh
+@@ -85,7 +85,7 @@ if { [ "$web" = 1 ] && [ ! -f "$EMSDK/emsdk_env.sh" ]; } || [ ! -x "$tools/eerec
+ # An update can bring a newer translator (the app replaces recomp/ but keeps build/): ninja compiles the tools again when their
+ # sources changed, about a second when nothing did. Without this, games built after an update would still use the old translator.
+ if [ -f "$tools/build.ninja" ]; then
+-  ninja -C "$tools" eerecomp vurecomp > "$tools/ninja-port.log" 2>&1 || { tail -n 30 "$tools/ninja-port.log" >&2; echo "building the translator tools failed" >&2; exit 1; }
++  ninja -C "$tools" ${PS2_JOBS:+-j$PS2_JOBS} eerecomp vurecomp > "$tools/ninja-port.log" 2>&1 || { tail -n 30 "$tools/ninja-port.log" >&2; echo "building the translator tools failed" >&2; exit 1; }
+ fi
+ mkdir -p "$game/disc" "$game/vu1" "$game/vu0" "$game/shots" "$generated"
+ 
+@@ -105,7 +105,7 @@ else
+       # is there and does the same alone, about ten times slower, when it is not (a build that failed, a tools folder from before it existed)
+       if [ -f "$tools/build.ninja" ] && [ ! -x "$tools/chdunpack" ]; then
+         echo "Building the disc image unpacker"
+-        ninja -C "$tools" chdunpack > "$tools/ninja-chdunpack.log" 2>&1 || echo "the unpacker could not be built (see $tools/ninja-chdunpack.log): using the slower Python code"
++        ninja -C "$tools" ${PS2_JOBS:+-j$PS2_JOBS} chdunpack > "$tools/ninja-chdunpack.log" 2>&1 || echo "the unpacker could not be built (see $tools/ninja-chdunpack.log): using the slower Python code"
+       fi
+       if [ -x "$tools/chdunpack" ]; then
+         echo "Unpacking the .chd disc image into a normal disc image (the game keeps it): this takes a few minutes"
+-- 
+2.43.0
+

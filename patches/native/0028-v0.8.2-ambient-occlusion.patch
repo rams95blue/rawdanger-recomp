@@ -1,0 +1,348 @@
+From f17f9a66d57b80df9bdaf821cb61fe47a2cc9090 Mon Sep 17 00:00:00 2001
+From: rawdanger-recomp <rawdanger-recomp@users.noreply.github.com>
+Date: Fri, 20 Nov 2026 20:31:59 +0000
+Subject: [PATCH] rawdanger-recomp: v0.8.2 ambient occlusion from the game's
+ depth
+
+- gs.wgsl game_ao: before Raw Danger's colour filter (at the walk's start, so the filter tints the shading as the game's own
+  light), creases are found from pairs of depth samples on opposite sides of each pixel (the game's depth is about 1 / distance,
+  linear across a flat surface: floors and walls stay clear), sized by depth, with a range check against objects far in front
+- ps2::set_ambient_occlusion (0 off, 1 light, 2 strong); keys.ini ambient_occlusion, F1 > Picture
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01QNLFPekqhcU2dj7B3Utmea
+---
+ host/keymap.cpp               | 12 ++++++++
+ host/keymap.hpp               |  4 ++-
+ host/quickmenu.cpp            | 10 +++++--
+ host/quickmenu.hpp            |  2 ++
+ host/window.cpp               | 10 +++++++
+ runtime/include/ps2/video.hpp |  3 ++
+ runtime/src/gs/gpu/gpu.cpp    | 26 +++++++++++++++--
+ runtime/src/gs/gpu/gpu.hpp    |  3 +-
+ runtime/src/gs/gpu/gs.wgsl    | 54 +++++++++++++++++++++++++++++++++++
+ runtime/src/gs/gs.cpp         | 12 ++++++++
+ 10 files changed, 129 insertions(+), 7 deletions(-)
+
+diff --git a/host/keymap.cpp b/host/keymap.cpp
+index cdc39f7..763191e 100644
+--- a/host/keymap.cpp
++++ b/host/keymap.cpp
+@@ -232,6 +232,10 @@ const char *sharp_2d_word(int sharp) {
+ 
+ std::string with_master_volume(const std::string &file_text, int percent) { return with_line(file_text, "mastervolume", "master_volume = " + std::to_string(percent)); }
+ std::string with_filter_pass(const std::string &file_text, int fast) { return with_line(file_text, "postprocessing", std::string("post_processing = ") + (fast ? "fast" : "original")); }
++std::string with_ambient_occlusion(const std::string &file_text, int level) {
++    static const char *const kNames[] = {"off", "light", "strong"};
++    return with_line(file_text, "ambientocclusion", std::string("ambient_occlusion = ") + kNames[level < 0 ? 0 : level > 2 ? 2 : level]);
++}
+ std::string with_popup_size(const std::string &file_text, int size) {
+     static const char *const kNames[] = {"small", "normal", "large", "huge"};
+     return with_line(file_text, "popupsize", std::string("popup_size = ") + kNames[size < 0 ? 0 : size > 3 ? 3 : size]);
+@@ -467,6 +471,14 @@ void parse(const std::string &text, Config &config, std::vector<std::string> &pr
+             else config.master_volume = static_cast<int>(v);
+             continue;
+         }
++        if (name == "ambientocclusion") {
++            const std::string v = squash(value);
++            if (v == "off" || v == "0") config.ambient_occlusion = 0;
++            else if (v == "light" || v == "1" || v == "on") config.ambient_occlusion = 1;
++            else if (v == "strong" || v == "2") config.ambient_occlusion = 2;
++            else bad("ambient_occlusion is off, light or strong, ignored");
++            continue;
++        }
+         if (name == "postprocessing") {
+             const std::string v = squash(value);
+             if (v == "fast" || v == "1") config.filter_pass = 1;
+diff --git a/host/keymap.hpp b/host/keymap.hpp
+index 3e58532..324a72a 100644
+--- a/host/keymap.hpp
++++ b/host/keymap.hpp
+@@ -41,6 +41,7 @@ struct Config {
+ 
+     int menu_game_runs = 1;    // rawdanger-recomp: the game goes on behind the quick menu (off: it waits, as before)
+     int filter_pass = -1;      // rawdanger-recomp: the post processing in one GPU pass (1) or drawn the game's way (0); -1: as the launcher says
++    int ambient_occlusion = 1; // rawdanger-recomp: 0 off, 1 light, 2 strong (the game's depth, before its colour filter)
+     int popup_size = 1;        // rawdanger-recomp: pop-ups (achievements, notes, the keys on screen): 0 small, 1 normal, 2 large, 3 huge
+     int keys_on_screen = 0;    // rawdanger-recomp: the list of the player's keys stays on the screen while playing (F10)
+     int pause_unfocused = 1;   // rawdanger-recomp: the quick menu opens (the game waits) when the window goes to the background
+@@ -75,7 +76,8 @@ std::string with_sharp_2d(const std::string &file_text, int sharp);
+ const char *sharp_2d_word(int sharp);  // "soft", "sharp", "sharpest"
+ std::string with_menu_game_runs(const std::string &file_text, int on);  // the 'menu_game_runs' line
+ std::string with_popup_size(const std::string &file_text, int size);
+-std::string with_filter_pass(const std::string &file_text, int fast);  // the 'post_processing' line: fast / original    // the 'popup_size' line: small / normal / large / huge
++std::string with_filter_pass(const std::string &file_text, int fast);
++std::string with_ambient_occlusion(const std::string &file_text, int level);  // the 'ambient_occlusion' line: off / light / strong  // the 'post_processing' line: fast / original    // the 'popup_size' line: small / normal / large / huge
+ std::string with_keys_on_screen(const std::string &file_text, int on);  // the 'keys_on_screen' line
+ std::string with_pause_unfocused(const std::string &file_text, int on);  // the 'pause_unfocused' line
+ std::string with_master_volume(const std::string &file_text, int percent);
+diff --git a/host/quickmenu.cpp b/host/quickmenu.cpp
+index 6d610a8..9a9cc25 100644
+--- a/host/quickmenu.cpp
++++ b/host/quickmenu.cpp
+@@ -120,8 +120,8 @@ constexpr const char *kTabNames[Menu::kTabs] = {"DISPLAY", "PICTURE", "SOUND", "
+ constexpr int kAchievementRows = 7;   // rawdanger-recomp: achievements lines shown at a time (bigger panel)
+ constexpr Command kDisplay[] = {Command::scale, Command::window_size, Command::fullscreen, Command::widescreen, Command::integer_scale, Command::menu_game_runs, Command::pause_unfocused, Command::menu_skin, Command::popup_size, Command::back};
+ constexpr const char *kDisplayKeys[] = {"", "", "F11", "", "", "", "", "", "", "Esc"};
+-constexpr Command kPicture[] = {Command::look, Command::antialias, Command::sharpen, Command::sharp_2d, Command::game_blur, Command::filter_pass, Command::black_bars, Command::lens_rain, Command::back};
+-constexpr const char *kPictureKeys[] = {"F2", "", "", "", "", "", "", "", "Esc"};
++constexpr Command kPicture[] = {Command::look, Command::antialias, Command::sharpen, Command::sharp_2d, Command::game_blur, Command::filter_pass, Command::ambient_occlusion, Command::black_bars, Command::lens_rain, Command::back};
++constexpr const char *kPictureKeys[] = {"F2", "", "", "", "", "", "", "", "", "Esc"};
+ constexpr Command kSound[] = {Command::master_volume, Command::reverb, Command::back};
+ constexpr const char *kSoundKeys[] = {"", "", "Esc"};
+ constexpr Command kControls[] = {Command::change_keys, Command::keys_on_screen, Command::mouse_look, Command::mouse_speed, Command::mouse_invert_x, Command::mouse_invert, Command::key_prompts, Command::back};
+@@ -386,6 +386,10 @@ std::string entry_text(Command c, const Values &v, bool quit_armed) {
+     case Command::black_bars: return "Cutscene black bars:  < " + (v.black_bars <= 0 ? std::string("removed") : std::to_string(v.black_bars) + " % opaque") + " >";
+     case Command::reverb: return std::string("Reverb (rooms, tunnels):  < ") + (v.reverb ? "on" : "off") + " >";
+     case Command::widescreen: return v.widescreen < 0 ? "Widescreen: not in this game" : std::string("Widescreen 16:9:  < ") + (v.widescreen ? "on" : "off") + " >";
++    case Command::ambient_occlusion: {
++        static const char *const kLevels[] = {"off", "light", "strong"};
++        return std::string("Ambient occlusion (shading in corners):  < ") + kLevels[std::clamp(v.ambient_occlusion, 0, 2)] + " >";
++    }
+     case Command::filter_pass: return std::string("  drawn:  < ") + (v.filter_pass ? "one GPU pass (fast)" : "the game's own draws (slow, to compare)") + " >";
+     case Command::popup_size: {
+         static const char *const kSizes[] = {"small", "normal", "large", "huge"};
+@@ -617,7 +621,7 @@ Command Menu::side() const {
+     return c == Command::look || c == Command::scale || c == Command::sharp_2d || c == Command::fullscreen || c == Command::widescreen || c == Command::pause_unfocused || c == Command::menu_game_runs ||
+                    c == Command::master_volume || c == Command::integer_scale || c == Command::lens_rain || c == Command::antialias || c == Command::menu_skin ||
+                    c == Command::window_size || c == Command::game_blur || c == Command::reverb || c == Command::key_prompts || c == Command::mouse_look || c == Command::black_bars || c == Command::sharpen ||
+-                   c == Command::mouse_speed || c == Command::mouse_invert || c == Command::mouse_invert_x || c == Command::popup_size || c == Command::keys_on_screen || c == Command::filter_pass
++                   c == Command::mouse_speed || c == Command::mouse_invert || c == Command::mouse_invert_x || c == Command::popup_size || c == Command::keys_on_screen || c == Command::filter_pass || c == Command::ambient_occlusion
+                ? c : Command::none;
+ }
+ 
+diff --git a/host/quickmenu.hpp b/host/quickmenu.hpp
+index 22664ab..3fa0a9f 100644
+--- a/host/quickmenu.hpp
++++ b/host/quickmenu.hpp
+@@ -38,6 +38,7 @@ enum class Command {
+     widescreen,    // Graphics page: the game's widescreen option (its recomp.ini section with aspect = 16:9)
+     menu_game_runs,   // Settings > Display: the game goes on behind this menu (off: it waits)
+     popup_size,       // Settings > Display: the size of the pop-ups (small / normal / large / huge)
++    ambient_occlusion, // Settings > Picture: shading in creases and corners from the game's depth (off / light / strong)
+     filter_pass,      // Settings > Picture: the post processing in one GPU pass or drawn the game's way (to compare)
+     keys_on_screen,   // Settings > Controls: the player's keys at the left of the screen while playing (F10)
+     pause_unfocused,  // Graphics page: the game waits (this menu opens) when the window goes to the background
+@@ -72,6 +73,7 @@ struct Values {
+     int widescreen = -1;           // the game's widescreen option: -1 the game has none, 0 off, 1 on
+     bool menu_game_runs = true;    // the game goes on behind this menu
+     int popup_size = 1;            // 0 small, 1 normal, 2 large, 3 huge
++    int ambient_occlusion = 1;     // 0 off, 1 light, 2 strong
+     int filter_pass = 1;           // 1 one GPU pass, 0 the game's own draws
+     bool keys_on_screen = false;   // the keys at the left of the screen while playing
+     bool game_waits = true;        // the game waits while this menu is open now (the title says PAUSED)
+diff --git a/host/window.cpp b/host/window.cpp
+index 9168709..f8e7fb6 100644
+--- a/host/window.cpp
++++ b/host/window.cpp
+@@ -792,6 +792,7 @@ void load_keys() {
+     ps2::set_bar_opacity(static_cast<unsigned>(std::clamp(g_keys.black_bars, 0, 100)));
+     quickmenu::set_popup_size(g_keys.popup_size);
+     if (g_keys.filter_pass >= 0) ps2::set_game_filter_pass(g_keys.filter_pass);
++    ps2::set_ambient_occlusion(g_keys.ambient_occlusion);
+     g_master_volume = std::clamp(g_keys.master_volume, 0, 100);
+     lens_rain::set_level(g_keys.lens_rain);
+     if (!g_look_forced && config.look >= 0) g_look = config.look;
+@@ -1393,6 +1394,7 @@ void menu_paint(bool show_again) {
+         v.menu_game_runs = g_keys.menu_game_runs != 0;
+         v.popup_size = g_keys.popup_size;
+         v.filter_pass = ps2::game_filter_pass();
++        v.ambient_occlusion = ps2::ambient_occlusion();
+         v.keys_on_screen = g_keys.keys_on_screen != 0;
+         v.game_waits = g_menu_hold.load();
+         v.master_volume = g_master_volume;
+@@ -2391,6 +2393,14 @@ void menu_command(quickmenu::Command c, int step) {
+         set_notice(v == 0 ? std::string("Master volume: muted") : "Master volume: " + std::to_string(v) + "%");
+         break;
+     }
++    case Command::ambient_occlusion: {
++        static const char *const kLevels[] = {"off", "light", "strong"};
++        g_keys.ambient_occlusion = (g_keys.ambient_occlusion + (step < 0 ? 2 : 1)) % 3;
++        ps2::set_ambient_occlusion(g_keys.ambient_occlusion);
++        rewrite_keys_file([](const std::string &t) { return keymap::with_ambient_occlusion(t, g_keys.ambient_occlusion); }, "ambient occlusion");
++        set_notice(std::string("Ambient occlusion: ") + kLevels[g_keys.ambient_occlusion] + (g_keys.ambient_occlusion ? " (with the post processing filter on)" : ""));
++        break;
++    }
+     case Command::filter_pass:
+         g_keys.filter_pass = ps2::game_filter_pass() ? 0 : 1;
+         ps2::set_game_filter_pass(g_keys.filter_pass);
+diff --git a/runtime/include/ps2/video.hpp b/runtime/include/ps2/video.hpp
+index 0acc9b8..d4e8c83 100644
+--- a/runtime/include/ps2/video.hpp
++++ b/runtime/include/ps2/video.hpp
+@@ -34,6 +34,9 @@ void set_debug_text(bool on);
+ // rawdanger-recomp: Raw Danger's colour filter done in one pass (1, PS2_GAME_FILTER_PASS=1) or drawn the game's way (0, slow); from
+ // the next frame
+ void set_game_filter_pass(int mode);
++// rawdanger-recomp: ambient occlusion from the game's depth before its colour filter (0 off, 1 light, 2 strong; the GPU only)
++void set_ambient_occlusion(int level);
++int ambient_occlusion();
+ int game_filter_pass();   // rawdanger-recomp: a developers' scene is on screen: its font drawn at its own size (gs.cpp, sjis)
+ // rawdanger-recomp: the keys shown instead of the PlayStation symbols in the game's font (cross, circle, square, triangle; short
+ // names of 1 to 3 letters, "" keeps the symbol); see gpu.cpp, draw_prompt_caps
+diff --git a/runtime/src/gs/gpu/gpu.cpp b/runtime/src/gs/gpu/gpu.cpp
+index dd40f02..c5a99cd 100644
+--- a/runtime/src/gs/gpu/gpu.cpp
++++ b/runtime/src/gs/gpu/gpu.cpp
+@@ -58,8 +58,8 @@ std::vector<unsigned char> smaa_tables();  // smaa_tables.cpp (rawdanger-recomp)
+ 
+ namespace {
+ 
+-enum Pipeline { kUpload, kCopyRead, kCopyWrite, kLoadClut, kDisplay, kRaster, kResolve, kSnapshot, kDecode, kGameFilter, kPipelines };
+-const char *const kEntryPoints[kPipelines] = {"upload", "copy_read", "copy_write", "load_clut", "display", "raster", "resolve", "snapshot", "decode", "game_filter"};
++enum Pipeline { kUpload, kCopyRead, kCopyWrite, kLoadClut, kDisplay, kRaster, kResolve, kSnapshot, kDecode, kGameFilter, kGameAo, kPipelines };
++const char *const kEntryPoints[kPipelines] = {"upload", "copy_read", "copy_write", "load_clut", "display", "raster", "resolve", "snapshot", "decode", "game_filter", "game_ao"};
+ 
+ constexpr std::uint32_t kParamStride = 256;
+ constexpr std::uint32_t kClutSlots = 2048;
+@@ -4756,6 +4756,28 @@ void game_filter(const std::uint32_t *p, std::uint32_t n) {
+     dispatch_linear(kGameFilter, static_cast<std::uint32_t>(w * h) * g_scale * g_scale, static_cast<std::uint32_t>(g_param_records.size() - 1));
+ }
+ 
++// rawdanger-recomp: ambient occlusion on the 3D picture, from the game's depth (gs.wgsl game_ao): p = frame, width in pages,
++// width, height, depth, its format, strength (0 ... 256), radius (game pixels at the nearest depth)
++void game_ao(const std::uint32_t *p) {
++    g_why = kWhyCopy;
++    flush_all();
++    g_why = kWhyFlush;
++    const int w = static_cast<int>(p[2]), h = static_cast<int>(p[3]);
++    const Range frame = pages(p[0], p[1], 0x00, 0, 0, w - 1, h - 1);
++    if (g_live) {
++        const Range depth = pages(p[4], p[1], p[5], 0, 0, w - 1, h - 1);
++        hw::live_position(static_cast<std::uint32_t>(g_commands.size()));
++        hw::live_reader(depth.lo, depth.hi);
++        hw::live_reader(frame.lo, frame.hi);
++        hw::live_writer(frame.lo, frame.hi);
++        hw::pal_write(p[0], p[1], 0x00, 0, 0, w - 1, h - 1);
++    }
++    if (hwcache::g_on) hwcache::write_region(p[0], p[1], 0x00, 0, 0, w - 1, h - 1, hwcache::kCopy);
++    mark_rendered(frame);
++    if (g_dec_on) stamp_pages(frame, true);
++    dispatch_linear(kGameAo, static_cast<std::uint32_t>(w * h) * g_scale * g_scale, push_params({p[0], p[1], p[2], p[3], p[4], p[5], p[6], p[7]}));
++}
++
+ void load_clut(std::uint64_t tex0, std::uint64_t texclut) {
+     flush_image();
+     if (g_clut_loads + 2 >= kClutSlots) {
+diff --git a/runtime/src/gs/gpu/gpu.hpp b/runtime/src/gs/gpu/gpu.hpp
+index 3a0e590..1e5b251 100644
+--- a/runtime/src/gs/gpu/gpu.hpp
++++ b/runtime/src/gs/gpu/gpu.hpp
+@@ -31,7 +31,8 @@ void draw(const State &s, const Vertex *v, int count);
+ void image_begin(const State &s);
+ void image_data(const std::uint8_t *data, std::size_t bytes);
+ void local_copy(const State &s);
+-void game_filter(const std::uint32_t *p, std::uint32_t n);   // rawdanger-recomp: the game's colour filter in one pass (gs.cpp rdfilter; n words)
++void game_filter(const std::uint32_t *p, std::uint32_t n);
++void game_ao(const std::uint32_t *p);   // rawdanger-recomp: ambient occlusion from the game's depth, before its colour filter (8 words)   // rawdanger-recomp: the game's colour filter in one pass (gs.cpp rdfilter; n words)
+ void load_clut(std::uint64_t tex0, std::uint64_t texclut);
+ void flush();
+ void texflush();
+diff --git a/runtime/src/gs/gpu/gs.wgsl b/runtime/src/gs/gpu/gs.wgsl
+index 008a72d..af53762 100644
+--- a/runtime/src/gs/gpu/gs.wgsl
++++ b/runtime/src/gs/gpu/gs.wgsl
+@@ -1755,3 +1755,57 @@ fn raster(@builtin(workgroup_id) wid: vec3<u32>, @builtin(local_invocation_id) l
+         shade_at(p, s, x, y, k, px, py);
+     }
+ }
++
++// rawdanger-recomp: ambient occlusion (v0.8.2), on the 3D picture before Raw Danger's colour filter. The game's depth is bigger
++// nearer, about 1 / distance, which is linear across the screen on a flat surface: so for pairs of points on opposite sides of a
++// pixel, their mean depth equals the pixel's on a floor or a wall, and is nearer in a crease, a corner, under a table or at a
++// foot on the floor: that is what darkens (not flat surfaces, and not edges of an object far in front). The pairs are as far
++// apart as the pixel's depth makes a fixed size in the world. prm: 0 frame, 1 width in pages, 2 3 width height, 4 depth, 5 its
++// format, 6 strength (0 ... 256), 7 radius (game pixels where the depth is 65536)
++fn ao_depth(x: i32, y: i32, w: u32, h: u32, k: u32) -> f32 {
++    let cx = u32(clamp(x, 0, i32(w) - 1));
++    let cy = u32(clamp(y, 0, i32(h) - 1));
++    return f32(read_sample(prm(5u), prm(4u), prm(1u), cx, cy, k));
++}
++
++@compute @workgroup_size(64)
++fn game_ao(@builtin(global_invocation_id) gid: vec3<u32>) {
++    let i = gid.x + gid.y * 64u * 1024u;
++    let n = SCALE * SCALE;
++    let w = prm(2u);
++    let h = prm(3u);
++    if (i >= w * h * n) {
++        return;
++    }
++    let k = i % n;
++    let x = (i / n) % w;
++    let y = (i / n) / w;
++    let z0 = f32(read_sample(prm(5u), prm(4u), prm(1u), x, y, k));
++    if (z0 < 64.0) {
++        return;   // nothing drawn (sky, cleared)
++    }
++    let radius = clamp(f32(prm(7u)) * z0 / 65536.0, 1.5, 28.0);
++    let turn = fract(52.9829189 * fract(0.06711056 * f32(x) + 0.00583715 * f32(y))) * 3.14159265;
++    var occluded = 0.0;
++    for (var s = 0u; s < 6u; s = s + 1u) {
++        let a = turn + f32(s) * 0.52359878;
++        let r = radius * (0.5 + 0.5 * f32((s * 7u) % 6u) / 6.0);
++        let dx = i32(round(cos(a) * r));
++        let dy = i32(round(sin(a) * r));
++        let zp = ao_depth(i32(x) + dx, i32(y) + dy, w, h, k);
++        let zm = ao_depth(i32(x) - dx, i32(y) - dy, w, h, k);
++        if (zp <= 0.0 || zm <= 0.0) {
++            continue;
++        }
++        let crease = ((zp + zm) * 0.5 - z0) / z0;
++        let ahead = max(zp, zm) / z0 - 1.0;
++        occluded = occluded + smoothstep(0.004, 0.04, crease) * (1.0 - smoothstep(0.04, 0.15, ahead));
++    }
++    let ao = 1.0 - f32(prm(6u)) / 256.0 * clamp(occluded / 6.0 * 1.5, 0.0, 1.0);
++    let fl = locate(0u, prm(0u), prm(1u), x, y);
++    let c = load_at(fl, k);
++    let cr = u32(f32(c & 255u) * ao);
++    let cg = u32(f32((c >> 8u) & 255u) * ao);
++    let cb = u32(f32((c >> 16u) & 255u) * ao);
++    store(fl, k, cr | (cg << 8u) | (cb << 16u) | (c & 0xFF000000u));
++}
+diff --git a/runtime/src/gs/gs.cpp b/runtime/src/gs/gs.cpp
+index 0aa697e..c90990d 100644
+--- a/runtime/src/gs/gs.cpp
++++ b/runtime/src/gs/gs.cpp
+@@ -1041,6 +1041,8 @@ struct Walk {
+ } g_walk;
+ std::uint32_t g_last_bp[8] = {}, g_last_bw[8] = {};   // the widths of the last few buffers drawn into (the frame's is not in the walk)
+ int g_last_n = 0;
++std::uint32_t g_scene_bp = 0, g_scene_bw = 0;   // the last 32-bit buffer wider than a page drawn into before the walk: the 3D picture
++std::atomic<int> g_ao{[] { const char *v = std::getenv("PS2_AO"); return v ? std::atoi(v) : 0; }()};   // 0 off, 1 light, 2 strong
+ 
+ std::uint32_t entry(std::uint32_t cbp, std::uint32_t i) {   // palette entry i of a 256-entry 32-bit palette stored at cbp (CSM1)
+     const std::uint32_t j = (i & 0xE7u) | ((i & 8u) << 1) | ((i & 0x10u) >> 1);
+@@ -1152,12 +1154,20 @@ bool step(const State &s, std::uint64_t attr) {
+             while (i < std::min(g_last_n, 8) && g_last_bp[i] != fbp) ++i;
+             if (i == std::min(g_last_n, 8)) i = g_last_n++ % 8;
+             g_last_bp[i] = fbp, g_last_bw[i] = fbw;
++            if (fpsm == 0x00) g_scene_bp = fbp, g_scene_bw = fbw;
+             return true;
+         }
+         const std::uint32_t zbp = static_cast<std::uint32_t>(c.zbuf & 0x1FFu) * 32u;
+         if (!(sprite && textured && fbw == 1 && fpsm == 0x0A && tpsm == 0x0A && tbw == 1 && tbp == zbp)) return true;
+         w = Walk{};   // the walk starts: the first page of the depth copied as 16-bit into a 64-wide buffer
+         w.active = true, w.zbp = zbp, w.zpsm = 0x30u | ((static_cast<std::uint32_t>(c.zbuf >> 24)) & 0xFu), w.buf = fbp, w.pages = 1, w.copies = 1;
++#ifdef PS2_GPU
++        // ambient occlusion on the 3D picture before the filter tints it (only with the GPU)
++        if (const int ao = g_ao.load(std::memory_order_relaxed); ao > 0 && gpu_on() && g_scene_bp && g_scene_bw >= 8 && g_scene_bw <= 16) {
++            const std::uint32_t p[8] = {g_scene_bp, g_scene_bw, g_scene_bw * 64u, 448u, zbp, w.zpsm, ao >= 2 ? 180u : 115u, 35u};
++            gpu::game_ao(p);
++        }
++#endif
+         return true;
+     }
+     if (fbw != 1) {   // the walk is over
+@@ -2509,6 +2519,8 @@ void state(ps2::state::Stream &s) {
+ 
+ namespace ps2 {
+ void set_debug_text(bool on) { ps2::gs::sjis::g_debug_text.store(on, std::memory_order_relaxed); }
++void set_ambient_occlusion(int level) { ps2::gs::rdfilter::g_ao.store(std::clamp(level, 0, 2), std::memory_order_relaxed); }
++int ambient_occlusion() { return ps2::gs::rdfilter::g_ao.load(std::memory_order_relaxed); }
+ void set_game_filter_pass(int mode) { ps2::gs::rdfilter::g_mode.store(mode ? 1 : 0, std::memory_order_relaxed); }
+ int game_filter_pass() { return ps2::gs::rdfilter::g_mode.load(std::memory_order_relaxed); }
+ void set_bar_opacity(unsigned percent) { ps2::gs::g_bar_opacity.store(static_cast<int>(std::min(percent, 100u)), std::memory_order_relaxed); }
+-- 
+2.43.0
+

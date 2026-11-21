@@ -1,0 +1,315 @@
+From d2b60e8441b0f2f33ba8fbaa489d86c49c6ba56c Mon Sep 17 00:00:00 2001
+From: rawdanger-recomp <rawdanger-recomp@users.noreply.github.com>
+Date: Fri, 20 Nov 2026 22:05:01 +0000
+Subject: [PATCH] rawdanger-recomp: v0.8.3 FXAA, stronger occlusion, rain turns
+ with the camera, mouse speed 1.0
+
+- smaa.wgsl: FXAA 3.11 (quality 8) on the picture at its own size; keys.ini smaa = fxaa; F1 anti-aliasing list
+- ambient occlusion: light 160/256, strong 230/256 (was barely visible)
+- lens rain: the camera's turn read from its view direction (every camera mode), short wet marks instead of long trails,
+  clinging drops creep with the air
+- look_speed (mouse look) 1.0 by default
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01QNLFPekqhcU2dj7B3Utmea
+---
+ host/keymap.cpp              |  7 ++--
+ host/keymap.hpp              |  2 +-
+ host/lens_rain.cpp           | 25 ++++++++++---
+ host/quickmenu.cpp           |  4 +--
+ host/window.cpp              | 10 +++---
+ runtime/src/gs/gpu/gpu.cpp   |  4 +--
+ runtime/src/gs/gpu/smaa.wgsl | 69 ++++++++++++++++++++++++++++++++++++
+ runtime/src/gs/gs.cpp        |  2 +-
+ 8 files changed, 105 insertions(+), 18 deletions(-)
+
+diff --git a/host/keymap.cpp b/host/keymap.cpp
+index 763191e..e59052c 100644
+--- a/host/keymap.cpp
++++ b/host/keymap.cpp
+@@ -221,8 +221,8 @@ std::string with_menu_skin(const std::string &file_text, int skin) { return with
+ std::string with_integer_scale(const std::string &file_text, int on) { return with_line(file_text, "integerscale", "integer_scale = " + std::to_string(on ? 1 : 0)); }
+ std::string with_lens_rain(const std::string &file_text, int level) { return with_line(file_text, "rainonlens", std::string("rain_on_lens = ") + (level ? "on" : "off")); }
+ std::string with_smaa(const std::string &file_text, int on) {
+-    static const char *const kNames[5] = {"off", "low", "medium", "high", "ultra"};
+-    return with_line(file_text, "smaa", std::string("smaa = ") + kNames[std::clamp(on, 0, 4)]);
++    static const char *const kNames[6] = {"off", "low", "medium", "high", "ultra", "fxaa"};   // rawdanger-recomp: 5 = FXAA
++    return with_line(file_text, "smaa", std::string("smaa = ") + kNames[std::clamp(on, 0, 5)]);
+ }
+ 
+ const char *sharp_2d_word(int sharp) {
+@@ -384,7 +384,8 @@ void parse(const std::string &text, Config &config, std::vector<std::string> &pr
+             else if (v == "low") config.smaa = 1;
+             else if (v == "medium") config.smaa = 2;
+             else if (v == "ultra") config.smaa = 4;
+-            else bad("smaa is off, low, medium, high or ultra, ignored");
++            else if (v == "fxaa") config.smaa = 5;
++            else bad("smaa is off, low, medium, high, ultra or fxaa, ignored");
+             continue;
+         }
+         if (name == "lookspeed") {
+diff --git a/host/keymap.hpp b/host/keymap.hpp
+index 324a72a..807732f 100644
+--- a/host/keymap.hpp
++++ b/host/keymap.hpp
+@@ -53,7 +53,7 @@ struct Config {
+     int black_bars = 100;      // rawdanger-recomp: the cutscenes' black bars, opacity in % (0: left out, the picture fills the screen)
+     int sharpen = 0;           // rawdanger-recomp: contrast-adaptive sharpening of the picture: 0 off (the picture is crisp by itself since the copy fix), 1 low, 2 medium, 3 high
+     int mouse_look = 1;        // rawdanger-recomp: the mouse turns the camera while playing (PS2_MOUSE_LOOK_* from the launcher); 0 off
+-    double look_speed = 2.0;   // rawdanger-recomp: how far the mouse look turns (0.2 to 4)
++    double look_speed = 1.0;   // rawdanger-recomp: how far the mouse look turns (0.2 to 4; 1.0 by default since v0.8.3)
+     int window_w = 0, window_h = 0;  // rawdanger-recomp: the window's size from the menu's presets (0: the default)
+     int integer_scale = 0;     // rawdanger-recomp: the picture is enlarged by whole numbers only (every console pixel row the same height)
+     int lens_rain = 1;         // rawdanger-recomp: rain drops on the lens while playing (keys.ini rain_on_lens): 0 off, 1 on (how hard
+diff --git a/host/lens_rain.cpp b/host/lens_rain.cpp
+index 6bd4bd5..72c9798 100644
+--- a/host/lens_rain.cpp
++++ b/host/lens_rain.cpp
+@@ -145,7 +145,8 @@ float g_yaw_prev = 0.0f, g_drift = 0.0f;
+ // (x y z floats) and of the view's direction (Raw Danger: 0x48F7D8, 0x310, 0x1B0). Screen-right is (view z, 0, -view x).
+ std::uint32_t g_motion_pointer = 0, g_motion_player = 0, g_motion_view = 0;
+ bool g_motion_set = false, g_motion_have = false;
+-float g_motion_prev[3] = {}, g_forward = 0.0f;
++float g_motion_prev[3] = {}, g_forward = 0.0f, g_view_yaw = 0.0f, g_view_turn = 0.0f;
++bool g_view_have = false;
+ 
+ float read_float(std::uint32_t address) {
+     const std::uint32_t w = ps2::ld32(address);
+@@ -182,8 +183,19 @@ float motion_drift(float seconds) {
+         }
+         for (int i = 0; i < 3; ++i) g_motion_prev[i] = p[i];
+         g_motion_have = fine;
++        // the camera's turn from its view (every camera has one; the angle word of PS2_LENS_YAW is only the follow camera's)
++        if (fine) {
++            const float yaw = std::atan2(v[0], v[2]);
++            if (g_view_have) {
++                float turn = yaw - g_view_yaw;
++                if (turn > 3.14159265f) turn -= 6.2831853f;
++                if (turn < -3.14159265f) turn += 6.2831853f;
++                g_view_turn = turn / seconds;
++            }
++            g_view_yaw = yaw, g_view_have = true;
++        }
+     } else {
+-        g_motion_have = false;
++        g_motion_have = false, g_view_have = false, g_view_turn = 0.0f;
+     }
+     g_forward += (std::max(0.0f, forward) - g_forward) * std::min(1.0f, seconds * 3.0f);
+     return std::clamp(-side * 0.14f, -0.8f, 0.8f);   // running sideways (about 4.5 a second) slants them about 3 in 5
+@@ -216,7 +228,11 @@ void read_drift(float seconds) {
+     } else {
+         g_yaw_have = false;
+     }
+-    goal += motion_drift(seconds);
++    // the camera turning (from its view: the angle word above misses some cameras): a turn to the right pushes the water left
++    const float side = motion_drift(seconds);
++    const float view_goal = std::clamp(-g_view_turn * 0.3f, -0.9f, 0.9f);
++    if (std::fabs(view_goal) > std::fabs(goal)) goal = view_goal;
++    goal += side;
+     g_drift += (std::clamp(goal, -1.1f, 1.1f) - g_drift) * std::min(1.0f, seconds * 4.0f);
+ }
+ 
+@@ -260,12 +276,13 @@ void frame(float seconds) {
+             d.y += step;
+             d.x += d.wobble * seconds + uniform(-0.0015f, 0.0015f) + g_drift * step;   // a little crookedly, and sideways in a turn
+             d.slant += (g_drift - d.slant) * std::min(1.0f, seconds * 3.0f);
+-            d.trail = std::min(0.28f, d.trail + step);
++            d.trail = std::min(std::min(0.12f, d.r * 7.0f), d.trail + step);   // v0.8.3: short wet marks, not lines down the picture
+             d.r = std::max(0.005f, d.r - 0.003f * seconds);           // leaves water behind and gets smaller
+             d.stretch = std::min(1.6f, d.stretch + seconds * 2.0f);
+         } else {
+             d.trail = std::max(0.0f, d.trail - seconds * 0.05f);
+             if (std::fabs(g_drift) > 0.3f && d.r > 0.008f) d.hold = std::min(d.hold, d.age + 0.1f);   // a turn or a run shakes it loose
++            d.x += g_drift * seconds * 0.05f;   // and a clinging one creeps the way the air pushes it
+         }
+         const float in = std::min(1.0f, d.age / 0.15f), out = std::clamp((d.life - d.age) / 1.0f, 0.0f, 1.0f);
+         d.alpha = 0.9f * in * out;
+diff --git a/host/quickmenu.cpp b/host/quickmenu.cpp
+index 9a9cc25..e551595 100644
+--- a/host/quickmenu.cpp
++++ b/host/quickmenu.cpp
+@@ -407,8 +407,8 @@ std::string entry_text(Command c, const Values &v, bool quit_armed) {
+     case Command::achievements: return "Achievements";
+     case Command::look: return "Upscale filter:  < " + (v.filter.empty() ? v.look : v.filter) + " >";
+     case Command::antialias: {
+-        static const char *const kAa[] = {"off", "smooth edges", "SMAA low", "SMAA medium", "SMAA high", "SMAA ultra"};
+-        return std::string("Anti-aliasing:  < ") + kAa[std::clamp(v.antialias, 0, 5)] + " >";
++        static const char *const kAa[] = {"off", "smooth edges", "SMAA low", "SMAA medium", "SMAA high", "SMAA ultra", "FXAA"};
++        return std::string("Anti-aliasing:  < ") + kAa[std::clamp(v.antialias, 0, 6)] + " >";
+     }
+     case Command::integer_scale: return std::string("Whole-number scaling:  < ") + (v.integer_scale ? "on" : "off") + " >";
+     case Command::menu_skin: return std::string("Menu look:  < ") + (v.menu_skin == 2 ? "the game's Options screen" : v.menu_skin == 1 ? "Japanese (blue on white)" : "hazard (yellow on black)") + " >";
+diff --git a/host/window.cpp b/host/window.cpp
+index f8e7fb6..cb93f6d 100644
+--- a/host/window.cpp
++++ b/host/window.cpp
+@@ -786,7 +786,7 @@ void load_keys() {
+         quickmenu::set_skin(skin);
+         g_skin_chosen = skin;
+         ps2::set_reverb(g_keys.reverb != 0);
+-        if (g_keys.smaa) ps2::set_smaa_quality(static_cast<unsigned>(g_keys.smaa));
++        if (g_keys.smaa) ps2::set_smaa_quality(g_keys.smaa == 5 ? 8u : static_cast<unsigned>(g_keys.smaa));
+         send_key_prompts();
+     }
+     ps2::set_bar_opacity(static_cast<unsigned>(std::clamp(g_keys.black_bars, 0, 100)));
+@@ -2259,17 +2259,17 @@ void menu_command(quickmenu::Command c, int step) {
+         break;
+     }
+     case Command::antialias: {
+-        // off -> smooth edges (the edge blend of the looks) -> SMAA low, medium, high, ultra (on the picture) -> off; at once
++        // off -> smooth edges (the edge blend of the looks) -> SMAA low, medium, high, ultra -> FXAA (on the picture) -> off; at once
+         int aa = g_keys.smaa ? 1 + g_keys.smaa : (g_look & 1) ? 1 : 0;
+-        aa = (aa + step + 6) % 6;
++        aa = (aa + step + 7) % 7;
+         g_look = (g_look & ~1) | (aa == 1 ? 1 : 0);
+         g_keys.look = g_look;
+         g_keys.smaa = aa >= 2 ? aa - 1 : 0;
+-        if (g_keys.smaa) ps2::set_smaa_quality(static_cast<unsigned>(g_keys.smaa));
++        if (g_keys.smaa) ps2::set_smaa_quality(g_keys.smaa == 5 ? 8u : static_cast<unsigned>(g_keys.smaa));
+         ps2::set_video_options(video_bits());
+         if (!g_look_forced) rewrite_keys_file([](const std::string &t) { return keymap::with_look(t, g_look); }, "look");
+         rewrite_keys_file([](const std::string &t) { return keymap::with_smaa(t, g_keys.smaa); }, "smaa");
+-        static const char *const kAa[] = {"off", "smooth edges", "SMAA low", "SMAA medium", "SMAA high", "SMAA ultra"};
++        static const char *const kAa[] = {"off", "smooth edges", "SMAA low", "SMAA medium", "SMAA high", "SMAA ultra", "FXAA"};
+         set_notice(std::string("Anti-aliasing: ") + kAa[aa]);
+         break;
+     }
+diff --git a/runtime/src/gs/gpu/gpu.cpp b/runtime/src/gs/gpu/gpu.cpp
+index c5a99cd..76db0eb 100644
+--- a/runtime/src/gs/gpu/gpu.cpp
++++ b/runtime/src/gs/gpu/gpu.cpp
+@@ -2832,7 +2832,7 @@ void encode_smaa(WGPUCommandEncoder enc) {
+         bd.entries = be;
+         g_smaa_group = wgpuDeviceCreateBindGroup(g_device, &bd);
+     }
+-    const std::uint32_t p[4] = {job.width, job.height, job.base, std::clamp<std::uint32_t>(g_smaa_quality.load(), 1u, 4u)};
++    const std::uint32_t p[4] = {job.width, job.height, job.base, (g_smaa_quality.load() == 8u ? 8u : std::clamp<std::uint32_t>(g_smaa_quality.load(), 1u, 4u))};
+     wgpuQueueWriteBuffer(g_queue, g_smaa_params, 0, p, sizeof p);
+     WGPUComputePassDescriptor cd = WGPU_COMPUTE_PASS_DESCRIPTOR_INIT;
+     WGPUComputePassEncoder pass = wgpuCommandEncoderBeginComputePass(enc, &cd);
+@@ -5767,7 +5767,7 @@ bool display(const DisplaySource &src, std::vector<std::uint32_t> &rgba, std::ui
+ namespace ps2 {
+ // rawdanger-recomp: the drops on the lens for the next pictures: count drops of (x, y, radius, opacity), x and y from the
+ // picture's top left (0 ... 1), the radius a share of the picture's height. The next 4 floats after the count: unused.
+-void set_smaa_quality(unsigned quality) { ps2::gs::gpu::g_smaa_quality = std::clamp(quality, 1u, 4u); }
++void set_smaa_quality(unsigned quality) { ps2::gs::gpu::g_smaa_quality = quality == 8u ? 8u : std::clamp(quality, 1u, 4u); }   // 8: FXAA
+ void set_sharp_2d(unsigned sharp) { ps2::gs::gpu::g_sharp_request = static_cast<int>(std::min(sharp, 2u)); }
+ void set_jp_textures(bool on) { ps2::gs::gpu::g_jp_textures = on; }
+ void set_internal_scale(unsigned scale) { ps2::gs::gpu::g_scale_request = std::clamp(scale, 1u, 8u); }
+diff --git a/runtime/src/gs/gpu/smaa.wgsl b/runtime/src/gs/gpu/smaa.wgsl
+index 20f5752..ffcde89 100644
+--- a/runtime/src/gs/gpu/smaa.wgsl
++++ b/runtime/src/gs/gpu/smaa.wgsl
+@@ -116,6 +116,7 @@ fn luma(x: i32, y: i32) -> f32 { return dot(color_texel(x, y).rgb, vec3<f32>(0.2
+ 
+ @compute @workgroup_size(8, 8)
+ fn edges(@builtin(global_invocation_id) id: vec3<u32>) {
++    if (params.quality == 8u) { return; }   // FXAA: the blend pass only
+     if (id.x >= params.width || id.y >= params.height) { return; }
+     let x = i32(id.x);
+     let y = i32(id.y);
+@@ -338,6 +339,7 @@ fn corner_vertical(weights: vec2<f32>, uv: vec4<f32>, d: vec2<f32>) -> vec2<f32>
+ 
+ @compute @workgroup_size(8, 8)
+ fn weights(@builtin(global_invocation_id) id: vec3<u32>) {
++    if (params.quality == 8u) { return; }
+     if (id.x >= params.width || id.y >= params.height) { return; }
+     let r = rt();
+     let uv = (vec2<f32>(id.xy) + 0.5) * r;
+@@ -384,6 +386,69 @@ fn weights(@builtin(global_invocation_id) id: vec3<u32>) {
+     work[count() + id.y * params.width + id.x] = pack4x8unorm(clamp(w, vec4<f32>(0.0), vec4<f32>(1.0)));
+ }
+ 
++// ---- rawdanger-recomp: FXAA (quality 8): Timothy Lottes' FXAA 3.11 edge walk, 12 steps, on the picture at its own size -----
++fn fx_luma(c: vec3<f32>) -> f32 { return sqrt(dot(c, vec3<f32>(0.299, 0.587, 0.114))); }
++fn fx_l(uv: vec2<f32>) -> f32 { return fx_luma(sample_color(uv).rgb); }
++fn fxaa(x: i32, y: i32, uv: vec2<f32>, r: vec2<f32>) -> vec4<f32> {
++    let c = color_texel(x, y);
++    let lm = fx_luma(c.rgb);
++    let ln = fx_luma(color_texel(x, y - 1).rgb);
++    let ls = fx_luma(color_texel(x, y + 1).rgb);
++    let lw = fx_luma(color_texel(x - 1, y).rgb);
++    let le = fx_luma(color_texel(x + 1, y).rgb);
++    let lo = min(lm, min(min(ln, ls), min(lw, le)));
++    let hi = max(lm, max(max(ln, ls), max(lw, le)));
++    let range = hi - lo;
++    if (range < max(0.0312, hi * 0.125)) { return c; }
++    let lnw = fx_luma(color_texel(x - 1, y - 1).rgb);
++    let lne = fx_luma(color_texel(x + 1, y - 1).rgb);
++    let lsw = fx_luma(color_texel(x - 1, y + 1).rgb);
++    let lse = fx_luma(color_texel(x + 1, y + 1).rgb);
++    let edge_h = abs(-2.0 * lw + lnw + lsw) + abs(-2.0 * lm + ln + ls) * 2.0 + abs(-2.0 * le + lne + lse);
++    let edge_v = abs(-2.0 * ln + lnw + lne) + abs(-2.0 * lm + lw + le) * 2.0 + abs(-2.0 * ls + lsw + lse);
++    let horizontal = edge_h >= edge_v;
++    let l1 = select(lw, ln, horizontal);
++    let l2 = select(le, ls, horizontal);
++    let g1 = abs(l1 - lm);
++    let g2 = abs(l2 - lm);
++    let steep = g1 >= g2;
++    var step_len = select(r.x, r.y, horizontal);
++    var l_avg = 0.5 * (l2 + lm);
++    var grad = 0.25 * max(g1, g2);
++    if (steep) { step_len = -step_len; l_avg = 0.5 * (l1 + lm); }
++    var cur = uv;
++    if (horizontal) { cur.y = cur.y + step_len * 0.5; } else { cur.x = cur.x + step_len * 0.5; }
++    let off = select(vec2<f32>(0.0, r.y), vec2<f32>(r.x, 0.0), horizontal);
++    var u1 = cur - off;
++    var u2 = cur + off;
++    var e1 = fx_l(u1) - l_avg;
++    var e2 = fx_l(u2) - l_avg;
++    var d1 = abs(e1) >= grad;
++    var d2 = abs(e2) >= grad;
++    let steps = array<f32, 12>(1.0, 1.0, 1.0, 1.0, 1.0, 1.5, 2.0, 2.0, 2.0, 2.0, 4.0, 8.0);
++    for (var i = 1; i < 12; i = i + 1) {
++        if (d1 && d2) { break; }
++        if (!d1) { u1 = u1 - off * steps[i]; e1 = fx_l(u1) - l_avg; d1 = abs(e1) >= grad; }
++        if (!d2) { u2 = u2 + off * steps[i]; e2 = fx_l(u2) - l_avg; d2 = abs(e2) >= grad; }
++    }
++    let dist1 = select(uv.y - u1.y, uv.x - u1.x, horizontal);
++    let dist2 = select(u2.y - uv.y, u2.x - uv.x, horizontal);
++    let closer1 = dist1 < dist2;
++    let dist = min(dist1, dist2);
++    let thickness = dist1 + dist2;
++    let pix_off = -dist / max(thickness, 1e-6) + 0.5;
++    let lm_smaller = lm < l_avg;
++    let correct = select((e2 < 0.0) != lm_smaller, (e1 < 0.0) != lm_smaller, closer1);
++    var final_off = select(0.0, pix_off, correct);
++    let la = (2.0 * (ln + ls + lw + le) + lnw + lne + lsw + lse) / 12.0;
++    let sub = clamp(abs(la - lm) / range, 0.0, 1.0);
++    let sub2 = (-2.0 * sub + 3.0) * sub * sub;
++    final_off = max(final_off, sub2 * sub2 * 0.75);
++    var fuv = uv;
++    if (horizontal) { fuv.y = fuv.y + final_off * step_len; } else { fuv.x = fuv.x + final_off * step_len; }
++    return vec4<f32>(sample_color(fuv).rgb, c.a);
++}
++
+ // ---- pass 3: neighbourhood blending -----------------------------------------------------------------------------------
+ @compute @workgroup_size(8, 8)
+ fn blend(@builtin(global_invocation_id) id: vec3<u32>) {
+@@ -392,6 +457,10 @@ fn blend(@builtin(global_invocation_id) id: vec3<u32>) {
+     let y = i32(id.y);
+     let r = rt();
+     let uv = (vec2<f32>(id.xy) + 0.5) * r;
++    if (params.quality == 8u) {
++        work[2u * count() + id.y * params.width + id.x] = pack4x8unorm(fxaa(x, y, uv, r));
++        return;
++    }
+     var a: vec4<f32>;
+     a.x = weight_texel(x + 1, y).w;   // right
+     a.y = weight_texel(x, y + 1).y;   // bottom (the original's "top", in its flipped texture coordinates)
+diff --git a/runtime/src/gs/gs.cpp b/runtime/src/gs/gs.cpp
+index c90990d..0aeb769 100644
+--- a/runtime/src/gs/gs.cpp
++++ b/runtime/src/gs/gs.cpp
+@@ -1164,7 +1164,7 @@ bool step(const State &s, std::uint64_t attr) {
+ #ifdef PS2_GPU
+         // ambient occlusion on the 3D picture before the filter tints it (only with the GPU)
+         if (const int ao = g_ao.load(std::memory_order_relaxed); ao > 0 && gpu_on() && g_scene_bp && g_scene_bw >= 8 && g_scene_bw <= 16) {
+-            const std::uint32_t p[8] = {g_scene_bp, g_scene_bw, g_scene_bw * 64u, 448u, zbp, w.zpsm, ao >= 2 ? 180u : 115u, 35u};
++            const std::uint32_t p[8] = {g_scene_bp, g_scene_bw, g_scene_bw * 64u, 448u, zbp, w.zpsm, ao >= 2 ? 230u : 160u, 38u};
+             gpu::game_ao(p);
+         }
+ #endif
+-- 
+2.43.0
+

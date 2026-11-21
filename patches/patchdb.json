@@ -1,0 +1,147 @@
+{
+ "_about": "Patches for Raw Danger! builds. Addresses are EE virtual addresses in the boot ELF. rd_mkconfig.py checks each address against your ELF, sorts it into CODE (baked in at recompile time via config.toml [patches]) or DATA (applied at boot by rd_game.cpp, toggled in rawdanger.ini), and refuses any site whose original value doesn't match 'expect'.",
+ "games": {
+  "SLUS-21501": {
+   "title": "Raw Danger! (USA)",
+   "elf": "SLUS_215.01",
+   "pcsx2_crc": "2905C5C6",
+   "patches": [
+    {
+     "group": "widescreen",
+     "name": "Widescreen 16:9 (gameplay FOV + aspect)",
+     "source": "PCSX2/pcsx2_patches SLUS-21501_2905C5C6.pnach [Widescreen 16:9]",
+     "default": true,
+     "sites": [
+      {
+       "addr": "0x003A83E0",
+       "value": "0x43E00000",
+       "expect": "0x43A00000",
+       "note": "horizontal axis 320.0 -> 448.0"
+      },
+      {
+       "addr": "0x003A8400",
+       "value": "0x43E00000",
+       "expect": "0x43A00000",
+       "note": "render fix 320.0 -> 448.0"
+      },
+      {
+       "addr": "0x0048BFA8",
+       "value": "0x3F400000",
+       "expect": "0x3F800000",
+       "note": "horizontal scale 1.0 -> 0.75"
+      }
+     ],
+     "expect_source": "Verified on retail ELFs whose PCSX2 CRC matches the pnach (2905C5C6 / C988ECBB)."
+    },
+    {
+     "group": "no_post_filter",
+     "name": "Remove problematic post-processing / blur filter",
+     "source": "PCSX2 wiki, Raw Danger! known issues (kozarovv, 'problematic post processing/filters removal')",
+     "default": false,
+     "sites": [
+      {
+       "addr": "0x0011E104",
+       "value": "0x00000000",
+       "expect": "0x0C066A5C",
+       "note": "NOP a jal (original verified on retail ELF, PCSX2 CRC match)"
+      },
+      {
+       "addr": "0x0011E10C",
+       "value": "0x00000000",
+       "expect": "0x0C08A8EC",
+       "note": "NOP a jal (original verified on retail ELF, PCSX2 CRC match)"
+      }
+     ]
+    },
+    {
+     "group": "native_loading_fix",
+     "name": "Fast loading fix (ps2-native-recomp)",
+     "source": "rawdanger-recomp, 2026-11-12: found replaying the F9 save state on ps2-native-recomp",
+     "default": false,
+     "sites": [
+      {
+       "addr": "0x0011B2B8",
+       "value": "0x00000000",
+       "expect": "0x0C0B1DF8",
+       "note": "jal fade reset (0x2C77E0) in the post-load function 0x11AA60 -> nop; without it a load faster than the 10-step loading-screen fade-in leaves GAMELOAD waiting for ever"
+      }
+     ]
+    }
+   ]
+  },
+  "SLPS-25606": {
+   "title": "Zettai Zetsumei Toshi 2 (Japan)",
+   "elf": "SLPS_256.06",
+   "pcsx2_crc": "C988ECBB",
+   "patches": [
+    {
+     "group": "widescreen",
+     "name": "Widescreen 16:9",
+     "source": "PCSX2/pcsx2_patches SLPS-25606_C988ECBB.pnach [Widescreen 16:9] (Little Giant)",
+     "default": true,
+     "sites": [
+      {
+       "addr": "0x001CF198",
+       "value": "0x00A52823",
+       "expect": "0x00000000",
+       "note": "black borders fix (code)"
+      },
+      {
+       "addr": "0x0048AB28",
+       "value": "0x3F400000",
+       "expect": "0x3F800000",
+       "note": "hor"
+      },
+      {
+       "addr": "0x003A7C60",
+       "value": "0x43E00000",
+       "expect": "0x43A00000",
+       "note": "increases hor. axis"
+      },
+      {
+       "addr": "0x003A7C80",
+       "value": "0x43E00000",
+       "expect": "0x43A00000",
+       "note": "render fix"
+      }
+     ],
+     "expect_source": "Verified on retail ELFs whose PCSX2 CRC matches the pnach (2905C5C6 / C988ECBB)."
+    },
+    {
+     "group": "no_post_filter",
+     "name": "Remove problematic post-processing / blur filter",
+     "source": "PCSX2 wiki, Raw Danger! known issues (kozarovv)",
+     "default": false,
+     "sites": [
+      {
+       "addr": "0x0011E094",
+       "value": "0x00000000",
+       "expect": "0x0C066804",
+       "note": "NOP a jal (original verified on retail ELF, PCSX2 CRC match)"
+      },
+      {
+       "addr": "0x0011E09C",
+       "value": "0x00000000",
+       "expect": "0x0C08A654",
+       "note": "NOP a jal (original verified on retail ELF, PCSX2 CRC match)"
+      }
+     ]
+    },
+    {
+     "group": "native_loading_fix",
+     "name": "Fast loading fix (ps2-native-recomp)",
+     "source": "rawdanger-recomp, matched from the US site (code identical around it)",
+     "default": false,
+     "sites": [
+      {
+       "addr": "0x0011B248",
+       "value": "0x00000000",
+       "expect": "0x0C0B1B78",
+       "note": "jal fade reset (0x2C6DE0) -> nop; not yet run on the JP disc"
+      }
+     ]
+    }
+   ]
+  }
+ }
+}

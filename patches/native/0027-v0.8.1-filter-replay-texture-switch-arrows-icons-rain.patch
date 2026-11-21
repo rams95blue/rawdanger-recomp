@@ -1,0 +1,1097 @@
+From fa3edb8c886922aba1e6d2fefdf323b9847c2048 Mon Sep 17 00:00:00 2001
+From: rawdanger-recomp <rawdanger-recomp@users.noreply.github.com>
+Date: Fri, 20 Nov 2026 19:46:35 +0000
+Subject: [PATCH] rawdanger-recomp: v0.8.1 filter replay, texture switch at
+ area load, arrows, icons, lens rain
+
+- Colour filter: the first page is drawn the game's way while its steps are written down, then replayed in one pass (CPU or
+  GPU) for the rest: two or three depth palettes, writes from palettes or a flat colour (AREA 01's variant was drawn wrong);
+  unknown steps fall back to the game's own draws. Byte-identical frames in both variants tested.
+- ps2::set_game_filter_pass: one GPU pass or the game's own draws (F1 > Picture, keys.ini post_processing) to compare
+- Texture options switched in an area wait for the next area load (PS2_AREA_LOAD), so the characters do not garble
+- Built-in fixes are no longer listed; the game's options change with left / right; clicks on a line's < > step it
+- Window icon (PS2_WINDOW_ICON, else resource 1) and PS2_EXE_ICON built into ps2run.exe
+- Lens rain: drops follow the player's movement (PS2_LENS_MOTION) and look like water (no dark ring, mild lens)
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01QNLFPekqhcU2dj7B3Utmea
+---
+ CMakeLists.txt                |   8 ++
+ host/keymap.cpp               |   8 ++
+ host/keymap.hpp               |   4 +-
+ host/lens_rain.cpp            |  61 +++++++++++-
+ host/quickmenu.cpp            |  37 +++++++-
+ host/quickmenu.hpp            |   8 ++
+ host/recomp_options.cpp       |  26 +++++-
+ host/recomp_options.hpp       |   8 ++
+ host/window.cpp               |  90 +++++++++++++++++-
+ runtime/include/ps2/video.hpp |   6 +-
+ runtime/src/gs/gpu/blit.wgsl  |  55 ++++++-----
+ runtime/src/gs/gpu/gpu.cpp    |  15 ++-
+ runtime/src/gs/gpu/gpu.hpp    |   2 +-
+ runtime/src/gs/gpu/gs.wgsl    |  60 +++++++++---
+ runtime/src/gs/gs.cpp         | 171 +++++++++++++++++++++++++---------
+ scripts/port.sh               |   2 +-
+ 16 files changed, 459 insertions(+), 102 deletions(-)
+
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+index 9fefe3a..da53c9d 100644
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -523,6 +523,14 @@ if(PS2_GENERATED)
+ 
+     add_executable(ps2run host/main.cpp host/crash.cpp)  # crash.cpp: the lines a crash writes to the log
+     target_link_libraries(ps2run PRIVATE ps2game ps2runtime)
++    # rawdanger-recomp: the program's icon (Explorer, Task Manager, the taskbar): PS2_EXE_ICON = a .ico, built in as resource 1
++    set(PS2_EXE_ICON "" CACHE FILEPATH "Windows: a .ico built into ps2run.exe")
++    if(WIN32 AND PS2_EXE_ICON AND EXISTS "${PS2_EXE_ICON}")
++        enable_language(RC)
++        file(TO_CMAKE_PATH "${PS2_EXE_ICON}" _ps2_icon)
++        file(WRITE "${CMAKE_BINARY_DIR}/ps2run_icon.rc" "1 ICON \"${_ps2_icon}\"\n")
++        target_sources(ps2run PRIVATE "${CMAKE_BINARY_DIR}/ps2run_icon.rc")
++    endif()
+     if(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64|AMD64")
+         target_sources(ps2run PRIVATE host/profile.cpp)
+         target_compile_definitions(ps2run PRIVATE PS2_PROFILE)
+diff --git a/host/keymap.cpp b/host/keymap.cpp
+index 6008fa4..cdc39f7 100644
+--- a/host/keymap.cpp
++++ b/host/keymap.cpp
+@@ -231,6 +231,7 @@ const char *sharp_2d_word(int sharp) {
+ }
+ 
+ std::string with_master_volume(const std::string &file_text, int percent) { return with_line(file_text, "mastervolume", "master_volume = " + std::to_string(percent)); }
++std::string with_filter_pass(const std::string &file_text, int fast) { return with_line(file_text, "postprocessing", std::string("post_processing = ") + (fast ? "fast" : "original")); }
+ std::string with_popup_size(const std::string &file_text, int size) {
+     static const char *const kNames[] = {"small", "normal", "large", "huge"};
+     return with_line(file_text, "popupsize", std::string("popup_size = ") + kNames[size < 0 ? 0 : size > 3 ? 3 : size]);
+@@ -466,6 +467,13 @@ void parse(const std::string &text, Config &config, std::vector<std::string> &pr
+             else config.master_volume = static_cast<int>(v);
+             continue;
+         }
++        if (name == "postprocessing") {
++            const std::string v = squash(value);
++            if (v == "fast" || v == "1") config.filter_pass = 1;
++            else if (v == "original" || v == "0") config.filter_pass = 0;
++            else bad("post_processing is fast or original, ignored");
++            continue;
++        }
+         if (name == "popupsize") {
+             const std::string v = squash(value);
+             if (v == "small" || v == "0") config.popup_size = 0;
+diff --git a/host/keymap.hpp b/host/keymap.hpp
+index 4036470..3e58532 100644
+--- a/host/keymap.hpp
++++ b/host/keymap.hpp
+@@ -40,6 +40,7 @@ struct Config {
+     std::string pace;          // the picture pace ('30', '60', 'off', ...; ps2/pace.hpp) used at the next start, "" when the file has no 'pace' line
+ 
+     int menu_game_runs = 1;    // rawdanger-recomp: the game goes on behind the quick menu (off: it waits, as before)
++    int filter_pass = -1;      // rawdanger-recomp: the post processing in one GPU pass (1) or drawn the game's way (0); -1: as the launcher says
+     int popup_size = 1;        // rawdanger-recomp: pop-ups (achievements, notes, the keys on screen): 0 small, 1 normal, 2 large, 3 huge
+     int keys_on_screen = 0;    // rawdanger-recomp: the list of the player's keys stays on the screen while playing (F10)
+     int pause_unfocused = 1;   // rawdanger-recomp: the quick menu opens (the game waits) when the window goes to the background
+@@ -73,7 +74,8 @@ std::string with_scale(const std::string &file_text, int scale);
+ std::string with_sharp_2d(const std::string &file_text, int sharp);
+ const char *sharp_2d_word(int sharp);  // "soft", "sharp", "sharpest"
+ std::string with_menu_game_runs(const std::string &file_text, int on);  // the 'menu_game_runs' line
+-std::string with_popup_size(const std::string &file_text, int size);    // the 'popup_size' line: small / normal / large / huge
++std::string with_popup_size(const std::string &file_text, int size);
++std::string with_filter_pass(const std::string &file_text, int fast);  // the 'post_processing' line: fast / original    // the 'popup_size' line: small / normal / large / huge
+ std::string with_keys_on_screen(const std::string &file_text, int on);  // the 'keys_on_screen' line
+ std::string with_pause_unfocused(const std::string &file_text, int on);  // the 'pause_unfocused' line
+ std::string with_master_volume(const std::string &file_text, int percent);
+diff --git a/host/lens_rain.cpp b/host/lens_rain.cpp
+index eba024c..6bd4bd5 100644
+--- a/host/lens_rain.cpp
++++ b/host/lens_rain.cpp
+@@ -107,7 +107,7 @@ void spawn(float strength) {
+     d.x = uniform(0.02f, 0.98f);
+     d.y = uniform(-0.02f, 0.88f);
+     const float size = uniform(0.0f, 1.0f);
+-    d.r = 0.006f + size * size * size * 0.032f * (0.7f + 0.3f * strength);   // mostly small, now and then a big one
++    d.r = 0.004f + size * size * size * 0.022f * (0.7f + 0.3f * strength);   // mostly small beads, now and then a bigger one
+     d.age = 0.0f;
+     d.life = uniform(3.0f, 8.0f);
+     d.hold = uniform(0.4f, 3.0f) * (1.2f - 0.4f * strength);                 // in heavy rain they let go sooner
+@@ -139,6 +139,56 @@ std::uint32_t g_yaw_address = 0;
+ bool g_yaw_set = false, g_yaw_have = false;
+ float g_yaw_prev = 0.0f, g_drift = 0.0f;
+ 
++// rawdanger-recomp: the player's own movement, seen from the camera: walking or running to the left pushes the water on the lens to
++// the right (the air goes past the other way), and running at the camera's view drives the drops down faster.
++// PS2_LENS_MOTION="POINTER,PLAYER,VIEW": a word holding the camera block's address, then the offsets in it of the player's position
++// (x y z floats) and of the view's direction (Raw Danger: 0x48F7D8, 0x310, 0x1B0). Screen-right is (view z, 0, -view x).
++std::uint32_t g_motion_pointer = 0, g_motion_player = 0, g_motion_view = 0;
++bool g_motion_set = false, g_motion_have = false;
++float g_motion_prev[3] = {}, g_forward = 0.0f;
++
++float read_float(std::uint32_t address) {
++    const std::uint32_t w = ps2::ld32(address);
++    float f;
++    std::memcpy(&f, &w, 4);
++    return f;
++}
++
++float motion_drift(float seconds) {
++    static bool parsed = false;
++    if (!parsed) {
++        parsed = true;
++        if (const char *m = std::getenv("PS2_LENS_MOTION"); m && *m) {
++            char *end = nullptr;
++            g_motion_pointer = static_cast<std::uint32_t>(std::strtoul(m, &end, 16));
++            if (end && *end == ',') g_motion_player = static_cast<std::uint32_t>(std::strtoul(end + 1, &end, 16));
++            if (end && *end == ',') g_motion_view = static_cast<std::uint32_t>(std::strtoul(end + 1, &end, 16));
++            g_motion_set = g_motion_pointer && g_motion_player && g_motion_view;
++        }
++    }
++    float side = 0.0f, forward = 0.0f;
++    const std::uint32_t block = g_motion_set && playing() && seconds > 0.0f ? ps2::ld32(g_motion_pointer) : 0u;
++    if (block >= 0x100000u && block < 0x2000000u) {
++        float p[3], v[3];
++        for (int i = 0; i < 3; ++i) p[i] = read_float(block + g_motion_player + 4u * i), v[i] = read_float(block + g_motion_view + 4u * i);
++        const bool fine = std::isfinite(p[0]) && std::isfinite(p[2]) && std::isfinite(v[0]) && std::isfinite(v[2]);
++        if (fine && g_motion_have) {
++            const float dx = p[0] - g_motion_prev[0], dz = p[2] - g_motion_prev[2];
++            const float len = std::max(1e-4f, std::sqrt(v[0] * v[0] + v[2] * v[2]));
++            if (dx * dx + dz * dz < 4.0f) {   // not a jump (a door, a loaded save)
++                side = (dx * v[2] - dz * v[0]) / len / seconds;
++                forward = (dx * v[0] + dz * v[2]) / len / seconds;
++            }
++        }
++        for (int i = 0; i < 3; ++i) g_motion_prev[i] = p[i];
++        g_motion_have = fine;
++    } else {
++        g_motion_have = false;
++    }
++    g_forward += (std::max(0.0f, forward) - g_forward) * std::min(1.0f, seconds * 3.0f);
++    return std::clamp(-side * 0.14f, -0.8f, 0.8f);   // running sideways (about 4.5 a second) slants them about 3 in 5
++}
++
+ void read_drift(float seconds) {
+     static bool parsed = false;
+     if (!parsed) {
+@@ -166,7 +216,8 @@ void read_drift(float seconds) {
+     } else {
+         g_yaw_have = false;
+     }
+-    g_drift += (goal - g_drift) * std::min(1.0f, seconds * 4.0f);
++    goal += motion_drift(seconds);
++    g_drift += (std::clamp(goal, -1.1f, 1.1f) - g_drift) * std::min(1.0f, seconds * 4.0f);
+ }
+ 
+ // the gust: a slow random swell around 1 (0.35 ... 1.6), a new goal every few seconds, followed smoothly
+@@ -190,7 +241,7 @@ void frame(float seconds) {
+     const bool on = target > 0.0f && strength > 0.01f;
+     // new drops: about 9 a second at full rain in an ordinary gust, more in a burst; the lens holds more the harder it rains
+     if (on) {
+-        const float rate = 9.0f * strength * g_gust;
++        const float rate = 9.0f * strength * g_gust * (1.0f + std::min(g_forward, 5.0f) * 0.12f);   // running into the rain: more of it
+         const std::size_t most = std::min<std::size_t>(kMost, static_cast<std::size_t>(16.0f + 48.0f * strength * std::min(g_gust, 1.0f)));
+         float expect = rate * seconds;
+         while (expect > 0.0f && g_drops.size() < most) {
+@@ -205,7 +256,7 @@ void frame(float seconds) {
+         d.age += seconds;
+         if (!on) d.life = std::min(d.life, d.age + 1.2f);   // nothing more falls: the lens clears
+         if (d.age > d.hold) {
+-            const float step = d.speed * seconds;
++            const float step = d.speed * seconds * (1.0f + std::min(g_forward, 5.0f) * 0.1f + std::fabs(g_drift) * 0.6f);
+             d.y += step;
+             d.x += d.wobble * seconds + uniform(-0.0015f, 0.0015f) + g_drift * step;   // a little crookedly, and sideways in a turn
+             d.slant += (g_drift - d.slant) * std::min(1.0f, seconds * 3.0f);
+@@ -214,7 +265,7 @@ void frame(float seconds) {
+             d.stretch = std::min(1.6f, d.stretch + seconds * 2.0f);
+         } else {
+             d.trail = std::max(0.0f, d.trail - seconds * 0.05f);
+-            if (std::fabs(g_drift) > 0.45f && d.r > 0.012f) d.hold = std::min(d.hold, d.age + 0.1f);   // a fast turn shakes it loose
++            if (std::fabs(g_drift) > 0.3f && d.r > 0.008f) d.hold = std::min(d.hold, d.age + 0.1f);   // a turn or a run shakes it loose
+         }
+         const float in = std::min(1.0f, d.age / 0.15f), out = std::clamp((d.life - d.age) / 1.0f, 0.0f, 1.0f);
+         d.alpha = 0.9f * in * out;
+diff --git a/host/quickmenu.cpp b/host/quickmenu.cpp
+index 55d25a5..6d610a8 100644
+--- a/host/quickmenu.cpp
++++ b/host/quickmenu.cpp
+@@ -120,8 +120,8 @@ constexpr const char *kTabNames[Menu::kTabs] = {"DISPLAY", "PICTURE", "SOUND", "
+ constexpr int kAchievementRows = 7;   // rawdanger-recomp: achievements lines shown at a time (bigger panel)
+ constexpr Command kDisplay[] = {Command::scale, Command::window_size, Command::fullscreen, Command::widescreen, Command::integer_scale, Command::menu_game_runs, Command::pause_unfocused, Command::menu_skin, Command::popup_size, Command::back};
+ constexpr const char *kDisplayKeys[] = {"", "", "F11", "", "", "", "", "", "", "Esc"};
+-constexpr Command kPicture[] = {Command::look, Command::antialias, Command::sharpen, Command::sharp_2d, Command::game_blur, Command::black_bars, Command::lens_rain, Command::back};
+-constexpr const char *kPictureKeys[] = {"F2", "", "", "", "", "", "", "Esc"};
++constexpr Command kPicture[] = {Command::look, Command::antialias, Command::sharpen, Command::sharp_2d, Command::game_blur, Command::filter_pass, Command::black_bars, Command::lens_rain, Command::back};
++constexpr const char *kPictureKeys[] = {"F2", "", "", "", "", "", "", "", "Esc"};
+ constexpr Command kSound[] = {Command::master_volume, Command::reverb, Command::back};
+ constexpr const char *kSoundKeys[] = {"", "", "Esc"};
+ constexpr Command kControls[] = {Command::change_keys, Command::keys_on_screen, Command::mouse_look, Command::mouse_speed, Command::mouse_invert_x, Command::mouse_invert, Command::key_prompts, Command::back};
+@@ -205,6 +205,8 @@ void game_text(Picture &p, int x, int y, int s, const std::string &line, std::ui
+     }
+ }
+ 
++int shown_text_width(int s, const std::string &line) { return (g_skin == 2 && g_font.ok) ? game_text_width(s, line) : static_cast<int>(line.size()) * 6 * s; }
++
+ struct Canvas {
+     Picture &p;
+     // hazard tape: diagonal yellow and black bands, `band` pixels wide
+@@ -384,6 +386,7 @@ std::string entry_text(Command c, const Values &v, bool quit_armed) {
+     case Command::black_bars: return "Cutscene black bars:  < " + (v.black_bars <= 0 ? std::string("removed") : std::to_string(v.black_bars) + " % opaque") + " >";
+     case Command::reverb: return std::string("Reverb (rooms, tunnels):  < ") + (v.reverb ? "on" : "off") + " >";
+     case Command::widescreen: return v.widescreen < 0 ? "Widescreen: not in this game" : std::string("Widescreen 16:9:  < ") + (v.widescreen ? "on" : "off") + " >";
++    case Command::filter_pass: return std::string("  drawn:  < ") + (v.filter_pass ? "one GPU pass (fast)" : "the game's own draws (slow, to compare)") + " >";
+     case Command::popup_size: {
+         static const char *const kSizes[] = {"small", "normal", "large", "huge"};
+         return std::string("Pop-up size (achievements, notes, keys):  < ") + kSizes[std::clamp(v.popup_size, 0, 3)] + " >";
+@@ -607,15 +610,24 @@ Command Menu::choose() {
+ }
+ 
+ Command Menu::side() const {
++    // rawdanger-recomp: the game's options (Settings > Game, the F3 page) change with left / right too
++    if ((page_ == Page::recomp || (page_ == Page::graphics && tab_ == kGameTab)) && selected_ < recomp_rows_) return Command::recomp_toggle;
+     if (page_ != Page::graphics || tab_ == kGameTab) return Command::none;
+     const Command c = kTabLists[tab_].commands[selected_];
+     return c == Command::look || c == Command::scale || c == Command::sharp_2d || c == Command::fullscreen || c == Command::widescreen || c == Command::pause_unfocused || c == Command::menu_game_runs ||
+                    c == Command::master_volume || c == Command::integer_scale || c == Command::lens_rain || c == Command::antialias || c == Command::menu_skin ||
+                    c == Command::window_size || c == Command::game_blur || c == Command::reverb || c == Command::key_prompts || c == Command::mouse_look || c == Command::black_bars || c == Command::sharpen ||
+-                   c == Command::mouse_speed || c == Command::mouse_invert || c == Command::mouse_invert_x || c == Command::popup_size || c == Command::keys_on_screen
++                   c == Command::mouse_speed || c == Command::mouse_invert || c == Command::mouse_invert_x || c == Command::popup_size || c == Command::keys_on_screen || c == Command::filter_pass
+                ? c : Command::none;
+ }
+ 
++int Menu::click_step(int x) const {
++    const int slot = selected_ - arrow_top_;
++    if (slot < 0 || slot >= static_cast<int>(arrow_mid_.size()) || arrow_mid_[static_cast<std::size_t>(slot)] < 0) return 0;
++    if (x < arrow_lo_[static_cast<std::size_t>(slot)] - entry_h_) return 0;   // on the name: the line is only chosen
++    return x < arrow_mid_[static_cast<std::size_t>(slot)] ? -1 : 1;
++}
++
+ bool Menu::select_at(int x, int y) {
+     if (page_ == Page::graphics && tab_h_ > 0 && y >= tab_y_ && y < tab_y_ + tab_h_) {
+         // a tab: hovering does nothing, the click (choose) is handled by click_tab
+@@ -739,7 +751,7 @@ void Menu::draw_recomp(int window_width, int window_height, const Values &values
+     const bool ach = page_ == Page::achievements, tabs = page_ == Page::graphics;
+     const std::string kTitleText = ach ? "ACHIEVEMENTS - offline" : tabs ? "SETTINGS" : "GAME OPTIONS - switched while you play",
+                       kHint = ach ? "Enter / Cross: switch on / off     Esc / Circle: back" : tabs ? "Enter: switch   Tab / Q / E / L1 / R1: tabs   Esc: back" : "Enter / Cross: switch     Esc / Circle: back",
+-                      kBuilt = ach ? "* unlocked. Kept next to the saves; nothing goes online" : "Also in RawDangerPC.exe (Recomp options). Dim: built in";
++                      kBuilt = ach ? "* unlocked. Kept next to the saves; nothing goes online" : "Also in RawDangerPC.exe (Recomp options)";
+     recomp_rows_ = static_cast<int>(values.recomp_rows.size());
+     const int all = recomp_rows_;
+     // long lists scroll: the highlighted line stays in view
+@@ -805,8 +817,17 @@ void Menu::draw_recomp(int window_width, int window_height, const Values &values
+     entry_w_ = inner_w;
+     entry_h_ = bar_h * s;
+     rows_y_ = out.y + y;
++    arrow_lo_.assign(static_cast<std::size_t>(n + 1), -1), arrow_mid_.assign(static_cast<std::size_t>(n + 1), -1), arrow_top_ = top_;
+     const auto line = [&](int index, const std::string &left, const std::string &right, bool dim, const Values::Icon *icon = nullptr) {
+         const bool lit = index == selected_;
++        if (const std::size_t lo = right.find("< "), hi = right.rfind(" >"); lo != std::string::npos && hi != std::string::npos && hi > lo) {
++            const std::size_t slot = static_cast<std::size_t>(index >= all ? n : index - top_);
++            const int rx = out.x + out.width - text_x - shown_text_width(s, right);
++            if (slot < arrow_lo_.size()) {
++                arrow_lo_[slot] = rx + shown_text_width(s, right.substr(0, lo));
++                arrow_mid_[slot] = rx + (shown_text_width(s, right.substr(0, lo)) + shown_text_width(s, right.substr(0, hi + 2))) / 2;
++            }
++        }
+         if (lit) c.fill(pad * s, y, inner_w, bar_h * s, kBar);
+         const std::uint32_t color = lit ? kBarText : dim ? kDim : kText;
+         int tx = text_x;
+@@ -826,7 +847,7 @@ void Menu::draw_recomp(int window_width, int window_height, const Values &values
+         }
+         const std::size_t room = static_cast<std::size_t>(ach ? 36 : 40);
+         c.text(tx, y + (bar_h - 8) / 2 * s, s, left.size() > room ? left.substr(0, room - 3) + "..." : left, color);
+-        if (!right.empty()) c.text(out.width - text_x - static_cast<int>(right.size()) * 6 * s + s, y + (bar_h - 8) / 2 * s, s, right, lit ? kBarDim : color);
++        if (!right.empty()) c.text(out.width - text_x - shown_text_width(s, right), y + (bar_h - 8) / 2 * s, s, right, lit ? kBarDim : color);
+         y += bar_h * s;
+     };
+     if (n == 0)
+@@ -941,7 +962,13 @@ void Menu::draw_list(int window_width, int window_height, const Values &values,
+     entry_y_ = out.y + y;
+     entry_w_ = out.width - 2 * pad * s;
+     entry_h_ = bar_h * s;
++    arrow_lo_.assign(static_cast<std::size_t>(n), -1), arrow_mid_.assign(static_cast<std::size_t>(n), -1), arrow_top_ = 0;
+     for (int i = 0; i < n; ++i) {
++        if (const std::size_t lo = lines[i].find("< "), hi = lines[i].rfind(" >"); lo != std::string::npos && hi != std::string::npos && hi > lo) {
++            const int x0 = out.x + (pad + bar_pad) * s;
++            arrow_lo_[static_cast<std::size_t>(i)] = x0 + shown_text_width(s, lines[i].substr(0, lo));
++            arrow_mid_[static_cast<std::size_t>(i)] = x0 + (shown_text_width(s, lines[i].substr(0, lo)) + shown_text_width(s, lines[i].substr(0, hi + 2))) / 2;
++        }
+         const bool lit = i == selected_;
+         const bool quit = commands[i] == Command::quit;
+         if (lit) c.fill(pad * s, y, out.width - 2 * pad * s, bar_h * s, quit ? kAlarm : kBar);
+diff --git a/host/quickmenu.hpp b/host/quickmenu.hpp
+index 045d438..22664ab 100644
+--- a/host/quickmenu.hpp
++++ b/host/quickmenu.hpp
+@@ -38,6 +38,7 @@ enum class Command {
+     widescreen,    // Graphics page: the game's widescreen option (its recomp.ini section with aspect = 16:9)
+     menu_game_runs,   // Settings > Display: the game goes on behind this menu (off: it waits)
+     popup_size,       // Settings > Display: the size of the pop-ups (small / normal / large / huge)
++    filter_pass,      // Settings > Picture: the post processing in one GPU pass or drawn the game's way (to compare)
+     keys_on_screen,   // Settings > Controls: the player's keys at the left of the screen while playing (F10)
+     pause_unfocused,  // Graphics page: the game waits (this menu opens) when the window goes to the background
+     integer_scale, // Graphics and sound page: whole-number enlargement only (even pixel rows)
+@@ -71,6 +72,7 @@ struct Values {
+     int widescreen = -1;           // the game's widescreen option: -1 the game has none, 0 off, 1 on
+     bool menu_game_runs = true;    // the game goes on behind this menu
+     int popup_size = 1;            // 0 small, 1 normal, 2 large, 3 huge
++    int filter_pass = 1;           // 1 one GPU pass, 0 the game's own draws
+     bool keys_on_screen = false;   // the keys at the left of the screen while playing
+     bool game_waits = true;        // the game waits while this menu is open now (the title says PAUSED)
+     bool pause_unfocused = true;   // the menu opens when the window goes to the background
+@@ -139,6 +141,8 @@ public:
+     Command side() const;                      // left and right: the entries that go through values (look, resolution), else none
+     bool quit_armed() const { return quit_armed_; }   // Quit or Language waits for its second Enter
+     bool select_at(int x, int y);
++    // rawdanger-recomp: a click at x on the highlighted line: -1 on its "<" side, 1 on its ">" side, 0 elsewhere or no arrows
++    int click_step(int x) const;
+     // --- the keys page (Change keys): the same panel, one line per button ---
+     bool on_keys_page() const { return page_ == Page::keys; }
+     bool on_recomp_page() const { return page_ == Page::recomp || (page_ == Page::graphics && tab_ == kGameTab); }
+@@ -194,6 +198,10 @@ private:
+     int rows_y_ = 0, footer_y_ = 0;
+     // where the last drawing put the entries, for the mouse
+     int entry_x_ = 0, entry_y_ = 0, entry_w_ = 0, entry_h_ = 0;
++    // rawdanger-recomp: where each shown line's "<" and the middle between "<" and ">" are (window pixels; -1: no arrows), so a
++    // click left of the middle steps back and right of it forward
++    std::vector<int> arrow_lo_, arrow_mid_;
++    int arrow_top_ = 0;   // the item the first shown line is
+ };
+ 
+ }  // namespace quickmenu
+diff --git a/host/recomp_options.cpp b/host/recomp_options.cpp
+index b3dbb37..f4e5a53 100644
+--- a/host/recomp_options.cpp
++++ b/host/recomp_options.cpp
+@@ -67,6 +67,23 @@ void apply_remap(const Section &s) {
+ }  // namespace
+ 
+ bool loaded() { return g_loaded; }
++
++namespace {
++bool g_defer_textures = false;
++}
++void set_defer_textures(bool defer) { g_defer_textures = defer; }
++bool apply_pending() {
++    bool any = false;
++    for (Section &s : g_sections)
++        if (s.pending) {
++            s.pending = false;
++            set_words(s, s.on);
++            apply_remap(s);
++            any = true;
++            std::fprintf(stderr, "[recomp] %s: %s from this area load\n", s.label.c_str(), s.on ? "on" : "off");
++        }
++    return any;
++}
+ std::vector<Section> &sections() { return g_sections; }
+ 
+ bool load(const char *path) {
+@@ -146,10 +163,17 @@ bool toggle(std::size_t index, std::string &note) {
+         return false;
+     }
+     s.on = !s.on;
++    save();
++    if (g_defer_textures && s.name.rfind("Textures:", 0) == 0) {
++        s.pending = !s.pending;   // switched back before the load: nothing waits
++        note = s.label + (s.on ? ": on" : ": off") + (s.pending ? " from the next area load (a door, a map, a loaded save)" : "");
++        std::fprintf(stderr, "[recomp] %s switched %s in the game; %s\n", s.label.c_str(), s.on ? "on" : "off", s.pending ? "waits for the next area load" : "as it was");
++        return true;
++    }
++    s.pending = false;
+     set_words(s, s.on);
+     if (s.aspect169) ps2::g_options.widescreen = s.on;
+     apply_remap(s);
+-    save();
+     note = s.label + (s.on ? ": on" : ": off");
+     std::fprintf(stderr, "[recomp] %s switched %s in the game\n", s.label.c_str(), s.on ? "on" : "off");
+     return true;
+diff --git a/host/recomp_options.hpp b/host/recomp_options.hpp
+index cc2038e..52614eb 100644
+--- a/host/recomp_options.hpp
++++ b/host/recomp_options.hpp
+@@ -38,6 +38,10 @@ struct Section {
+     // voice switch also swaps the sound banks with voices in them: Japanese where ROOT.FAT points, English further on)
+     std::uint32_t remap2_from = 0, remap2_to = 0, remap2_count = 0;
+     bool remap2_when_on = false;
++    // rawdanger-recomp: a texture option switched while an area is loaded waits for the next area load (the game keeps
++    // where each texture goes from the first load: the other version's pictures read into that place garbled the characters)
++    bool pending = false;
++    bool applied_on() const { return pending ? !on : on; }
+ };
+ 
+ bool load(const char *path);                // false when there is no file (then the menu page says so)
+@@ -45,5 +49,9 @@ void apply_startup();                       // the choices of the file, before t
+ std::vector<Section> &sections();
+ bool toggle(std::size_t index, std::string &note);  // live sections: on <-> off now, written back to the file
+ bool loaded();
++// rawdanger-recomp: while set, a switched texture option (a section named "Textures: ...") waits; apply_pending() makes the waiting
++// ones take effect (the window calls it while the game loads an area)
++void set_defer_textures(bool defer);
++bool apply_pending();   // true when one took effect
+ 
+ }  // namespace recomp
+diff --git a/host/window.cpp b/host/window.cpp
+index 12688e5..9168709 100644
+--- a/host/window.cpp
++++ b/host/window.cpp
+@@ -132,7 +132,7 @@ std::atomic<bool> g_fast_forward{false};   // rawdanger-recomp: F6 held
+ void sync_jp_textures() {
+     bool on = false;
+     for (const recomp::Section &sec : recomp::sections())
+-        if (sec.on && sec.name.rfind("Textures: Japanese", 0) == 0) on = true;
++        if (sec.applied_on() && sec.name.rfind("Textures: Japanese", 0) == 0) on = true;
+     if (const char *f = std::getenv("PS2_JP_TEXTURES"); f && *f) on = *f == '1';   // forced (the US build has no such switch)
+     ps2::set_jp_textures(on);
+ }
+@@ -791,6 +791,7 @@ void load_keys() {
+     }
+     ps2::set_bar_opacity(static_cast<unsigned>(std::clamp(g_keys.black_bars, 0, 100)));
+     quickmenu::set_popup_size(g_keys.popup_size);
++    if (g_keys.filter_pass >= 0) ps2::set_game_filter_pass(g_keys.filter_pass);
+     g_master_volume = std::clamp(g_keys.master_volume, 0, 100);
+     lens_rain::set_level(g_keys.lens_rain);
+     if (!g_look_forced && config.look >= 0) g_look = config.look;
+@@ -1391,6 +1392,7 @@ void menu_paint(bool show_again) {
+         v.pause_unfocused = g_keys.pause_unfocused != 0;
+         v.menu_game_runs = g_keys.menu_game_runs != 0;
+         v.popup_size = g_keys.popup_size;
++        v.filter_pass = ps2::game_filter_pass();
+         v.keys_on_screen = g_keys.keys_on_screen != 0;
+         v.game_waits = g_menu_hold.load();
+         v.master_volume = g_master_volume;
+@@ -1460,11 +1462,12 @@ void menu_paint(bool show_again) {
+                 const recomp::Section &sec = recomp::sections()[i];
+                 if (sec.aspect169 && sec.live) continue;  // the widescreen switch lives on Settings > Display (one place only)
+                 if (static_cast<int>(i) == blur_section()) continue;  // and the blur on Settings > Picture
++                if (!sec.live) continue;  // rawdanger-recomp: fixes built in for good (no switch) are not shown (docs/ROADMAP.md lists them)
+                 g_recomp_row_section.push_back(i);
+                 quickmenu::Values::RecompRow row;
+                 row.label = sec.label;
+                 row.live = sec.live;
+-                row.state = !sec.live ? "built in" : sec.on ? "on" : "off";
++                row.state = sec.on ? "<  on  >" : "<  off >";
+                 v.recomp_rows.push_back(row);
+             }
+             if (debug_scenes().set) {
+@@ -1982,6 +1985,30 @@ void set_notice(const std::string &text) {
+ 
+ // the lines of keys.ini for these buttons, written with the keys now in force (comments and every other line stay as they are)
+ // rawdanger-recomp: the game's font shows the first key of Cross, Circle, Square and Triangle in place of their symbols
++// rawdanger-recomp: the window's icon in the taskbar and Alt+Tab: the game's .ico (PS2_WINDOW_ICON, from RawDangerPC.exe), else the
++// icon built into the program (PS2_EXE_ICON at the build: the one Task Manager and Explorer show)
++void set_window_icon() {
++#ifdef _WIN32
++    SDL_SysWMinfo info;
++    SDL_VERSION(&info.version);
++    if (!SDL_GetWindowWMInfo(g_window, &info)) return;
++    const HWND hwnd = info.info.win.window;
++    HICON big = nullptr, small = nullptr;
++    if (const char *path = std::getenv("PS2_WINDOW_ICON"); path && *path) {
++        const int n = MultiByteToWideChar(CP_UTF8, 0, path, -1, nullptr, 0);
++        std::wstring w(static_cast<std::size_t>(n > 0 ? n : 1), L'\0');
++        if (n > 0) MultiByteToWideChar(CP_UTF8, 0, path, -1, w.data(), n);
++        big = static_cast<HICON>(LoadImageW(nullptr, w.c_str(), IMAGE_ICON, GetSystemMetrics(SM_CXICON), GetSystemMetrics(SM_CYICON), LR_LOADFROMFILE));
++        small = static_cast<HICON>(LoadImageW(nullptr, w.c_str(), IMAGE_ICON, GetSystemMetrics(SM_CXSMICON), GetSystemMetrics(SM_CYSMICON), LR_LOADFROMFILE));
++    }
++    if (!big) big = static_cast<HICON>(LoadImageW(GetModuleHandleW(nullptr), MAKEINTRESOURCEW(1), IMAGE_ICON, GetSystemMetrics(SM_CXICON), GetSystemMetrics(SM_CYICON), 0));
++    if (!small) small = static_cast<HICON>(LoadImageW(GetModuleHandleW(nullptr), MAKEINTRESOURCEW(1), IMAGE_ICON, GetSystemMetrics(SM_CXSMICON), GetSystemMetrics(SM_CYSMICON), 0));
++    if (big) SendMessageW(hwnd, WM_SETICON, ICON_BIG, reinterpret_cast<LPARAM>(big));
++    if (small) SendMessageW(hwnd, WM_SETICON, ICON_SMALL, reinterpret_cast<LPARAM>(small));
++    std::fprintf(stderr, "[window] icon: %s\n", big ? "set" : "none (no PS2_WINDOW_ICON and none built in)");
++#endif
++}
++
+ bool g_using_pad = false;   // rawdanger-recomp: the last button pressed was a controller's (the game's texts show its symbols then)
+ void send_key_prompts() {
+     std::string labels[4];
+@@ -2364,6 +2391,12 @@ void menu_command(quickmenu::Command c, int step) {
+         set_notice(v == 0 ? std::string("Master volume: muted") : "Master volume: " + std::to_string(v) + "%");
+         break;
+     }
++    case Command::filter_pass:
++        g_keys.filter_pass = ps2::game_filter_pass() ? 0 : 1;
++        ps2::set_game_filter_pass(g_keys.filter_pass);
++        rewrite_keys_file([](const std::string &t) { return keymap::with_filter_pass(t, g_keys.filter_pass); }, "post processing");
++        set_notice(g_keys.filter_pass ? "Post processing: one GPU pass" : "Post processing: the game's own draws (slow; to compare)");
++        break;
+     case Command::popup_size:
+         g_keys.popup_size = (g_keys.popup_size + (step < 0 ? 3 : 1)) % 4;
+         quickmenu::set_popup_size(g_keys.popup_size);
+@@ -2540,7 +2573,13 @@ bool menu_event(const SDL_Event &e) {
+         }
+         return false;
+     }
+-    const auto side = [](int step) { menu_command(g_menu.side(), step); };
++    const auto side = [](int step) {
++        const quickmenu::Command c = g_menu.side();
++        // the developers' menus are opened with Enter only (left / right on their lines does nothing)
++        const std::size_t row = static_cast<std::size_t>(g_menu.recomp_row());
++        if (c == Command::recomp_toggle && row < g_recomp_row_section.size() && (g_recomp_row_section[row] == kDebugRow || g_recomp_row_section[row] == kMapSelRow)) return;
++        menu_command(c, step);
++    };
+     const auto move = [](int step) {
+         g_menu.move(step);
+         menu_paint();
+@@ -2629,7 +2668,16 @@ bool menu_event(const SDL_Event &e) {
+         return true;
+     case SDL_MOUSEBUTTONDOWN:
+         if (e.button.button == SDL_BUTTON_LEFT && menu_pointer_tab()) menu_paint();
+-        else if (e.button.button == SDL_BUTTON_LEFT && menu_pointer_select()) menu_command(g_menu.choose(), 1);
++        else if (e.button.button == SDL_BUTTON_LEFT && menu_pointer_select()) {
++            // rawdanger-recomp: a click on a line's "<" side steps back, on its ">" side forward; elsewhere the line is chosen
++            int x = 0, y = 0, ww = 1, wh = 1, pw = 0, ph = 0;
++            SDL_GetMouseState(&x, &y);
++            SDL_GetWindowSize(g_window, &ww, &wh);
++            window_pixels(pw, ph);
++            const int step = g_menu.click_step(x * pw / std::max(ww, 1));
++            if (step != 0 && g_menu.side() != Command::none) menu_command(g_menu.side(), step);
++            else menu_command(g_menu.choose(), 1);
++        }
+         else if (e.button.button == SDL_BUTTON_RIGHT) back("the right mouse button");
+         return true;
+     case SDL_MOUSEBUTTONUP: return true;
+@@ -2858,6 +2906,39 @@ void poll() {
+             menu_paint(false);
+         }
+     }
++    // rawdanger-recomp: texture options switched in an area wait for the next area load (PS2_AREA_LOAD="ADDRESS=V1,V2,...": the
++    // word has one of those values while the game loads an area; Raw Danger: the scene word 0x48F488, 0x13 and -1)
++    {
++        static bool parsed = false, set = false, in_area = false;
++        static std::uint32_t address = 0;
++        static std::vector<std::uint32_t> values;
++        if (!parsed) {
++            parsed = true;
++            if (const char *v = std::getenv("PS2_AREA_LOAD"); v && *v) {
++                const std::string t = v;
++                const std::size_t eq = t.find('=');
++                if (eq != std::string::npos) {
++                    address = static_cast<std::uint32_t>(std::strtoul(t.substr(0, eq).c_str(), nullptr, 16));
++                    for (std::size_t at = eq + 1; at < t.size();) {
++                        const std::size_t end = std::min(t.find(',', at), t.size());
++                        values.push_back(static_cast<std::uint32_t>(std::strtoul(t.substr(at, end - at).c_str(), nullptr, 16)));
++                        at = end + 1;
++                    }
++                    set = address != 0 && !values.empty();
++                }
++            }
++        }
++        if (set) {
++            const std::uint32_t word = ps2::ld32(address);
++            const bool loading = std::find(values.begin(), values.end(), word) != values.end();
++            if (g_look_when_set && word == g_look_when_value) in_area = true;
++            if (loading) {
++                in_area = false;
++                if (recomp::apply_pending()) sync_jp_textures();
++            }
++            recomp::set_defer_textures(in_area);
++        }
++    }
+     // rawdanger-recomp: the keys on screen come and go with the setting (at the start, and when keys.ini is read again)
+     if (!g_menu.is_open() && g_note_text.empty() && !g_native_hint && keys_on_screen_now() != g_overlay_on) menu_paint();
+     if (g_menu_redraw) menu_show_again();
+@@ -3436,6 +3517,7 @@ bool open_window(bool fullscreen) {
+         std::fprintf(stderr, "SDL: %s\n", SDL_GetError());
+         return false;
+     }
++    set_window_icon();
+     SDL_ShowWindow(g_window);
+     SDL_RaiseWindow(g_window);
+ #ifdef _WIN32
+diff --git a/runtime/include/ps2/video.hpp b/runtime/include/ps2/video.hpp
+index 884307f..0acc9b8 100644
+--- a/runtime/include/ps2/video.hpp
++++ b/runtime/include/ps2/video.hpp
+@@ -30,7 +30,11 @@ void set_jp_textures(bool on);
+ void set_bar_opacity(unsigned percent);
+ // rawdanger-recomp: note where the game's 2D lies (HUD, texts) so the rain on the lens stays under it (on while drops fall)
+ void set_ui_boxes(bool on);
+-void set_debug_text(bool on);   // rawdanger-recomp: a developers' scene is on screen: its font drawn at its own size (gs.cpp, sjis)
++void set_debug_text(bool on);
++// rawdanger-recomp: Raw Danger's colour filter done in one pass (1, PS2_GAME_FILTER_PASS=1) or drawn the game's way (0, slow); from
++// the next frame
++void set_game_filter_pass(int mode);
++int game_filter_pass();   // rawdanger-recomp: a developers' scene is on screen: its font drawn at its own size (gs.cpp, sjis)
+ // rawdanger-recomp: the keys shown instead of the PlayStation symbols in the game's font (cross, circle, square, triangle; short
+ // names of 1 to 3 letters, "" keeps the symbol); see gpu.cpp, draw_prompt_caps
+ void set_button_prompts(const std::string labels[4]);
+diff --git a/runtime/src/gs/gpu/blit.wgsl b/runtime/src/gs/gpu/blit.wgsl
+index e245c5d..2fc1432 100644
+--- a/runtime/src/gs/gpu/blit.wgsl
++++ b/runtime/src/gs/gpu/blit.wgsl
+@@ -385,36 +385,45 @@ fn drops_over(uv: vec2<f32>, picture: vec3<f32>, on_ui: bool) -> vec3<f32> {
+         let e = lens.drops[i].b;
+         let r = max(d.z, 0.0001);
+         let rel = (uv - d.xy) * vec2<f32>(aspect, 1.0);
+-        // the trail: a thin streak above the drop, wavering a little, fading towards its top
+-        if (e.x > 0.002 && rel.y < 0.0 && -rel.y < e.x) {
+-            let t = -rel.y / e.x;
+-            // e.w: the slant of the drop's path (picture widths across per height down): a trail lies along the way it came
+-            let wave = sin(rel.y * 90.0 + e.z * 40.0) * r * 0.18 + rel.y * e.w * aspect;
+-            let half_w = r * (0.38 - 0.2 * t);
+-            let dx = abs(rel.x - wave) / max(half_w, 0.0001);
+-            if (dx < 1.0) {
+-                let shift = vec2<f32>((rel.x - wave) * 0.6 / aspect, 0.004);
+-                var view = scene(clamp(uv - shift, vec2<f32>(0.0), vec2<f32>(1.0))) * 0.94;
+-                view = view + vec3<f32>(pow(1.0 - dx, 8.0) * 0.12);
+-                c = mix(c, view, d.w * (1.0 - t) * (1.0 - dx * dx) * 0.6);
++        // v0.8.1: water as it looks on a real lens: nearly clear, the picture behind it only bent a little and a touch brighter, a
++        // soft edge, one small bright highlight; no dark ring. The trail: a short wet smear along the way the drop came (e.w: its
++        // slant, picture widths across per height down), the picture in it slightly smeared, fading fast.
++        if (e.x > 0.002 && rel.y < 0.0) {
++            let along = -rel.y;
++            let off = rel.x + rel.y * e.w * aspect;   // across the trail
++            if (along < e.x) {
++                let t = along / e.x;
++                let half_w = r * (0.55 - 0.35 * t);
++                let dx = abs(off) / max(half_w, 0.0001);
++                if (dx < 1.0) {
++                    let bend = vec2<f32>(off * 0.35 / aspect, -0.002);
++                    let smear = (scene(clamp(uv - bend, vec2<f32>(0.0), vec2<f32>(1.0))) +
++                                 scene(clamp(uv - bend + vec2<f32>(0.0, 0.004), vec2<f32>(0.0), vec2<f32>(1.0)))) * 0.5;
++                    let wet = smear * 1.03 + vec3<f32>(0.012);
++                    c = mix(c, wet, d.w * (1.0 - t) * (1.0 - t) * (1.0 - dx * dx) * 0.55);
++                }
+             }
+         }
+-        // the bead: pulled long while it runs, its bottom rounder and heavier than its top
++        // the bead: rounder at its bottom while it runs, pulled along its path
+         var q = rel;
+-        q.y = q.y / select(mix(1.0, e.y, 0.45), e.y, q.y < 0.0);
++        q.y = q.y / select(mix(1.0, e.y, 0.4), e.y, q.y < 0.0);
++        q.x = q.x - q.y * e.w * aspect * 0.5;
+         let dist = length(q) / r;
+         if (dist >= 1.0) { continue; }
+         let normal = q / r;
+-        // through the bead: the picture around the drop, mirrored and drawn in (a water bead is a tiny fish-eye lens)
+-        let through = d.xy - normal * vec2<f32>(r / aspect, r) * 1.7 * (1.0 - 0.35 * dist * dist);
++        let h = sqrt(max(0.0, 1.0 - dist * dist));   // the bead's height: a dome
++        // the view through it: a small upside-down picture of what is around it (a bead is a tiny lens), squeezed at its edge
++        let through = d.xy - normal * vec2<f32>(r / aspect, r) * 2.2 * (1.0 - 0.45 * dist * dist);
+         var view = scene(clamp(through, vec2<f32>(0.0), vec2<f32>(1.0)));
+-        let rim = smoothstep(0.5, 1.0, dist);
+-        view = mix(view * 1.05 + vec3<f32>(0.025), view * 0.45, rim * 0.55);
+-        // a glint where the light from above would catch the bead, and a faint second one under it
+-        let glint = pow(max(dot(normal, vec2<f32>(-0.5, -0.66)), 0.0), 7.0) * (1.0 - rim) * 0.6;
+-        let under = pow(max(dot(normal, vec2<f32>(0.3, 0.95)), 0.0), 10.0) * rim * 0.18;
+-        view = view + vec3<f32>(glint + under);
+-        let alpha = d.w * (1.0 - smoothstep(0.84, 1.0, dist));
++        view = view * (1.05 + 0.08 * h) + vec3<f32>(0.02);
++        // the edge: a little darker where the light leaves the water sideways, a light crescent at its bottom
++        let edge = smoothstep(0.72, 0.97, dist);
++        view = view * (1.0 - 0.3 * edge * (1.0 - 0.6 * max(normal.y, 0.0)));
++        view = view + vec3<f32>(edge * max(normal.y, 0.0) * max(normal.y, 0.0) * 0.12);
++        // one small highlight up and left, from the sky
++        let spec = pow(max(dot(normalize(vec3<f32>(normal, h)), normalize(vec3<f32>(-0.45, -0.6, 0.66))), 0.0), 40.0);
++        view = view + vec3<f32>(spec * 0.45);
++        let alpha = d.w * (1.0 - smoothstep(0.82, 1.0, dist));
+         c = mix(c, view, alpha);
+     }
+     return c;
+diff --git a/runtime/src/gs/gpu/gpu.cpp b/runtime/src/gs/gpu/gpu.cpp
+index 06778f4..dd40f02 100644
+--- a/runtime/src/gs/gpu/gpu.cpp
++++ b/runtime/src/gs/gpu/gpu.cpp
+@@ -4728,7 +4728,7 @@ void local_copy(const State &s) {
+ 
+ // rawdanger-recomp: Raw Danger's colour filter as one pass over the frame (gs.cpp rdfilter: p = frame bp, bw, width, height, depth
+ // bp, depth psm, brightness palette, three weights, the two depth palettes, the four palettes of the writes)
+-void game_filter(const std::uint32_t *p) {
++void game_filter(const std::uint32_t *p, std::uint32_t n) {
+     g_why = kWhyCopy;
+     flush_all();
+     g_why = kWhyFlush;
+@@ -4739,16 +4739,21 @@ void game_filter(const std::uint32_t *p) {
+         hw::live_position(static_cast<std::uint32_t>(g_commands.size()));
+         hw::live_reader(depth.lo, depth.hi);
+         hw::live_reader(frame.lo, frame.hi);
+-        for (int k = 6; k < 16; ++k)
+-            if (k < 7 || k > 9) hw::live_reader(p[k] * 256u, p[k] * 256u + 1024u);
++        // the palettes: brightness (6), depth (11..13), the writes' (18 + 4 * op + 1 when the op reads a palette)
++        hw::live_reader(p[6] * 256u, p[6] * 256u + 1024u);
++        for (std::uint32_t k = 0; k < p[10] && k < 3; ++k) hw::live_reader(p[11 + k] * 256u, p[11 + k] * 256u + 1024u);
++        for (std::uint32_t o = 0; o < p[17] && 18 + 4 * o + 1 < n; ++o)
++            if (((p[18 + 4 * o] >> 1) & 3u) < 2u) hw::live_reader(p[18 + 4 * o + 1] * 256u, p[18 + 4 * o + 1] * 256u + 1024u);
+         hw::live_writer(frame.lo, frame.hi);
+         hw::pal_write(p[0], p[1], 0x00, 0, 0, w - 1, h - 1);
+     }
+     if (hwcache::g_on) hwcache::write_region(p[0], p[1], 0x00, 0, 0, w - 1, h - 1, hwcache::kCopy);
+     mark_rendered(frame);
+     if (g_dec_on) stamp_pages(frame, true);
+-    dispatch_linear(kGameFilter, static_cast<std::uint32_t>(w * h) * g_scale * g_scale,
+-                    push_params({p[0], p[1], p[2], p[3], p[4], p[5], p[6], p[7], p[8], p[9], p[10], p[11], p[12], p[13], p[14], p[15]}));
++    std::array<std::uint32_t, kParamStride / 4> record{};
++    for (std::uint32_t i = 0; i < n && i < record.size(); ++i) record[i] = p[i];
++    g_param_records.push_back(record);
++    dispatch_linear(kGameFilter, static_cast<std::uint32_t>(w * h) * g_scale * g_scale, static_cast<std::uint32_t>(g_param_records.size() - 1));
+ }
+ 
+ void load_clut(std::uint64_t tex0, std::uint64_t texclut) {
+diff --git a/runtime/src/gs/gpu/gpu.hpp b/runtime/src/gs/gpu/gpu.hpp
+index ea4a9d2..3a0e590 100644
+--- a/runtime/src/gs/gpu/gpu.hpp
++++ b/runtime/src/gs/gpu/gpu.hpp
+@@ -31,7 +31,7 @@ void draw(const State &s, const Vertex *v, int count);
+ void image_begin(const State &s);
+ void image_data(const std::uint8_t *data, std::size_t bytes);
+ void local_copy(const State &s);
+-void game_filter(const std::uint32_t *p);   // rawdanger-recomp: the game's colour filter in one pass (gs.cpp rdfilter; 16 words)
++void game_filter(const std::uint32_t *p, std::uint32_t n);   // rawdanger-recomp: the game's colour filter in one pass (gs.cpp rdfilter; n words)
+ void load_clut(std::uint64_t tex0, std::uint64_t texclut);
+ void flush();
+ void texflush();
+diff --git a/runtime/src/gs/gpu/gs.wgsl b/runtime/src/gs/gpu/gs.wgsl
+index 6615c68..008a72d 100644
+--- a/runtime/src/gs/gpu/gs.wgsl
++++ b/runtime/src/gs/gpu/gs.wgsl
+@@ -388,6 +388,22 @@ fn rd_g(v: u32) -> i32 {
+     return i32((v >> 8u) & 255u);
+ }
+ 
++fn rd_blend(abcd: u32, cs: i32, cd: i32, a_s: i32, ad: i32, fix: i32) -> i32 {
++    let ka = abcd & 3u;
++    let kb = (abcd >> 2u) & 3u;
++    let kc = (abcd >> 4u) & 3u;
++    let kd = (abcd >> 6u) & 3u;
++    let a = select(select(0, cd, ka == 1u), cs, ka == 0u);
++    let b = select(select(0, cd, kb == 1u), cs, kb == 0u);
++    let d = select(select(0, cd, kd == 1u), cs, kd == 0u);
++    let c = select(select(fix, ad, kc == 1u), a_s, kc == 0u);
++    return clamp(((a - b) * c >> 7u) + d, 0, 255);
++}
++
++// rawdanger-recomp: the game's colour filter (gs.cpp rdfilter): the steps of its first page, on every pixel but the first page's.
++// prm: 0 frame page, 1 width in pages, 2 3 width height, 4 depth, 5 its format, 6 brightness palette, 7..9 weights (B G R),
++// 10 depth palettes, 11..13 them, 14..16 add (1) or set (0), 17 writes, 18.. 4 words each: alpha-only | source << 1 (0 depth's
++// palette, 1 brightness', 2 a colour), the palette or the colour, the blend (ABCD), FIX
+ @compute @workgroup_size(64)
+ fn game_filter(@builtin(global_invocation_id) gid: vec3<u32>) {
+     let i = gid.x + gid.y * 64u * 1024u;
+@@ -399,6 +415,9 @@ fn game_filter(@builtin(global_invocation_id) gid: vec3<u32>) {
+     let k = i % n;
+     let x = (i / n) % w;
+     let y = (i / n) / w;
++    if (x < 64u && y < 32u) {
++        return;   // the first page: drawn the game's way
++    }
+     let fl = locate(0u, prm(0u), prm(1u), x, y);
+     let c = load_at(fl, k);
+     let z = read_sample(prm(5u), prm(4u), prm(1u), x, y, k);
+@@ -406,19 +425,34 @@ fn game_filter(@builtin(global_invocation_id) gid: vec3<u32>) {
+     l = min(255, l + ((rd_g(rd_entry(prm(6u), (c >> 16u) & 255u)) * i32(prm(7u))) >> 7u));
+     l = min(255, l + ((rd_g(rd_entry(prm(6u), (c >> 8u) & 255u)) * i32(prm(8u))) >> 7u));
+     l = min(255, l + ((rd_g(rd_entry(prm(6u), c & 255u)) * i32(prm(9u))) >> 7u));
+-    let d = u32(min(255, rd_g(rd_entry(prm(10u), (z >> 16u) & 255u)) + rd_g(rd_entry(prm(11u), (z >> 8u) & 255u))));
+-    let a1 = i32(rd_entry(prm(12u), d) >> 24u);
+-    let a2 = rd_entry(prm(14u), d) >> 24u;
+-    let s1 = rd_entry(prm(13u), u32(l));
+-    let s2 = rd_entry(prm(15u), u32(l));
+-    var out = a2 << 24u;
+-    for (var b = 0u; b < 3u; b = b + 1u) {
+-        let xv = i32((c >> (8u * b)) & 255u);
+-        let x1 = clamp(((i32((s1 >> (8u * b)) & 255u) - xv) * a1 >> 7u) + xv, 0, 255);
+-        let x2 = clamp(((i32((s2 >> (8u * b)) & 255u) * i32(a2)) >> 7u) + x1, 0, 255);
+-        out = out | (u32(x2) << (8u * b));
+-    }
+-    store(fl, k, out);
++    var d = 0;
++    for (var j = 0u; j < prm(10u) && j < 3u; j = j + 1u) {
++        let v = rd_g(rd_entry(prm(11u + j), (z >> (16u - 8u * j)) & 255u));
++        d = select(v, min(255, d + v), prm(14u + j) == 1u);
++    }
++    var a = i32(c >> 24u);
++    var ch = array<i32, 3>(i32(c & 255u), i32((c >> 8u) & 255u), i32((c >> 16u) & 255u));
++    for (var o = 0u; o < prm(17u) && o < 6u; o = o + 1u) {
++        let kind = prm(18u + 4u * o);
++        let src = (kind >> 1u) & 3u;
++        var sv = prm(19u + 4u * o);
++        if (src == 0u) {
++            sv = rd_entry(sv, u32(d));
++        } else if (src == 1u) {
++            sv = rd_entry(sv, u32(l));
++        }
++        if ((kind & 1u) != 0u) {
++            a = i32(sv >> 24u);
++            continue;
++        }
++        let abcd = prm(20u + 4u * o);
++        let fix = i32(prm(21u + 4u * o));
++        let a_s = i32(sv >> 24u);
++        for (var b = 0u; b < 3u; b = b + 1u) {
++            ch[b] = rd_blend(abcd, i32((sv >> (8u * b)) & 255u), ch[b], a_s, a, fix);
++        }
++    }
++    store(fl, k, u32(ch[0]) | (u32(ch[1]) << 8u) | (u32(ch[2]) << 16u) | (u32(a) << 24u));
+ }
+ 
+ // The colour palette load `k` of record `r` reads from graphics memory.
+diff --git a/runtime/src/gs/gs.cpp b/runtime/src/gs/gs.cpp
+index ead1e5f..0aa697e 100644
+--- a/runtime/src/gs/gs.cpp
++++ b/runtime/src/gs/gs.cpp
+@@ -1013,13 +1013,31 @@ bool step(State &s, std::uint64_t attr) {
+ // left out, their palettes and weights noted as they pass (the game builds the palettes each frame from its scene presets), and
+ // the formula runs once over the frame at the end of the walk (every sample at any internal resolution).
+ namespace rdfilter {
+-const bool g_on = [] { const char *v = std::getenv("PS2_GAME_FILTER_PASS"); return v && *v == '1'; }();
++// rawdanger-recomp: Raw Danger's colour filter ("Original PS2 Post Processing Filter", docs/GRAPHICS.md) walks the frame one 64 x 32
++// page at a time with a few dozen small draws a page (2,800 a frame). The walk is the same for every page, so the first page is drawn
++// as the game draws it while its steps are written down; when the second page starts and the steps are ones this knows, the rest of
++// the walk is left out and done in one pass over the frame (the CPU or the GPU, gs.wgsl game_filter) with the same arithmetic. A
++// walk with a step this does not know is drawn the game's way to the end (correct, only slower). The maps differ: three or two
++// palettes for the depth; the last writes from palettes or in one flat colour (AREA 01).
++std::atomic<int> g_mode{[] { const char *v = std::getenv("PS2_GAME_FILTER_PASS"); return v && *v == '1' ? 1 : 0; }()};
++bool g_on = true;   // (the walk is looked for always: g_mode says whether it is replaced)
++constexpr int kMaxDepth = 3, kMaxOps = 6;
++struct Op {
++    bool alpha = false;          // writes the alpha only (else the colour only)
++    int src = 0;                 // 0 the depth's palette, 1 the brightness' palette, 2 a flat colour
++    std::uint32_t value = 0;     // the palette (cbp) or the colour (RGBA, red low)
++    std::uint32_t abcd = 0, fix = 0;
++};
+ struct Walk {
+-    bool active = false;
+-    std::uint32_t zbp = 0, zpsm = 0x30, luma = 0, dset = 0, dadd = 0, fin[4] = {}, first_page = 0, pages = 0;
++    bool active = false, decided = false, ok = false, replace = false;
++    std::uint32_t zbp = 0, zpsm = 0x30, buf = 0, acc = 0, dbuf = 0, lbuf = 0, luma = 0, first_page = 0, pages = 0, copies = 0;
+     std::uint32_t weights[3] = {};
+-    int nweights = 0, nfin = 0;
+-    std::uint32_t alpha_writes = 0;
++    int nweights = 0, ndepth = 0, nops = 0;
++    std::uint32_t depth[kMaxDepth] = {};
++    bool depth_add[kMaxDepth] = {};
++    Op ops[kMaxOps];
++    bool unknown = false;
++    const char *why = "";
+ } g_walk;
+ std::uint32_t g_last_bp[8] = {}, g_last_bw[8] = {};   // the widths of the last few buffers drawn into (the frame's is not in the walk)
+ int g_last_n = 0;
+@@ -1029,60 +1047,95 @@ std::uint32_t entry(std::uint32_t cbp, std::uint32_t i) {   // palette entry i o
+     return read_pixel(0x00, cbp, 1, j % 16u, j / 16u);
+ }
+ 
+-// the formula on one pixel (shared with the GPU pass in gs.wgsl, game_filter)
+-std::uint32_t apply(const Walk &w, std::uint32_t c, std::uint32_t z, const std::uint32_t *luma, const std::uint32_t *dset, const std::uint32_t *dadd,
+-                    const std::uint32_t *const *fin) {
++// one blend of the GS on one channel: ((A - B) * C >> 7) + D, A B D from Cs / Cd / 0, C from As / Ad / FIX
++int blend(std::uint32_t abcd, int cs, int cd, int as, int ad, int fix) {
++    const auto pick = [&](std::uint32_t k) { return k == 0 ? cs : k == 1 ? cd : 0; };
++    const int a = pick(abcd & 3u), b = pick((abcd >> 2) & 3u), d = pick((abcd >> 6) & 3u);
++    const std::uint32_t ck = (abcd >> 4) & 3u;
++    const int c = ck == 0 ? as : ck == 1 ? ad : fix;
++    return std::clamp(((a - b) * c >> 7) + d, 0, 255);
++}
++
++// the steps on one pixel (the same in gs.wgsl, game_filter)
++std::uint32_t apply(const Walk &w, std::uint32_t c, std::uint32_t z, const std::uint32_t *luma, const std::uint32_t (*depth)[256],
++                    const std::uint32_t (*pal)[256]) {
+     const auto g = [](std::uint32_t v) { return static_cast<int>((v >> 8) & 255u); };
+-    const int ch[3] = {static_cast<int>((c >> 16) & 255u), static_cast<int>((c >> 8) & 255u), static_cast<int>(c & 255u)};   // B, G, R
+     int L = 0;
+-    for (int k = 0; k < 3; ++k) L = std::min(255, L + ((g(luma[ch[k]]) * static_cast<int>(w.weights[k])) >> 7));
+-    const int d = std::min(255, g(dset[(z >> 16) & 255u]) + g(dadd[(z >> 8) & 255u]));
+-    const int a1 = static_cast<int>(fin[0][d] >> 24), a2 = static_cast<int>(fin[2][d] >> 24);
+-    std::uint32_t out = static_cast<std::uint32_t>(a2) << 24;
+-    for (int k = 0; k < 3; ++k) {
+-        const int x = static_cast<int>((c >> (8 * k)) & 255u);
+-        const int s1 = static_cast<int>((fin[1][L] >> (8 * k)) & 255u), s2 = static_cast<int>((fin[3][L] >> (8 * k)) & 255u);
+-        const int x1 = std::clamp(((s1 - x) * a1 >> 7) + x, 0, 255);
+-        const int x2 = std::clamp(((s2 * a2) >> 7) + x1, 0, 255);
+-        out |= static_cast<std::uint32_t>(x2) << (8 * k);
++    for (int k = 0; k < 3; ++k) L = std::min(255, L + ((g(luma[(c >> (8 * (2 - k))) & 255u]) * static_cast<int>(w.weights[k])) >> 7));
++    int d = 0;
++    for (int k = 0; k < w.ndepth; ++k) {
++        const int v = g(depth[k][(z >> (16 - 8 * k)) & 255u]);
++        d = w.depth_add[k] ? std::min(255, d + v) : v;
++    }
++    int a = static_cast<int>(c >> 24);
++    int ch[3] = {static_cast<int>(c & 255u), static_cast<int>((c >> 8) & 255u), static_cast<int>((c >> 16) & 255u)};
++    for (int o = 0; o < w.nops; ++o) {
++        const Op &op = w.ops[o];
++        const std::uint32_t sv = op.src == 0 ? pal[o][d] : op.src == 1 ? pal[o][L] : op.value;
++        if (op.alpha) { a = static_cast<int>(sv >> 24); continue; }
++        const int as = static_cast<int>(sv >> 24);
++        for (int k = 0; k < 3; ++k) ch[k] = blend(op.abcd, static_cast<int>((sv >> (8 * k)) & 255u), ch[k], as, a, static_cast<int>(op.fix));
+     }
+-    return out;
++    return static_cast<std::uint32_t>(ch[0]) | static_cast<std::uint32_t>(ch[1]) << 8 | static_cast<std::uint32_t>(ch[2]) << 16 | static_cast<std::uint32_t>(a) << 24;
+ }
+ 
+ void finish() {
+     Walk &w = g_walk;
+     if (!w.active) return;
+     w.active = false;
++    if (!w.replace) return;   // drawn the game's way
+     std::uint32_t bw = 0;
+     for (int i = 0; i < std::min(g_last_n, 8); ++i)
+         if (g_last_bp[i] == w.first_page) bw = g_last_bw[i];
+     static int told = 0;
+-    if (!bw || !w.pages || w.pages % bw || w.nweights != 3 || w.nfin != 4 || !w.luma || !w.dset || !w.dadd) {
+-        if (told++ < 3) std::fprintf(stderr, "[gs] the game's colour filter: an unknown walk (%u pages, width %u, %d weights, %d writes), left out\n", w.pages, bw, w.nweights, w.nfin);
++    if (!bw || !w.pages || w.pages % bw) {
++        if (told++ < 3) std::fprintf(stderr, "[gs] the game's colour filter: %u pages of a frame %u pages wide, left as drawn\n", w.pages, bw);
+         return;
+     }
+     const std::uint32_t width = bw * 64, height = w.pages / bw * 32;
+-    if (told++ == 0) std::fprintf(stderr, "[gs] the game's colour filter: one pass over %ux%u (frame %X, depth %X)\n", width, height, w.first_page, w.zbp);
++    if (told++ == 0 || std::getenv("PS2_FILTER_LOG"))
++        std::fprintf(stderr, "[gs] the game's colour filter: one pass over %ux%u (frame %X, depth %X, %d depth palettes, %d writes)\n", width, height,
++                     w.first_page, w.zbp, w.ndepth, w.nops);
+     if (cpu_raster()) {
+-        std::uint32_t luma[256], dset[256], dadd[256], f[4][256];
++        std::uint32_t luma[256], depth[kMaxDepth][256], pal[kMaxOps][256];
+         for (std::uint32_t i = 0; i < 256; ++i) {
+-            luma[i] = entry(w.luma, i), dset[i] = entry(w.dset, i), dadd[i] = entry(w.dadd, i);
+-            for (int k = 0; k < 4; ++k) f[k][i] = entry(w.fin[k], i);
++            luma[i] = entry(w.luma, i);
++            for (int k = 0; k < w.ndepth; ++k) depth[k][i] = entry(w.depth[k], i);
++            for (int o = 0; o < w.nops; ++o) pal[o][i] = w.ops[o].src < 2 ? entry(w.ops[o].value, i) : 0;
+         }
+-        const std::uint32_t *fin[4] = {f[0], f[1], f[2], f[3]};
+         for (std::uint32_t y = 0; y < height; ++y)
+             for (std::uint32_t x = 0; x < width; ++x)
+-                write_pixel(0x00, w.first_page, bw, x, y, apply(w, read_pixel(0x00, w.first_page, bw, x, y), read_pixel(w.zpsm, w.zbp, bw, x, y), luma, dset, dadd, fin));
++                if (x >= 64 || y >= 32)   // the first page was drawn the game's way
++                    write_pixel(0x00, w.first_page, bw, x, y, apply(w, read_pixel(0x00, w.first_page, bw, x, y), read_pixel(w.zpsm, w.zbp, bw, x, y), luma, depth, pal));
+     }
+ #ifdef PS2_GPU
+     if (gpu_on()) {
+-        const std::uint32_t p[16] = {w.first_page, bw, width, height, w.zbp, w.zpsm, w.luma, w.weights[0], w.weights[1], w.weights[2], w.dset, w.dadd,
+-                                     w.fin[0], w.fin[1], w.fin[2], w.fin[3]};
+-        gpu::game_filter(p);
++        std::vector<std::uint32_t> p = {w.first_page, bw, width, height, w.zbp, w.zpsm, w.luma, w.weights[0], w.weights[1], w.weights[2],
++                                        static_cast<std::uint32_t>(w.ndepth)};
++        for (int k = 0; k < kMaxDepth; ++k) p.push_back(k < w.ndepth ? w.depth[k] : 0);
++        for (int k = 0; k < kMaxDepth; ++k) p.push_back(k < w.ndepth && w.depth_add[k] ? 1u : 0u);
++        p.push_back(static_cast<std::uint32_t>(w.nops));
++        for (int o = 0; o < kMaxOps; ++o) {
++            const Op &op = w.ops[o];
++            p.push_back(o < w.nops ? (op.alpha ? 1u : 0u) | static_cast<std::uint32_t>(op.src) << 1 : 0u);
++            p.push_back(op.value), p.push_back(op.abcd), p.push_back(op.fix);
++        }
++        gpu::game_filter(p.data(), static_cast<std::uint32_t>(p.size()));
+     }
+ #endif
+ }
+ 
++// the steps of the first page, checked when the second one starts
++void decide(Walk &w) {
++    w.decided = true;
++    if (w.unknown) w.ok = false;
++    else if (w.ndepth < 1 || w.nweights != 3 || !w.luma || w.nops < 1 || !w.first_page) w.ok = false, w.why = "not all of the steps were seen";
++    else w.ok = true;
++    w.replace = w.ok && g_mode.load(std::memory_order_relaxed) == 1;
++    static int told = 0;
++    if (!w.ok && told++ < 3) std::fprintf(stderr, "[gs] the game's colour filter: steps this does not know (%s), drawn the game's way\n", w.why);
++}
++
+ // false: a draw of the walk, left out
+ bool step(const State &s, std::uint64_t attr) {
+     const Context &c = s.ctx[(attr >> 9) & 1u];
+@@ -1090,7 +1143,7 @@ bool step(const State &s, std::uint64_t attr) {
+     const std::uint32_t fpsm = static_cast<std::uint32_t>(c.frame >> 24) & 0x3Fu, fbmsk = static_cast<std::uint32_t>(c.frame >> 32);
+     const std::uint32_t tbp = static_cast<std::uint32_t>(c.tex0) & 0x3FFFu, tbw = static_cast<std::uint32_t>(c.tex0 >> 14) & 0x3Fu;
+     const std::uint32_t tpsm = static_cast<std::uint32_t>(c.tex0 >> 20) & 0x3Fu, cbp = static_cast<std::uint32_t>(c.tex0 >> 37) & 0x3FFFu;
+-    const std::uint32_t fix = static_cast<std::uint32_t>(c.alpha >> 32) & 0xFFu, dmode = static_cast<std::uint32_t>(c.alpha >> 6) & 3u;
++    const std::uint32_t fix = static_cast<std::uint32_t>(c.alpha >> 32) & 0xFFu, abcd = static_cast<std::uint32_t>(c.alpha) & 0xFFu, dmode = (abcd >> 6) & 3u;
+     const bool textured = (attr & 0x10u) != 0, sprite = (attr & 7u) == 6;
+     Walk &w = g_walk;
+     if (!w.active) {
+@@ -1104,24 +1157,56 @@ bool step(const State &s, std::uint64_t attr) {
+         const std::uint32_t zbp = static_cast<std::uint32_t>(c.zbuf & 0x1FFu) * 32u;
+         if (!(sprite && textured && fbw == 1 && fpsm == 0x0A && tpsm == 0x0A && tbw == 1 && tbp == zbp)) return true;
+         w = Walk{};   // the walk starts: the first page of the depth copied as 16-bit into a 64-wide buffer
+-        w.active = true, w.zbp = zbp, w.zpsm = 0x30u | ((static_cast<std::uint32_t>(c.zbuf >> 24)) & 0xFu);
++        w.active = true, w.zbp = zbp, w.zpsm = 0x30u | ((static_cast<std::uint32_t>(c.zbuf >> 24)) & 0xFu), w.buf = fbp, w.pages = 1, w.copies = 1;
++        return true;
+     }
+     if (fbw != 1) {   // the walk is over
+         finish();
+         return step(s, attr);
+     }
+-    if (textured && tpsm == 0x13) {   // a byte read through a palette
+-        if (fix == 0x80) (dmode == 2 ? w.dset : w.dadd) = cbp;
+-        else {
++    // a page starts: its depth copied into the walk's buffer
++    if (sprite && textured && fbp == w.buf && tpsm == 0x0A && tbp == w.zbp + 32u * w.pages && (w.decided || w.nops > 0)) {
++        if (!w.decided) decide(w);
++        ++w.pages;
++        return !w.replace;
++    }
++    if (w.decided) return !w.replace;
++    // the first page: written down, and drawn
++    const auto unknown = [&](const char *why) { if (!w.unknown) w.unknown = true, w.why = why; };
++    if (textured && tpsm == 0x13) {   // a byte read through a palette into the accumulator
++        w.acc = fbp;
++        if (fix == 0x80 && w.nweights == 0) {   // the depth: the first palette sets, the next ones add
++            int k = 0;
++            while (k < w.ndepth && w.depth[k] != cbp) ++k;
++            if (k == w.ndepth) {
++                if (w.ndepth == kMaxDepth) unknown("more than three depth palettes");
++                else w.depth[w.ndepth] = cbp, w.depth_add[w.ndepth] = dmode == 1, ++w.ndepth;
++            }
++        } else {
+             w.luma = cbp;
+             if ((w.nweights == 0 || w.weights[w.nweights - 1] != fix) && w.nweights < 3) w.weights[w.nweights++] = fix;
+         }
+-    } else if (textured && tpsm == 0x1B && (fbmsk == 0x00FFFFFFu || fbmsk == 0xFF000000u)) {   // the four writes back into the frame's page
+-        if (w.nfin == 0) w.first_page = fbp;
+-        if (w.nfin < 4) w.fin[w.nfin++] = cbp;
+-        if (fbmsk == 0x00FFFFFFu) ++w.alpha_writes, w.pages = w.alpha_writes / 2;   // two alpha writes a page
++    } else if (textured && tpsm == 0x0A && tbp == w.acc && w.acc) {   // the accumulator copied out: first the depth's result, then the brightness'
++        if (!w.dbuf) w.dbuf = fbp;
++        else if (!w.lbuf && fbp != w.dbuf) w.lbuf = fbp;
++    } else if (fbmsk == 0x00FFFFFFu || fbmsk == 0xFF000000u) {   // a write into the frame's page
++        if (fbp != w.buf && fbp != w.acc && fbp != w.dbuf && fbp != w.lbuf) {
++            if (!w.first_page) w.first_page = fbp;
++            if (w.nops == kMaxOps) unknown("more than six writes");
++            else {
++                Op &op = w.ops[w.nops++];
++                op.alpha = fbmsk == 0x00FFFFFFu, op.abcd = abcd, op.fix = fix;
++                if (textured && tpsm == 0x1B && tbp == w.dbuf) op.src = 0, op.value = cbp;
++                else if (textured && tpsm == 0x1B && tbp == w.lbuf) op.src = 1, op.value = cbp;
++                else if (!textured) op.src = 2, op.value = static_cast<std::uint32_t>(s.queue[1].r) | static_cast<std::uint32_t>(s.queue[1].g) << 8 |
++                                                         static_cast<std::uint32_t>(s.queue[1].b) << 16 | static_cast<std::uint32_t>(s.queue[1].a) << 24;
++                else unknown("a write from another picture");
++                if (!op.alpha && ((abcd & 3u) == 3u || ((abcd >> 2) & 3u) == 3u || ((abcd >> 6) & 3u) == 3u)) unknown("a blend this does not know");
++                if (op.alpha && !textured) unknown("a flat alpha");
++            }
++        }
+     }
+-    return false;
++    return true;
+ }
+ }  // namespace rdfilter
+ 
+@@ -1152,7 +1237,7 @@ bool step(const State &s, std::uint64_t attr) {
+         if (!(s.prmodecont & 1u)) attr = (s.prim & 7u) | (s.prmode & ~7ull);
+         draw = sjis::step(s, attr);
+     }
+-    if (draw && rdfilter::g_on) [[unlikely]] {
++    if (draw && rdfilter::g_on && rdfilter::g_mode.load(std::memory_order_relaxed) >= 0) [[unlikely]] {
+         std::uint64_t attr = s.prim;
+         if (!(s.prmodecont & 1u)) attr = (s.prim & 7u) | (s.prmode & ~7ull);
+         draw = rdfilter::step(s, attr);
+@@ -2424,6 +2509,8 @@ void state(ps2::state::Stream &s) {
+ 
+ namespace ps2 {
+ void set_debug_text(bool on) { ps2::gs::sjis::g_debug_text.store(on, std::memory_order_relaxed); }
++void set_game_filter_pass(int mode) { ps2::gs::rdfilter::g_mode.store(mode ? 1 : 0, std::memory_order_relaxed); }
++int game_filter_pass() { return ps2::gs::rdfilter::g_mode.load(std::memory_order_relaxed); }
+ void set_bar_opacity(unsigned percent) { ps2::gs::g_bar_opacity.store(static_cast<int>(std::min(percent, 100u)), std::memory_order_relaxed); }
+ void set_ui_boxes(bool on) { ps2::gs::ui::g_on.store(on, std::memory_order_relaxed); }
+ }
+diff --git a/scripts/port.sh b/scripts/port.sh
+index 39b9063..c0c66c9 100755
+--- a/scripts/port.sh
++++ b/scripts/port.sh
+@@ -217,7 +217,7 @@ build_native() {
+   shared_runtime
+   config="${cxx_flags[*]} ${runtime_lib:-own runtime}"
+   if [ ! -f "$native/build.ninja" ] || [ "$(cat "$native/.port-config" 2> /dev/null)" != "$config" ]; then
+-    cmake -S "$ROOT" -B "$native" -G Ninja -DCMAKE_BUILD_TYPE=$build_type "${cxx_flags[@]}" -DPS2_GENERATED="$generated" -DPS2_RUNTIME_LIB="$runtime_lib" > /dev/null
++    cmake -S "$ROOT" -B "$native" -G Ninja -DCMAKE_BUILD_TYPE=$build_type "${cxx_flags[@]}" -DPS2_GENERATED="$generated" -DPS2_RUNTIME_LIB="$runtime_lib" -DPS2_EXE_ICON="${PS2_EXE_ICON:-}" > /dev/null
+     echo "$config" > "$native/.port-config"
+   fi
+   # a unit that crashes the compiler is built again a step lower (scripts/build_units.sh); a real error stops here as before
+-- 
+2.43.0
+

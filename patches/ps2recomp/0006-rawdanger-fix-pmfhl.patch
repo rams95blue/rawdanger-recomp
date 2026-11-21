@@ -1,0 +1,107 @@
+Fix PMFHL.{LW,UW,SLW,LH,SH}: interleave the 32-bit words of HI/LO (and HI1/LO1)
+as the EE does, instead of copying whole 64-bit lanes. With the old macros
+"multu; pmfhl.lw" dropped the high word of every 64-bit product, so libgcc
+soft-float (_fpmul_parts) normalised a zero mantissa forever.
+
+diff --git a/ps2xRuntime/include/ps2_runtime_macros.h b/ps2xRuntime/include/ps2_runtime_macros.h
+index 0485d50..869b871 100644
+--- a/ps2xRuntime/include/ps2_runtime_macros.h
++++ b/ps2xRuntime/include/ps2_runtime_macros.h
+@@ -821,16 +821,90 @@ inline __m128i _mm_custom_srav_epi32(__m128i a, __m128i count)
+ }
+ 
+ // PMFHL function implementations
+-inline __m128i ps2_u64_to_epi64_pair(uint64_t value)
++// PMFHL: HI/LO are 128 bits on the EE. Lane 0 (bits 63:0) is ctx->hi / ctx->lo,
++// lane 1 (bits 127:64) is ctx->hi1 / ctx->lo1 (the MULT1/DIV1 pipeline).
++// Semantics follow the EE Core manual / PCSX2's interpreter: PMFHL.LW gives
++// {LO.w0, HI.w0, LO.w2, HI.w2}, so "multu; pmfhl.lw" yields the full 64-bit
++// product that GCC's soft-float (_fpmul_parts, __muldi3...) relies on.
++// The generated code always calls these as PS2_PMFHL_xx(ctx->hi, ctx->lo) with
++// the guest context named ctx in scope; lane 1 is read from ctx->hi1 / ctx->lo1.
++inline uint32_t ps2_hl_w(uint64_t lane0, uint64_t lane1, int word)
+ {
+-    return _mm_set1_epi64x(static_cast<long long>(value));
++    const uint64_t lane = (word & 2) ? lane1 : lane0;
++    return static_cast<uint32_t>((word & 1) ? (lane >> 32) : lane);
+ }
+ 
+-#define PS2_PMFHL_LW(hi, lo) _mm_unpacklo_epi64(ps2_u64_to_epi64_pair(lo), ps2_u64_to_epi64_pair(hi))
+-#define PS2_PMFHL_UW(hi, lo) _mm_unpackhi_epi64(ps2_u64_to_epi64_pair(lo), ps2_u64_to_epi64_pair(hi))
+-#define PS2_PMFHL_SLW(hi, lo) _mm_packs_epi32(ps2_u64_to_epi64_pair(lo), ps2_u64_to_epi64_pair(hi))
+-#define PS2_PMFHL_LH(hi, lo) _mm_shuffle_epi32(_mm_packs_epi32(ps2_u64_to_epi64_pair(lo), ps2_u64_to_epi64_pair(hi)), _MM_SHUFFLE(3, 1, 2, 0))
+-#define PS2_PMFHL_SH(hi, lo) _mm_shufflehi_epi16(_mm_shufflelo_epi16(_mm_packs_epi32(ps2_u64_to_epi64_pair(lo), ps2_u64_to_epi64_pair(hi)), _MM_SHUFFLE(3, 1, 2, 0)), _MM_SHUFFLE(3, 1, 2, 0))
++inline int64_t ps2_pmfhl_clamp32(uint32_t hiWord, uint32_t loWord)
++{
++    const int64_t v = static_cast<int64_t>((static_cast<uint64_t>(hiWord) << 32) | loWord);
++    if (v >= 0x7FFFFFFFLL)
++        return 0x7FFFFFFFLL;
++    if (v <= -0x80000000LL)
++        return -0x80000000LL;
++    return static_cast<int32_t>(loWord);
++}
++
++inline uint16_t ps2_pmfhl_clamp16(uint32_t word)
++{
++    const int32_t v = static_cast<int32_t>(word);
++    return static_cast<uint16_t>(v > 0x7FFF ? 0x7FFF : (v < -0x8000 ? -0x8000 : v));
++}
++
++inline __m128i ps2_pmfhl_lw(uint64_t hi, uint64_t lo, uint64_t hi1, uint64_t lo1)
++{
++    return _mm_set_epi32(static_cast<int>(ps2_hl_w(hi, hi1, 2)), static_cast<int>(ps2_hl_w(lo, lo1, 2)),
++                         static_cast<int>(ps2_hl_w(hi, hi1, 0)), static_cast<int>(ps2_hl_w(lo, lo1, 0)));
++}
++
++inline __m128i ps2_pmfhl_uw(uint64_t hi, uint64_t lo, uint64_t hi1, uint64_t lo1)
++{
++    return _mm_set_epi32(static_cast<int>(ps2_hl_w(hi, hi1, 3)), static_cast<int>(ps2_hl_w(lo, lo1, 3)),
++                         static_cast<int>(ps2_hl_w(hi, hi1, 1)), static_cast<int>(ps2_hl_w(lo, lo1, 1)));
++}
++
++inline __m128i ps2_pmfhl_slw(uint64_t hi, uint64_t lo, uint64_t hi1, uint64_t lo1)
++{
++    return _mm_set_epi64x(ps2_pmfhl_clamp32(ps2_hl_w(hi, hi1, 2), ps2_hl_w(lo, lo1, 2)),
++                          ps2_pmfhl_clamp32(ps2_hl_w(hi, hi1, 0), ps2_hl_w(lo, lo1, 0)));
++}
++
++inline __m128i ps2_pmfhl_lh(uint64_t hi, uint64_t lo, uint64_t hi1, uint64_t lo1)
++{
++    uint16_t h[8];
++    for (int lane = 0; lane < 2; ++lane)
++    {
++        const uint32_t l0 = ps2_hl_w(lo, lo1, lane * 2), l1 = ps2_hl_w(lo, lo1, lane * 2 + 1);
++        const uint32_t h0 = ps2_hl_w(hi, hi1, lane * 2), h1 = ps2_hl_w(hi, hi1, lane * 2 + 1);
++        h[lane * 4 + 0] = static_cast<uint16_t>(l0);
++        h[lane * 4 + 1] = static_cast<uint16_t>(l1);
++        h[lane * 4 + 2] = static_cast<uint16_t>(h0);
++        h[lane * 4 + 3] = static_cast<uint16_t>(h1);
++    }
++    __m128i r;
++    std::memcpy(&r, h, sizeof(r));
++    return r;
++}
++
++inline __m128i ps2_pmfhl_sh(uint64_t hi, uint64_t lo, uint64_t hi1, uint64_t lo1)
++{
++    uint16_t h[8];
++    for (int lane = 0; lane < 2; ++lane)
++    {
++        h[lane * 4 + 0] = ps2_pmfhl_clamp16(ps2_hl_w(lo, lo1, lane * 2));
++        h[lane * 4 + 1] = ps2_pmfhl_clamp16(ps2_hl_w(lo, lo1, lane * 2 + 1));
++        h[lane * 4 + 2] = ps2_pmfhl_clamp16(ps2_hl_w(hi, hi1, lane * 2));
++        h[lane * 4 + 3] = ps2_pmfhl_clamp16(ps2_hl_w(hi, hi1, lane * 2 + 1));
++    }
++    __m128i r;
++    std::memcpy(&r, h, sizeof(r));
++    return r;
++}
++
++#define PS2_PMFHL_LW(hi, lo) ps2_pmfhl_lw((hi), (lo), (ctx)->hi1, (ctx)->lo1)
++#define PS2_PMFHL_UW(hi, lo) ps2_pmfhl_uw((hi), (lo), (ctx)->hi1, (ctx)->lo1)
++#define PS2_PMFHL_SLW(hi, lo) ps2_pmfhl_slw((hi), (lo), (ctx)->hi1, (ctx)->lo1)
++#define PS2_PMFHL_LH(hi, lo) ps2_pmfhl_lh((hi), (lo), (ctx)->hi1, (ctx)->lo1)
++#define PS2_PMFHL_SH(hi, lo) ps2_pmfhl_sh((hi), (lo), (ctx)->hi1, (ctx)->lo1)
+ 
+ // FPU (COP1) operations
+ #define FPU_SET_ACC(ctx, res) (ctx->f_acc = res)

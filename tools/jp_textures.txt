@@ -1,0 +1,191 @@
+# rawdanger-recomp: the textures the US release changed, for the Enhanced Edition's Japanese look options (rd_hybrid.py
+# --jp-textures faces,signs). Name in ROOT.FAT, then the group:
+#   faces  the characters as the Japanese release draws them (black hair, darker eyes and skin, the original clothes colours)
+#   signs  writing in the world in Japanese: shop signs, packets, keys, papers, the game-over screen
+# Made by comparing both discs (same name, other bytes); 151 textures. Other files that differ (maps, models, overlays) are
+# not swapped: they go with each release's own program code.
+#   logos  the Japanese title logo (絶体絶命都市2) where the US one says RAW DANGER: at the start and behind the title menu
+#          (BOOT.DAT picture 34, TITLE.DAT picture 8; the title menu's words stay English)
+#   movies the Japanese opening film (Japanese logo, captions and voices, the original hair) and the other film that differs
+# A fourth column "tims=N,..." takes only those pictures from the Japanese file and keeps the rest of the US one.
+# A third column: a texture only the US disc has, a copy of a redrawn one; its Japanese version is that one's. The US program
+# draws Joshua (the player) from TEX/22103 and TEX/22041, copies of TEX/10033 and TEX/10092 (found by matching the textures
+# drawn in the banquet hall to the disc).
+TEX/22103.TM2	faces	TEX/10033.TM2
+TEX/22041.TM2	faces	TEX/10092.TM2
+# more US-only player and cast pictures, paired with the Japanese ones by the US program's character texture table (the
+# same entries in SLPS-25606's table; TEX/22001 checked by eye: Joshua's face, blond in the US release)
+TEX/22001.TM2	faces	TEX/10004.TM2
+TEX/22004.TM2	faces	TEX/11105.TM2
+TEX/22007.TM2	faces	TEX/10052.TM2
+TEX/22010.TM2	faces	TEX/10018.TM2
+TEX/22016.TM2	faces	TEX/10053.TM2
+TEX/22019.TM2	faces	TEX/10039.TM2
+TEX/22022.TM2	faces	TEX/10088.TM2
+TEX/22028.TM2	faces	TEX/11232.TM2
+TEX/22031.TM2	faces	TEX/11231.TM2
+TEX/22038.TM2	faces	TEX/11202.TM2
+TEX/22044.TM2	faces	TEX/10091.TM2
+TEX/22100.TM2	faces	TEX/11226.TM2
+TEX/22110.TM2	faces	TEX/10017.TM2
+TEX/22111.TM2	faces	TEX/10020.TM2
+TEX/22115.TM2	faces	TEX/10095.TM2
+TEX/22118.TM2	faces	TEX/11205.TM2
+TEX/22124.TM2	faces	TEX/10081.TM2
+TEX/22127.TM2	faces	TEX/11137.TM2
+TEX/2368.TM2	signs
+TEX/10007.TM2	faces
+TEX/10010.TM2	faces
+TEX/10018.TM2	faces
+TEX/10021.TM2	faces
+TEX/10033.TM2	faces
+TEX/10054.TM2	faces
+TEX/10057.TM2	faces
+TEX/10058.TM2	faces
+TEX/10061.TM2	faces
+TEX/10062.TM2	faces
+TEX/10070.TM2	faces
+TEX/10073.TM2	faces
+TEX/10075.TM2	faces
+TEX/10079.TM2	faces
+TEX/10081.TM2	faces
+TEX/10082.TM2	faces
+TEX/10084.TM2	faces
+TEX/10085.TM2	faces
+TEX/10086.TM2	faces
+TEX/10090.TM2	faces
+TEX/10092.TM2	faces
+TEX/10093.TM2	faces
+TEX/10099.TM2	faces
+TEX/10100.TM2	faces
+TEX/10106.TM2	faces
+TEX/11105.TM2	faces
+TEX/11151.TM2	faces
+TEX/11152.TM2	faces
+TEX/11153.TM2	faces
+TEX/11162.TM2	faces
+TEX/11163.TM2	faces
+TEX/11175.TM2	faces
+TEX/11183.TM2	faces
+TEX/11184.TM2	faces
+TEX/11188.TM2	faces
+TEX/11191.TM2	faces
+TEX/11193.TM2	faces
+TEX/11195.TM2	faces
+TEX/11198.TM2	faces
+TEX/11200.TM2	faces
+TEX/11209.TM2	faces
+TEX/11212.TM2	faces
+TEX/11213.TM2	faces
+TEX/11216.TM2	faces
+TEX/11221.TM2	faces
+TEX/11227.TM2	faces
+TEX/11229.TM2	faces
+TEX/11230.TM2	faces
+TEX/11237.TM2	faces
+TEX/11239.TM2	faces
+TEX/11242.TM2	faces
+TEX/11249.TM2	faces
+TEX/11250.TM2	faces
+TEX/11251.TM2	faces
+TEX/11474.TM2	faces
+TEX/11475.TM2	faces
+TEX/11501.TM2	faces
+TEX/11505.TM2	faces
+TEX/11506.TM2	faces
+TEX/11508.TM2	faces
+TEX/11521.TM2	faces
+TEX/11522.TM2	faces
+TEX/11523.TM2	faces
+TEX/11525.TM2	faces
+TEX/11526.TM2	faces
+TEX/11527.TM2	faces
+TEX/11528.TM2	faces
+TEX/11529.TM2	faces
+TEX/11533.TM2	faces
+TEX/11601.TM2	signs
+TEX/11603.TM2	signs
+TEX/11606.TM2	signs
+TEX/11648.TM2	signs
+TEX/11654.TM2	signs
+TEX/11655.TM2	signs
+TEX/11657.TM2	signs
+TEX/11658.TM2	signs
+TEX/11659.TM2	signs
+TEX/11670.TM2	signs
+TEX/11672.TM2	signs
+TEX/11676.TM2	signs
+TEX/11678.TM2	signs
+TEX/11686.TM2	faces
+TEX/11689.TM2	signs
+TEX/11694.TM2	signs
+TEX/11715.TM2	faces
+TEX/11716.TM2	faces
+TEX/11718.TM2	faces
+TEX/11719.TM2	signs
+TEX/11731.TM2	signs
+TEX/11751.TM2	signs
+TEX/11752.TM2	signs
+TEX/11753.TM2	signs
+TEX/11754.TM2	signs
+TEX/11755.TM2	signs
+TEX/11756.TM2	signs
+TEX/11757.TM2	signs
+TEX/11758.TM2	signs
+TEX/11759.TM2	signs
+TEX/11760.TM2	signs
+TEX/11767.TM2	signs
+TEX/11796.TM2	signs
+TEX/11798.TM2	signs
+TEX/11805.TM2	signs
+TEX/11810.TM2	signs
+TEX/11811.TM2	signs
+TEX/11812.TM2	signs
+TEX/11813.TM2	signs
+TEX/11814.TM2	signs
+TEX/11818.TM2	signs
+TEX/11819.TM2	signs
+TEX/11824.TM2	signs
+TEX/11825.TM2	signs
+TEX/11829.TM2	signs
+TEX/11831.TM2	signs
+TEX/11850.TM2	signs
+TEX/11851.TM2	signs
+TEX/11852.TM2	signs
+TEX/11856.TM2	signs
+TEX/11857.TM2	signs
+TEX/11900.TM2	signs
+TEX/11902.TM2	signs
+TEX/11904.TM2	faces
+TEX/11905.TM2	signs
+TEX/11906.TM2	signs
+TEX/11908.TM2	signs
+TEX/11911.TM2	signs
+TEX/11912.TM2	signs
+TEX/11914.TM2	faces
+TEX/11916.TM2	signs
+TEX/11917.TM2	signs
+TEX/11923.TM2	signs
+TEX/11926.TM2	signs
+TEX/11927.TM2	signs
+TEX/11928.TM2	signs
+TEX/11929.TM2	signs
+TEX/11930.TM2	signs
+TEX/11931.TM2	signs
+TEX/11938.TM2	signs
+TEX/11939.TM2	signs
+TEX/12502.TM2	signs
+TEX/14107.TM2	signs
+TEX/16250.TM2	signs
+TEX/16804.TM2	faces
+TEX/16829.TM2	signs
+TEX/16848.TM2	signs
+TEX/20096.TM2	signs
+TEX/20342.TM2	faces
+TEX/20420.TM2	faces
+TEX/20475.TM2	faces
+# v0.8.1: the Japanese logo and films (Settings > Game: "Japanese logo", "Japanese opening film")
+BOOT.DAT	logos	-	tims=34
+TITLE/TITLE.DAT	logos	-	tims=8
+MOVIE/T2_OP_SHINO.PSS	movies
+MOVIE/T2_1_1_5.PSS	movies

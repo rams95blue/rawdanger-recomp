@@ -1,0 +1,109 @@
+diff --git a/ps2xRuntime/src/lib/gs/gs_cpu_backend.cpp b/ps2xRuntime/src/lib/gs/gs_cpu_backend.cpp
+index f0ad507..d7376ee 100644
+--- a/ps2xRuntime/src/lib/gs/gs_cpu_backend.cpp
++++ b/ps2xRuntime/src/lib/gs/gs_cpu_backend.cpp
+@@ -1307,6 +1307,16 @@ void GSCpuBackend::DrawTriangle(const GSPrimitiveBatch &batch)
+     if (std::fabs(denom) < 0.001f)
+         return;
+ 
++    // Depth: the barycentric weights are floats, and Z is a 32-bit value, so
++    // v.z * w with weights that sum to 1 +/- 1e-7 is off by hundreds near
++    // 0xFFFFFFFF. 2D quads drawn at Z = 0xFFFFFF00 against a Z buffer holding
++    // 0xFFFFFF00 then failed ZTST GEQUAL on scattered pixels (striped title
++    // screen in Raw Danger). A constant-Z triangle keeps its exact Z, and an
++    // interpolated Z is clamped to the vertices' range.
++    const bool zConstant = (v0.z == v1.z) && (v1.z == v2.z);
++    const double zLo = std::min({static_cast<double>(v0.z), static_cast<double>(v1.z), static_cast<double>(v2.z)});
++    const double zHi = std::max({static_cast<double>(v0.z), static_cast<double>(v1.z), static_cast<double>(v2.z)});
++
+     const float winding = (denom < 0.0f) ? -1.0f : 1.0f;
+     const float invAbsDenom = 1.0f / std::fabs(denom);
+     constexpr float kEdgeEpsilon = 1.0e-4f;
+@@ -1325,7 +1335,10 @@ void GSCpuBackend::DrawTriangle(const GSPrimitiveBatch &batch)
+             if (w0 < -kEdgeEpsilon || w1 < -kEdgeEpsilon || w2 < -kEdgeEpsilon)
+                 continue;
+ 
+-            double z = v0.z * w0 + v1.z * w1 + v2.z * w2;
++            double z = zConstant ? static_cast<double>(v0.z)
++                                 : std::clamp(static_cast<double>(v0.z) * w0 + static_cast<double>(v1.z) * w1 +
++                                                  static_cast<double>(v2.z) * w2,
++                                              zLo, zHi);
+ 
+             uint8_t r, g, b, a;
+             if (state.prim.iip)
+@@ -1388,7 +1401,7 @@ void GSCpuBackend::DrawTriangle(const GSPrimitiveBatch &batch)
+             }
+ 
+             const uint8_t fog = clampU8(static_cast<int>(v0.fog * w0 + v1.fog * w1 + v2.fog * w2));
+-            WritePixel(state, x, y, static_cast<u32>(z + 0.5), r, g, b, a, fog);
++            WritePixel(state, x, y, static_cast<u32>(zConstant ? z : std::min(z + 0.5, zHi)), r, g, b, a, fog);
+         }
+     }
+ }
+@@ -1438,7 +1451,10 @@ void GSCpuBackend::DrawLine(const GSPrimitiveBatch &batch)
+             a = v1.a;
+         }
+ 
+-        double z = (v0.z + (v1.z - v0.z) * t);
++        double z = (v0.z == v1.z) ? static_cast<double>(v0.z)
++                                  : std::clamp(static_cast<double>(v0.z) + (static_cast<double>(v1.z) - static_cast<double>(v0.z)) * t,
++                                               std::min(static_cast<double>(v0.z), static_cast<double>(v1.z)),
++                                               std::max(static_cast<double>(v0.z), static_cast<double>(v1.z)));
+         const uint8_t fog = clampU8(static_cast<int>(v0.fog + (v1.fog - v0.fog) * t));
+         WritePixel(state, x0, y0, static_cast<u32>(z), r, g, b, a, fog);
+ 
+diff --git a/ps2xTest/src/ps2_gs_tests.cpp b/ps2xTest/src/ps2_gs_tests.cpp
+index 113cc88..8d49e6f 100644
+--- a/ps2xTest/src/ps2_gs_tests.cpp
++++ b/ps2xTest/src/ps2_gs_tests.cpp
+@@ -775,6 +775,50 @@ void register_ps2_gs_tests()
+                      "the next XYZ2 should draw BCD from the advanced strip queue");
+         });
+ 
++        tc.Run("GS triangle at Z 0xFFFFFF00 passes ZTST GEQUAL against an equal Z buffer everywhere", [](TestCase &t)
++        {
++            // Raw Danger's title screen: full-screen 2D quads (two triangles) at
++            // Z = 0xFFFFFF00 with XYOFFSET 1728/1824, ZTST GEQUAL, Z buffer
++            // holding 0xFFFFFF00.
++            std::vector<uint8_t> vram(PS2_GS_VRAM_SIZE, 0u);
++            GS gs;
++            gs.init(vram.data(), static_cast<uint32_t>(vram.size()), nullptr);
++
++            constexpr uint32_t kZ = 0xFFFFFF00u;
++            constexpr uint32_t kW = 640u, kH = 448u, kFbw = 10u;
++            constexpr uint32_t kZbp = 0x118u; // pages
++            for (uint32_t y = 0; y < kH; ++y)
++                for (uint32_t x = 0; x < kW; ++x)
++                    gs.WriteVram(GS_PSM_Z32, kZbp * 32u, kFbw, x, y, kZ);
++
++            gs.writeRegister(GS_REG_FRAME_1, (static_cast<uint64_t>(kFbw) << 16) | (static_cast<uint64_t>(GS_PSM_CT32) << 24));
++            gs.writeRegister(GS_REG_ZBUF_1, static_cast<uint64_t>(kZbp) | (1ull << 32)); // Z32, ZMSK
++            gs.writeRegister(GS_REG_SCISSOR_1, (static_cast<uint64_t>(kW - 1u) << 16) | (static_cast<uint64_t>(kH - 1u) << 48));
++            gs.writeRegister(GS_REG_XYOFFSET_1, 0x6C00ull | (0x7200ull << 32));
++            gs.writeRegister(GS_REG_TEST_1, (1ull << 16) | (2ull << 17)); // ZTE, ZTST = GEQUAL
++            gs.writeRegister(GS_REG_PRIM, static_cast<uint64_t>(GS_PRIM_TRIANGLE));
++            gs.writeRegister(GS_REG_RGBAQ, 0x80FFFFFFull);
++
++            auto xyz = [&](uint32_t x, uint32_t y) -> uint64_t
++            {
++                return static_cast<uint64_t>((1728u + x) * 16u) | (static_cast<uint64_t>((1824u + y) * 16u) << 16) |
++                       (static_cast<uint64_t>(kZ) << 32);
++            };
++            gs.writeRegister(GS_REG_XYZ2, xyz(0u, 0u));
++            gs.writeRegister(GS_REG_XYZ2, xyz(kW, 0u));
++            gs.writeRegister(GS_REG_XYZ2, xyz(0u, kH));
++            gs.writeRegister(GS_REG_XYZ2, xyz(kW, 0u));
++            gs.writeRegister(GS_REG_XYZ2, xyz(0u, kH));
++            gs.writeRegister(GS_REG_XYZ2, xyz(kW, kH));
++
++            uint32_t missed = 0u;
++            for (uint32_t y = 1; y + 1 < kH; ++y)
++                for (uint32_t x = 1; x + 1 < kW; ++x)
++                    if (readReferencePSMCT32Pixel(vram, 0u, kFbw, x, y) != 0x80FFFFFFu)
++                        ++missed;
++            t.Equals(missed, 0u, "every pixel of a constant-Z quad should pass GEQUAL against the same Z");
++        });
++
+         tc.Run("GS fog blends the shaded color toward FOGCOL before framebuffer blending", [](TestCase &t)
+         {
+             auto renderFoggedPoint = [](bool fogEnabled, uint8_t fog, uint32_t fogColor = 0u) -> uint32_t

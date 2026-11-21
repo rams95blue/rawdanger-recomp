@@ -1,0 +1,472 @@
+diff --git a/host/achievements.cpp b/host/achievements.cpp
+index e6608f6..47caba3 100644
+--- a/host/achievements.cpp
++++ b/host/achievements.cpp
+@@ -10,6 +10,7 @@
+ #include <cstdlib>
+ #include <ctime>
+ #include <fstream>
++#include <map>
+ #include <mutex>
+ #include <set>
+ #include <sstream>
+@@ -67,6 +68,7 @@ struct Achievement {
+ 
+ std::vector<Achievement> g_list;
+ std::string g_unlocks_path, g_off_path, g_note, g_note_icon, g_icons_dir;
++std::map<std::string, std::string> g_when;  // id -> when it was unlocked (the unlocks file's second column)
+ std::mutex g_lock;
+ bool g_loaded = false;
+ 
+@@ -427,6 +429,7 @@ void save_unlock(const Achievement &a) {
+     char when[32];
+     std::strftime(when, sizeof when, "%Y-%m-%d %H:%M", std::localtime(&now));
+     f << a.id << "\t" << when << "\t" << a.title << "\n";
++    g_when[a.id] = when;
+ }
+ 
+ // ---- the two file forms ----------------------------------------------------------------------------------------------
+@@ -566,7 +569,14 @@ bool load(const char *set_path, const std::string &unlocks_path) {
+     std::set<std::string> done;
+     std::ifstream u(unlocks_path);
+     std::string line;
+-    while (std::getline(u, line)) done.insert(line.substr(0, line.find('\t')));
++    while (std::getline(u, line)) {
++        const std::size_t tab = line.find('\t');
++        done.insert(line.substr(0, tab));
++        if (tab != std::string::npos) {
++            const std::string rest = line.substr(tab + 1);
++            g_when[line.substr(0, tab)] = trim(rest.substr(0, rest.find('\t')));
++        }
++    }
+     for (Achievement &a : g_list) a.unlocked = done.count(a.id) != 0;
+     g_loaded = !g_list.empty();
+     std::fprintf(stderr, "[achievements] %zu achievements from %s, %zu already unlocked\n", g_list.size(), set_path, done.size());
+@@ -593,7 +603,23 @@ void frame() {
+ std::vector<Row> rows() {
+     std::lock_guard<std::mutex> hold(g_lock);
+     std::vector<Row> out;
+-    for (const Achievement &a : g_list) out.push_back({a.title, a.description, a.points, a.unlocked, a.enabled, a.unofficial, a.groups.empty()});
++    for (const Achievement &a : g_list) {
++        Row r;
++        r.title = a.title;
++        r.description = a.description;
++        if (!g_icons_dir.empty()) {
++            r.icon = g_icons_dir + "/" + a.id + ".bmp";
++            r.icon_locked = g_icons_dir + "/" + a.id + "_lock.bmp";
++        }
++        const auto w = g_when.find(a.id);
++        if (a.unlocked && w != g_when.end()) r.when = w->second;
++        r.points = a.points;
++        r.unlocked = a.unlocked;
++        r.enabled = a.enabled;
++        r.unofficial = a.unofficial;
++        r.unsupported = a.groups.empty();
++        out.push_back(r);
++    }
+     return out;
+ }
+ 
+diff --git a/host/achievements.hpp b/host/achievements.hpp
+index 62179f5..88524ee 100644
+--- a/host/achievements.hpp
++++ b/host/achievements.hpp
+@@ -31,6 +31,8 @@ namespace achievements {
+ 
+ struct Row {
+     std::string title, description;
++    std::string icon, icon_locked;  // its pictures (.bmp, PS2_ACHIEVEMENTS_ICONS/<id>.bmp and <id>_lock.bmp; empty: none)
++    std::string when;               // when it was unlocked ("2026-11-13 07:30"), empty while locked
+     int points = 0;
+     bool unlocked = false;
+     bool enabled = true;      // switched off by the player: not checked
+diff --git a/host/keymap.cpp b/host/keymap.cpp
+index 7a2c4e8..0545a91 100644
+--- a/host/keymap.cpp
++++ b/host/keymap.cpp
+@@ -166,6 +166,7 @@ const char *sharp_2d_word(int sharp) {
+     return kWords[sharp >= 0 && sharp <= 2 ? sharp : 1];
+ }
+ 
++std::string with_master_volume(const std::string &file_text, int percent) { return with_line(file_text, "mastervolume", "master_volume = " + std::to_string(percent)); }
+ std::string with_pause_unfocused(const std::string &file_text, int on) { return with_line(file_text, "pauseunfocused", std::string("pause_unfocused = ") + (on ? "on" : "off")); }
+ std::string with_sharp_2d(const std::string &file_text, int sharp) { return with_line(file_text, "sharp2d", std::string("sharp_2d = ") + sharp_2d_word(sharp)); }
+ 
+@@ -298,6 +299,13 @@ void parse(const std::string &text, Config &config, std::vector<std::string> &pr
+             else bad("pace is 30, 20, 15, 60 or off, ignored");
+             continue;
+         }
++        if (name == "mastervolume") {
++            char *tail = nullptr;
++            const long v = std::strtol(value.c_str(), &tail, 10);
++            if (tail == value.c_str() || v < 0 || v > 100) bad("master_volume is 0 to 100, ignored");
++            else config.master_volume = static_cast<int>(v);
++            continue;
++        }
+         if (name == "pauseunfocused") {
+             const std::string v = squash(value);
+             if (v == "on" || v == "1" || v == "yes") config.pause_unfocused = 1;
+diff --git a/host/keymap.hpp b/host/keymap.hpp
+index c977ac4..f9254a1 100644
+--- a/host/keymap.hpp
++++ b/host/keymap.hpp
+@@ -39,6 +39,7 @@ struct Config {
+     std::string pace;          // the picture pace ('30', '60', 'off', ...; ps2/pace.hpp) used at the next start, "" when the file has no 'pace' line
+ 
+     int pause_unfocused = 1;   // rawdanger-recomp: the quick menu opens (the game waits) when the window goes to the background
++    int master_volume = 100;   // rawdanger-recomp: the volume of everything the game plays, 0 to 100 (%)
+ };
+ 
+ // The picture looks the F2 key goes through. The number is also the video option bits (ps2/video.hpp): bit 0 smooth edges, bit 1 soft, bit 2 sharp (look 4: cubic enlargement + light sharpening; look 5 = sharp + smooth edges).
+@@ -54,6 +55,7 @@ std::string with_scale(const std::string &file_text, int scale);
+ std::string with_sharp_2d(const std::string &file_text, int sharp);
+ const char *sharp_2d_word(int sharp);  // "soft", "sharp", "sharpest"
+ std::string with_pause_unfocused(const std::string &file_text, int on);  // the 'pause_unfocused' line
++std::string with_master_volume(const std::string &file_text, int percent);  // the 'master_volume' line
+ 
+ const char *action_name(int action);  // the word used in keys.ini
+ 
+diff --git a/host/quickmenu.cpp b/host/quickmenu.cpp
+index f6bbec4..043a07b 100644
+--- a/host/quickmenu.cpp
++++ b/host/quickmenu.cpp
+@@ -114,10 +114,10 @@ constexpr Command kCommands[kEntries] = {Command::resume,   Command::save,
+ // the program's key for the same thing, shown dim at the right end of the entry
+ constexpr const char *kKeys[kEntries] = {"F1", "F5", "F8", "F3", "", "F4", "", "", ""};
+ // the Graphics page
+-constexpr int kGraphicsEntries = 7;
+-constexpr Command kGraphics[kGraphicsEntries] = {Command::look,       Command::scale,           Command::sharp_2d, Command::fullscreen,
+-                                                 Command::widescreen, Command::pause_unfocused, Command::back};
+-constexpr const char *kGraphicsKeys[kGraphicsEntries] = {"F2", "", "", "F11", "", "", "Esc"};
++constexpr int kGraphicsEntries = 8;
++constexpr Command kGraphics[kGraphicsEntries] = {Command::look,       Command::scale,         Command::sharp_2d,        Command::fullscreen,
++                                                 Command::widescreen, Command::master_volume, Command::pause_unfocused, Command::back};
++constexpr const char *kGraphicsKeys[kGraphicsEntries] = {"F2", "", "", "F11", "", "", "", "Esc"};
+ constexpr int kVisibleRows = 11;  // lines of the keys page shown at once; the page scrolls
+ constexpr int kKeysPageChars = 58;
+ 
+@@ -160,9 +160,14 @@ std::string entry_text(Command c, const Values &v, bool quit_armed) {
+     case Command::save: return "Quick save";
+     case Command::load: return "Quick load";
+     case Command::recomp: return "Game options";
+-    case Command::graphics: return "Graphics";
++    case Command::graphics: return "Graphics and sound";
+     case Command::widescreen: return v.widescreen < 0 ? "Widescreen: not in this game" : std::string("Widescreen 16:9:  < ") + (v.widescreen ? "on" : "off") + " >";
+     case Command::pause_unfocused: return std::string("Pause in the background:  < ") + (v.pause_unfocused ? "on" : "off") + " >";
++    case Command::master_volume: {
++        const int pct = std::clamp(v.master_volume, 0, 100);
++        return "Master volume:  < " + (pct == 0 ? std::string("muted") : std::to_string(pct) + "%") + " >  " + std::string(static_cast<std::size_t>(pct / 10), '|') +
++               std::string(static_cast<std::size_t>(10 - pct / 10), '.');
++    }
+     case Command::back: return "Back";
+     case Command::achievements: return "Achievements";
+     case Command::look: return "Picture look:  < " + v.look + " >";
+@@ -297,7 +302,8 @@ Command Menu::choose() {
+ Command Menu::side() const {
+     if (page_ != Page::graphics) return Command::none;
+     const Command c = kGraphics[selected_];
+-    return c == Command::look || c == Command::scale || c == Command::sharp_2d || c == Command::fullscreen || c == Command::widescreen || c == Command::pause_unfocused
++    return c == Command::look || c == Command::scale || c == Command::sharp_2d || c == Command::fullscreen || c == Command::widescreen || c == Command::pause_unfocused ||
++                   c == Command::master_volume
+                ? c : Command::none;
+ }
+ 
+@@ -407,9 +413,9 @@ void Menu::draw_recomp(int window_width, int window_height, const Values &values
+     }
+     top_ = std::clamp(top_, 0, std::max(0, all - shown_max));
+     const int n = std::min(all, shown_max);
+-    const int pad = 8, bar_h = 12, bar_pad = 5, chars = 62;
++    const int pad = 8, bar_h = ach ? 14 : 12, bar_pad = 5, chars = 62;
+     const int units_w = 2 * pad + 2 * bar_pad + chars * 6;
+-    const int units_h = pad + 8 + 12 + (n + 1) * bar_h + 3 + 11 + 12 + 12 + 12 + 8 + pad;
++    const int units_h = pad + 8 + 12 + (ach ? 8 : 0) + (n + 1) * bar_h + 3 + 11 + (ach ? 24 : 0) + 12 + 12 + 12 + 8 + pad;
+     const int s = std::clamp(std::min(window_height * 4 / 5 / units_h, window_width * 23 / 25 / units_w), 1, 6);
+     out.width = units_w * s;
+     out.height = units_h * s;
+@@ -426,30 +432,73 @@ void Menu::draw_recomp(int window_width, int window_height, const Values &values
+     int y = pad * s;
+     c.text(text_x, y, s, kTitleText, kTitle);
+     y += 8 * s + 6 * s;
++    if (ach) {
++        // how far the player is: a bar of the points won, hazard tape for the part still to win
++        const int bw = inner_w - 2 * bar_pad * s, bh = 4 * s;
++        const float f = std::clamp(values.progress < 0 ? 0.f : values.progress, 0.f, 1.f);
++        c.tape(text_x, y, bw, bh, std::max(2, 2 * s));
++        c.fill(text_x, y, bw, bh, rgba(14, 13, 10, 170));
++        c.fill(text_x, y, static_cast<int>(bw * f), bh, kTitle);
++        y += 8 * s;
++    }
+     c.fill(pad * s, y, inner_w, std::max(1, s / 2), kFrame);
+     y += 6 * s;
+     entry_x_ = out.x + pad * s;
+     entry_w_ = inner_w;
+     entry_h_ = bar_h * s;
+     rows_y_ = out.y + y;
+-    const auto line = [&](int index, const std::string &left, const std::string &right, bool dim) {
++    const auto line = [&](int index, const std::string &left, const std::string &right, bool dim, const Values::Icon *icon = nullptr) {
+         const bool lit = index == selected_;
+         if (lit) c.fill(pad * s, y, inner_w, bar_h * s, kBar);
+         const std::uint32_t color = lit ? kBarText : dim ? kDim : kText;
+-        c.text(text_x, y + 2 * s, s, left.size() > 40 ? left.substr(0, 37) + "..." : left, color);
+-        if (!right.empty()) c.text(out.width - text_x - static_cast<int>(right.size()) * 6 * s + s, y + 2 * s, s, right, lit ? kBarDim : color);
++        int tx = text_x;
++        if (ach && index < all) {
++            // the badge, a square as tall as the line (nearest pixel), then the name beside it
++            const int size = (bar_h - 2) * s, ix = text_x - 2 * s, iy = y + s;
++            if (icon && icon->width > 0 && icon->height > 0) {
++                for (int j = 0; j < size; ++j)
++                    for (int i = 0; i < size; ++i) {
++                        const std::uint32_t px = icon->rgba[static_cast<std::size_t>(j * icon->height / size) * icon->width + i * icon->width / size];
++                        c.fill(ix + i, iy + j, 1, 1, px | 0xFF000000u);
++                    }
++            } else {
++                c.fill(ix, iy, size, size, kFrame);
++            }
++            tx = ix + size + 4 * s;
++        }
++        const std::size_t room = static_cast<std::size_t>(ach ? 36 : 40);
++        c.text(tx, y + (bar_h - 8) / 2 * s, s, left.size() > room ? left.substr(0, room - 3) + "..." : left, color);
++        if (!right.empty()) c.text(out.width - text_x - static_cast<int>(right.size()) * 6 * s + s, y + (bar_h - 8) / 2 * s, s, right, lit ? kBarDim : color);
+         y += bar_h * s;
+     };
+     if (n == 0) c.text(text_x, y + 2 * s, s, ach ? "No achievements loaded" : "No options file (the game was not built by RawDangerPC.exe)", kDim);
+     for (int r = 0; r < n; ++r) {
+         const Values::RecompRow &row = values.recomp_rows[top_ + r];
+-        line(top_ + r, row.label, row.state, !row.live);
++        line(top_ + r, row.label, row.state, !row.live, row.icon);
+     }
+     if (n == 0) y += bar_h * s;
+     line(all, "Back", "", false);
+     y += 3 * s;
+     c.fill(pad * s, y, inner_w, std::max(1, s / 2), kFrame);
+     y += 6 * s;
++    if (ach) {
++        // the highlighted achievement: what it asks for (two lines of 62 letters, cut at a space)
++        std::string d = selected_ < all ? values.recomp_rows[selected_].detail : std::string();
++        for (int k = 0; k < 2; ++k) {
++            std::string part = d;
++            if (part.size() > static_cast<std::size_t>(chars)) {
++                std::size_t cut = part.rfind(' ', chars);
++                if (cut == std::string::npos || cut < 20) cut = chars;
++                part = d.substr(0, cut);
++                d = d.substr(std::min(d.size(), cut + 1));
++            } else {
++                d.clear();
++            }
++            if (k == 1 && !d.empty()) part = part.substr(0, std::max<std::size_t>(0, part.size() > 3 ? part.size() - 3 : 0)) + "...";
++            c.text(text_x, y, s, part, kText);
++            y += 12 * s;
++        }
++    }
+     c.text(text_x, y, s, values.recomp_note.size() > 62 ? values.recomp_note.substr(0, 59) + "..." : values.recomp_note, kTitle);
+     y += 12 * s;
+     c.text(text_x, y, s, kHint, kDim);
+@@ -477,7 +526,7 @@ void Menu::draw_list(int window_width, int window_height, const Values &values,
+     const char *const *keys = gfx ? kGraphicsKeys : kKeys;
+     std::string game = values.title.empty() ? "PAUSED" : values.title;
+     for (char &ch : game) ch = static_cast<char>(ch >= 'a' && ch <= 'z' ? ch - 32 : ch);
+-    const std::string kTitleText = gfx ? "GRAPHICS" : game + " - PAUSED";
++    const std::string kTitleText = gfx ? "GRAPHICS AND SOUND" : game + " - PAUSED";
+     const std::string kHint = gfx ? "Left / Right: change     Esc / Circle: back" : "Enter / Cross: OK     F1 / Esc / Circle: resume";
+     const std::string kNote = gfx ? (values.scale_next != values.scale_now || values.sharp_next != values.sharp_now ? "Resolution and text filter: used at the next start" : "Saved in keys.ini next to the game")
+                                   : "rawdanger-recomp";
+diff --git a/host/quickmenu.hpp b/host/quickmenu.hpp
+index c637077..6689161 100644
+--- a/host/quickmenu.hpp
++++ b/host/quickmenu.hpp
+@@ -24,6 +24,7 @@ enum class Command {
+     graphics,      // rawdanger-recomp: the main menu's entry that opens the Graphics page
+     widescreen,    // Graphics page: the game's widescreen option (its recomp.ini section with aspect = 16:9)
+     pause_unfocused,  // Graphics page: the game waits (this menu opens) when the window goes to the background
++    master_volume, // Graphics and sound page: the volume of the game's sound (left / right: 10 % steps)
+     back           // a page's Back line
+ };
+ 
+@@ -38,6 +39,7 @@ struct Values {
+     bool fullscreen = false;
+     int widescreen = -1;           // the game's widescreen option: -1 the game has none, 0 off, 1 on
+     bool pause_unfocused = true;   // the menu opens when the window goes to the background
++    int master_volume = 100;       // %
+     std::string title;             // the game's name for the panel's title ("Raw Danger! Enhanced Edition")
+     // the keys page: one row per button (label and its keys, in the order of keys.ini) and a message line (what the last change did)
+     struct KeyRow {
+@@ -46,12 +48,19 @@ struct Values {
+     std::vector<KeyRow> key_rows;
+     std::string key_note;
+     // the Recomp options page (rawdanger-recomp): one row per patch of the game
++    struct Icon {  // a small picture: straight RGBA, red in the low byte
++        std::vector<std::uint32_t> rgba;
++        int width = 0, height = 0;
++    };
+     struct RecompRow {
+         std::string label, state;  // "Widescreen 16:9", "on" / "off" / "built in"
+         bool live = false;
++        const Icon *icon = nullptr;  // achievements page: its badge (in colour when unlocked, grey while locked)
++        std::string detail;          // achievements page: what it asks for, shown for the highlighted line
+     };
+     std::vector<RecompRow> recomp_rows;
+     std::string recomp_note;
++    float progress = -1;           // achievements page: share of the points won (0 ... 1), a bar under the title; < 0: none
+ };
+ 
+ // The panel: straight (not premultiplied) RGBA, one std::uint32_t per pixel with red in the low byte, placed at x, y in window pixels.
+diff --git a/host/window.cpp b/host/window.cpp
+index b32f926..02f8d27 100644
+--- a/host/window.cpp
++++ b/host/window.cpp
+@@ -42,9 +42,11 @@
+ #include <cmath>
+ #include <filesystem>
+ #include <functional>
++#include <map>
+ #include <cstdint>
+ #include <cstdio>
+ #include <cstdlib>
++#include <cstring>
+ #include <string>
+ #include <thread>
+ #include <vector>
+@@ -119,6 +121,8 @@ void window_stage(const char *name) {
+ // gets the focus back after the file changed). The arrow keys are the D-pad only: they used to push the left stick as well, and
+ // a menu that reads both moved two entries for one press.
+ keymap::Config g_keys = keymap::defaults();
++std::atomic<int> g_master_volume{100};  // rawdanger-recomp: keys.ini master_volume (%), read by the sound device's thread
++std::vector<std::size_t> g_recomp_row_section;  // the Game options page's lines -> recomp::sections() (widescreen is on the Graphics page)
+ std::string g_keys_path;
+ std::filesystem::file_time_type g_keys_time{};
+ int g_mouse_sum_x = 0, g_mouse_sum_y = 0;  // mouse counts since the last sample (only while the mouse pushes a stick)
+@@ -170,6 +174,42 @@ bool g_note_wanted = false;  // a save or load was asked by the menu: the next m
+ std::string g_note_text;  // not empty while the note is up
+ // rawdanger-recomp: the achievement pop-up shown with the note (its picture, straight RGBA); empty: a plain note
+ std::vector<std::uint32_t> g_toast_icon;
++
++bool file_exists(const std::string &path) {
++    if (path.empty()) return false;
++    if (std::FILE *f = std::fopen(path.c_str(), "rb")) { std::fclose(f); return true; }
++    return false;
++}
++
++// rawdanger-recomp: the achievements page's badges, read once (.bmp from RawDangerPC.exe) and kept; grey = the locked look made here
++// when there is no _lock picture (the luminance, darkened a little)
++const quickmenu::Values::Icon *menu_icon(const std::string &path, bool grey) {
++    static std::map<std::string, quickmenu::Values::Icon> cache;
++    if (path.empty()) return nullptr;
++    const std::string key = path + (grey ? "#grey" : "");
++    if (auto it = cache.find(key); it != cache.end()) return it->second.width > 0 ? &it->second : nullptr;
++    quickmenu::Values::Icon &icon = cache[key];
++    if (SDL_Surface *bmp = SDL_LoadBMP(path.c_str())) {
++        if (SDL_Surface *rgba = SDL_ConvertSurfaceFormat(bmp, SDL_PIXELFORMAT_ABGR8888, 0)) {
++            icon.width = rgba->w;
++            icon.height = rgba->h;
++            icon.rgba.resize(static_cast<std::size_t>(icon.width) * icon.height);
++            for (int y = 0; y < icon.height; ++y)
++                std::memcpy(icon.rgba.data() + static_cast<std::size_t>(y) * icon.width, static_cast<const std::uint8_t *>(rgba->pixels) + y * rgba->pitch,
++                            static_cast<std::size_t>(icon.width) * 4);
++            SDL_FreeSurface(rgba);
++            if (grey)
++                for (std::uint32_t &px : icon.rgba) {
++                    const int r = px & 255, g = px >> 8 & 255, b = px >> 16 & 255;
++                    const int l = (r * 77 + g * 150 + b * 29) >> 8;
++                    const int d = l * 3 / 4;
++                    px = static_cast<std::uint32_t>(d) | static_cast<std::uint32_t>(d) << 8 | static_cast<std::uint32_t>(d) << 16 | (px & 0xFF000000u);
++                }
++        }
++        SDL_FreeSurface(bmp);
++    }
++    return icon.width > 0 ? &icon : nullptr;
++}
+ int g_toast_w = 0, g_toast_h = 0;
+ bool g_toast = false;
+ std::string g_toast_title;
+@@ -529,6 +569,7 @@ void load_keys() {
+     if (have) keymap::parse(text, config, problems);
+     for (const std::string &p : problems) std::fprintf(stderr, "[keys] %s, %s\n", g_keys_path.c_str(), p.c_str());
+     g_keys = config;
++    g_master_volume = std::clamp(g_keys.master_volume, 0, 100);
+     if (!g_look_forced && config.look >= 0) g_look = config.look;
+     g_keys.look = g_look;
+     ps2::set_video_options(static_cast<std::uint32_t>(g_look));
+@@ -921,6 +962,7 @@ void menu_paint(bool show_again = true) {
+         v.sharp_locked = g_sharp_locked;
+         v.fullscreen = SDL_GetWindowFlags(g_window) & SDL_WINDOW_FULLSCREEN;
+         v.pause_unfocused = g_keys.pause_unfocused != 0;
++        v.master_volume = g_master_volume;
+         v.title = g_game_title.substr(0, g_game_title.find("  -  "));  // "Raw Danger! Enhanced Edition", without the program's name
+         v.widescreen = -1;
+         for (const recomp::Section &sec : recomp::sections())
+@@ -930,20 +972,32 @@ void menu_paint(bool show_again = true) {
+             v.key_note = g_key_note;
+         }
+         if (g_menu.on_achievements_page()) {
++            int won = 0, all_points = 0;
+             for (const achievements::Row &r : achievements::rows()) {
+                 quickmenu::Values::RecompRow row;
+-                row.label = (r.unlocked ? "* " : "  ") + r.title + (r.unofficial ? " (unofficial)" : "");
+-                row.state = r.unsupported ? "n/a" : !r.enabled ? "off" : std::to_string(r.points);
++                row.label = r.title + (r.unofficial ? " (unofficial)" : "");
++                row.state = r.unsupported ? "n/a" : !r.enabled ? "off" : (r.unlocked ? "* " : "") + std::to_string(r.points);
+                 row.live = r.unlocked || (r.enabled && !r.unsupported);
++                // the badge: in colour once unlocked, grey until then (the RetroAchievements look)
++                row.icon = r.unlocked ? menu_icon(r.icon, false) : menu_icon(r.icon_locked.empty() ? r.icon : r.icon_locked, r.icon_locked.empty() || !file_exists(r.icon_locked));
++                if (!r.unlocked && row.icon == nullptr && !r.icon.empty()) row.icon = menu_icon(r.icon, true);
++                row.detail = r.description + (r.unlocked ? "  (unlocked " + r.when + ")" : r.unsupported ? "  (cannot be checked here)" : "");
++                all_points += r.points;
++                if (r.unlocked) won += r.points;
+                 v.recomp_rows.push_back(row);
+             }
++            v.progress = all_points > 0 ? static_cast<float>(won) / static_cast<float>(all_points) : 0.f;
+             g_menu.set_recomp_rows(static_cast<int>(v.recomp_rows.size()));
+             v.recomp_note = achievements::loaded() ? std::to_string(achievements::unlocked_count()) + " of " + std::to_string(v.recomp_rows.size()) + " unlocked, " +
+                                                          std::to_string(achievements::total_points(true)) + " of " + std::to_string(achievements::total_points(false)) + " points"
+                                                    : "No achievement set: start the game from RawDangerPC.exe";
+             if (!g_recomp_note.empty()) v.recomp_note = g_recomp_note;
+         } else if (g_menu.on_recomp_page()) {
+-            for (const recomp::Section &sec : recomp::sections()) {
++            g_recomp_row_section.clear();
++            for (std::size_t i = 0; i < recomp::sections().size(); ++i) {
++                const recomp::Section &sec = recomp::sections()[i];
++                if (sec.aspect169 && sec.live) continue;  // the widescreen switch lives on the Graphics and sound page (one place only)
++                g_recomp_row_section.push_back(i);
+                 quickmenu::Values::RecompRow row;
+                 row.label = sec.label;
+                 row.live = sec.live;
+@@ -1134,6 +1188,15 @@ void menu_command(quickmenu::Command c, int step) {
+         if (!found) set_notice("This game has no widescreen option");
+         break;
+     }
++    case Command::master_volume: {
++        // left / right (and Enter: up): 10 % steps
++        const int v = std::clamp((g_master_volume + 10 * step + (step < 0 ? 9 : 0)) / 10 * 10, 0, 100);
++        g_master_volume = v;
++        g_keys.master_volume = v;
++        rewrite_keys_file([v](const std::string &t) { return keymap::with_master_volume(t, v); }, "master volume");
++        set_notice(v == 0 ? std::string("Master volume: muted") : "Master volume: " + std::to_string(v) + "%");
++        break;
++    }
+     case Command::pause_unfocused:
+         g_keys.pause_unfocused = g_keys.pause_unfocused ? 0 : 1;
+         rewrite_keys_file([](const std::string &t) { return keymap::with_pause_unfocused(t, g_keys.pause_unfocused); }, "pause in the background");
+@@ -1143,7 +1206,8 @@ void menu_command(quickmenu::Command c, int step) {
+     case Command::achievement_toggle: achievements::toggle(static_cast<std::size_t>(g_menu.recomp_row()), g_recomp_note); break;
+     case Command::recomp_toggle: {
+         const bool wide = ps2::g_options.widescreen;
+-        recomp::toggle(static_cast<std::size_t>(g_menu.recomp_row()), g_recomp_note);
++        const std::size_t row = static_cast<std::size_t>(g_menu.recomp_row());
++        if (row < g_recomp_row_section.size()) recomp::toggle(g_recomp_row_section[row], g_recomp_note);
+         if (wide != ps2::g_options.widescreen) { g_tex_w = 0; fit_window_to_shape(); }  // the SDL picture takes the new shape at the next frame
+         break;
+     }
+@@ -1880,6 +1944,13 @@ void audio_callback(void *, Uint8 *stream, int length) {
+     }
+     ps2::crash::test_poll(ps2::crash::Thread::Sound);
+     g_pipe->render(reinterpret_cast<std::int16_t *>(stream), static_cast<std::size_t>(length) / 4, audio_seconds(), mix_beep);
++    // rawdanger-recomp: the master volume (keys.ini, the menu's Graphics and sound page); a curve, so each step sounds alike
++    const int volume = g_master_volume.load(std::memory_order_relaxed);
++    if (volume < 100) {
++        const int gain = volume * volume * 256 / 10000;  // 0 ... 256
++        std::int16_t *samples = reinterpret_cast<std::int16_t *>(stream);
++        for (int i = 0; i < length / 2; ++i) samples[i] = static_cast<std::int16_t>(samples[i] * gain / 256);
++    }
+ }
+ 
+ void write_audio_dumps() {

@@ -1,0 +1,109 @@
+From d2526816efe380b1cac99d652ee17c04253d15f2 Mon Sep 17 00:00:00 2001
+From: rawdanger-recomp <rawdanger-recomp@users.noreply.github.com>
+Date: Sat, 21 Nov 2026 00:05:14 +0000
+Subject: [PATCH] rawdanger-recomp: v0.8.4 filter without a brightness stage,
+ smooth occlusion, walk/run wheel
+
+- colour filter: AREA 01's streets (MAP01-04) have no brightness stage (the last writes are flat colours); the replay took that
+  for unknown steps and the frame was drawn the game's way (slow: the fps drops). Accepted now; byte-identical frame
+- ambient occlusion: the same 16 samples for every pixel (no random turn per pixel: the grain on hair and shirts)
+- mouse wheel: walk / run (the game has only these two paces)
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01QNLFPekqhcU2dj7B3Utmea
+---
+ host/window.cpp            | 14 +++++++-------
+ runtime/src/gs/gpu/gs.wgsl | 18 ++++++++++++------
+ runtime/src/gs/gs.cpp      |  4 +++-
+ 3 files changed, 22 insertions(+), 14 deletions(-)
+
+diff --git a/host/window.cpp b/host/window.cpp
+index cb93f6d..0d8e6e8 100644
+--- a/host/window.cpp
++++ b/host/window.cpp
+@@ -949,11 +949,12 @@ void show_key_card(const char *why) {
+ // A stick pushed by keys: all the way in a direction; two keys make a diagonal that is as far from the middle as a straight push
+ // (not 1.4 times as far, which the game would take as a push past the stick's circle).
+ // rawdanger-recomp: walk speed for the walk keys, set with the mouse wheel when the wheel is not given to a button (keys.ini)
+-// rawdanger-recomp: the walk keys' speed (the mouse wheel): steps 1 to 5 push the stick from just past the game's dead zone (about
+-// 59) to all the way, step 6 runs: all the way with the run button (Cross; the game runs while Cross is held with the stick)
+-constexpr int kPushSteps = 5, kWalkSteps = kPushSteps + 1;
+-int g_walk_step = kPushSteps;   // all the way, walking (as before v0.8.0)
+-double walk_push() { return 60.0 + (127.0 - 60.0) * (std::min(g_walk_step, kPushSteps) - 1) / (kPushSteps - 1); }
++// rawdanger-recomp: the walk keys' pace (the mouse wheel): the game has two, walking (the stick past its dead zone, however far)
++// and running (Cross held with the stick); v0.8.0's five pushes of the stick all walked the same, so since v0.8.4 the wheel
++// switches between the two: down walks, up runs (the walk keys then hold Cross, only while playing)
++constexpr int kPushSteps = 1, kWalkSteps = 2;
++int g_walk_step = kPushSteps;   // walking
++double walk_push() { return 127.0; }
+ bool wheel_is_a_button() {
+     for (const auto &list : g_keys.inputs)
+         for (int input : list)
+@@ -2888,8 +2889,7 @@ void poll() {
+             // rawdanger-recomp: or, when no button has the wheel, the walk speed of the walk keys
+             if (!g_menu.is_open() && e.wheel.y != 0 && !wheel_is_a_button()) {
+                 g_walk_step = std::clamp(g_walk_step + (e.wheel.y > 0 ? 1 : -1), 1, kWalkSteps);
+-                set_notice("Walk speed " + std::to_string(g_walk_step) + " of " + std::to_string(kWalkSteps) +
+-                           (g_walk_step == kWalkSteps ? " (run: the walk keys hold Cross)" : g_walk_step == kPushSteps ? " (walk)" : g_walk_step == 1 ? " (slow walk)" : ""));
++                set_notice(g_walk_step == kWalkSteps ? "Walk keys: run (they hold Cross; wheel down: walk)" : "Walk keys: walk (wheel up: run)");
+             }
+         }
+         if (e.type == SDL_CONTROLLERDEVICEADDED) open_pad(e.cdevice.which);
+diff --git a/runtime/src/gs/gpu/gs.wgsl b/runtime/src/gs/gpu/gs.wgsl
+index af53762..d26fa51 100644
+--- a/runtime/src/gs/gpu/gs.wgsl
++++ b/runtime/src/gs/gpu/gs.wgsl
+@@ -1785,13 +1785,17 @@ fn game_ao(@builtin(global_invocation_id) gid: vec3<u32>) {
+         return;   // nothing drawn (sky, cleared)
+     }
+     let radius = clamp(f32(prm(7u)) * z0 / 65536.0, 1.5, 28.0);
+-    let turn = fract(52.9829189 * fract(0.06711056 * f32(x) + 0.00583715 * f32(y))) * 3.14159265;
++    // v0.8.4: the same 8 directions at 2 distances for every pixel (no random turn per pixel: that was the grain)
+     var occluded = 0.0;
+-    for (var s = 0u; s < 6u; s = s + 1u) {
+-        let a = turn + f32(s) * 0.52359878;
+-        let r = radius * (0.5 + 0.5 * f32((s * 7u) % 6u) / 6.0);
++    var counted = 0.0;
++    for (var s = 0u; s < 16u; s = s + 1u) {
++        let a = f32(s % 8u) * 0.39269908 + f32(s / 8u) * 0.19634954;
++        let r = radius * select(1.0, 0.5, s >= 8u);
+         let dx = i32(round(cos(a) * r));
+         let dy = i32(round(sin(a) * r));
++        if (dx == 0 && dy == 0) {
++            continue;
++        }
+         let zp = ao_depth(i32(x) + dx, i32(y) + dy, w, h, k);
+         let zm = ao_depth(i32(x) - dx, i32(y) - dy, w, h, k);
+         if (zp <= 0.0 || zm <= 0.0) {
+@@ -1799,9 +1803,11 @@ fn game_ao(@builtin(global_invocation_id) gid: vec3<u32>) {
+         }
+         let crease = ((zp + zm) * 0.5 - z0) / z0;
+         let ahead = max(zp, zm) / z0 - 1.0;
+-        occluded = occluded + smoothstep(0.004, 0.04, crease) * (1.0 - smoothstep(0.04, 0.15, ahead));
++        occluded = occluded + smoothstep(0.006, 0.05, crease) * (1.0 - smoothstep(0.04, 0.15, ahead));
++        counted = counted + 1.0;
+     }
+-    let ao = 1.0 - f32(prm(6u)) / 256.0 * clamp(occluded / 6.0 * 1.5, 0.0, 1.0);
++    occluded = select(0.0, occluded / counted * 6.0, counted > 0.0);
++    let ao = 1.0 - f32(prm(6u)) / 256.0 * smoothstep(0.0, 1.0, clamp(occluded / 6.0 * 1.4, 0.0, 1.0));
+     let fl = locate(0u, prm(0u), prm(1u), x, y);
+     let c = load_at(fl, k);
+     let cr = u32(f32(c & 255u) * ao);
+diff --git a/runtime/src/gs/gs.cpp b/runtime/src/gs/gs.cpp
+index 0aeb769..e1b3d77 100644
+--- a/runtime/src/gs/gs.cpp
++++ b/runtime/src/gs/gs.cpp
+@@ -1131,7 +1131,9 @@ void finish() {
+ void decide(Walk &w) {
+     w.decided = true;
+     if (w.unknown) w.ok = false;
+-    else if (w.ndepth < 1 || w.nweights != 3 || !w.luma || w.nops < 1 || !w.first_page) w.ok = false, w.why = "not all of the steps were seen";
++    else if (w.ndepth < 1 || w.nops < 1 || !w.first_page) w.ok = false, w.why = "not all of the steps were seen";
++    else if (std::any_of(w.ops, w.ops + w.nops, [](const Op &op) { return op.src == 1; }) && (w.nweights != 3 || !w.luma))
++        w.ok = false, w.why = "a write from the brightness without its steps";   // (AREA 01's streets: no brightness stage at all)
+     else w.ok = true;
+     w.replace = w.ok && g_mode.load(std::memory_order_relaxed) == 1;
+     static int told = 0;
+-- 
+2.43.0
+

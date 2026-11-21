@@ -1,0 +1,1471 @@
+From 9c78be7705107edc9eb64d105397676488ffd885 Mon Sep 17 00:00:00 2001
+From: rams95 <rams95@users.noreply.github.com>
+Date: Thu, 19 Nov 2026 11:08:00 +0000
+Subject: [PATCH] 0015-settings-tabs-key-prompts.patch
+
+Settings in tabs (Display, Picture, Sound, Controls, Game; Tab/Q/E/L1/R1, mouse), window size presets, the game's blur filter
+switch, sound chip reverb switch, Game tab in the same panel as the others.
+Key prompts: the game's font (a texture override made by tools/rd_prompts.py) gets key caps with the player's keys in place of
+the PlayStation symbols (PS2_PROMPT_FONT_KEY, PS2_PROMPT_CELLS, ps2::set_button_prompts), remade when a key changes; key caps
+and PlayStation symbols on the Change keys page.
+Lens rain follows the map's weather (PS2_LENS_WEATHER): trails, stretched beads, mist.
+Texture overrides fit the device's largest buffer binding (no crash on 128 MB devices).
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01QNLFPekqhcU2dj7B3Utmea
+---
+ host/keymap.cpp               |  62 +++++++++
+ host/keymap.hpp               |  10 +-
+ host/lens_rain.cpp            | 181 +++++++++++++++++-------
+ host/quickmenu.cpp            | 254 +++++++++++++++++++++++++++++-----
+ host/quickmenu.hpp            |  25 +++-
+ host/window.cpp               | 120 +++++++++++++++-
+ runtime/include/ps2/video.hpp |  11 +-
+ runtime/src/gs/gpu/blit.wgsl  |  73 +++++++---
+ runtime/src/gs/gpu/gpu.cpp    | 138 +++++++++++++++++-
+ runtime/src/iop/spu2.cpp      |   9 +-
+ 10 files changed, 760 insertions(+), 123 deletions(-)
+
+diff --git a/host/keymap.cpp b/host/keymap.cpp
+index 639eb82..2939369 100644
+--- a/host/keymap.cpp
++++ b/host/keymap.cpp
+@@ -160,6 +160,48 @@ std::string with_line(const std::string &file_text, const std::string &name, con
+ std::string with_look(const std::string &file_text, int look) { return with_line(file_text, "look", std::string("look = ") + look_word(look)); }
+ 
+ std::string with_scale(const std::string &file_text, int scale) { return with_line(file_text, "scale", "scale = " + (scale == kScaleAuto ? std::string("auto") : std::to_string(scale))); }
++std::string with_key_prompts(const std::string &file_text, int on) { return with_line(file_text, "keyprompts", std::string("key_prompts = ") + (on ? "on" : "off")); }
++std::string short_input_name(int input) {
++    switch (input) {
++    case kMouseLeft: return "ML";
++    case kMouseRight: return "MR";
++    case kMouseMiddle: return "MM";
++    case kMouseX1: return "M4";
++    case kMouseX2: return "M5";
++    case kWheelUp: return "WU";
++    case kWheelDown: return "WD";
++    default: break;
++    }
++    if (input <= 0 || input >= kScancodes) return "";
++    switch (static_cast<SDL_Scancode>(input)) {
++    case SDL_SCANCODE_SPACE: return "SP";
++    case SDL_SCANCODE_RETURN: case SDL_SCANCODE_KP_ENTER: return "EN";
++    case SDL_SCANCODE_LSHIFT: case SDL_SCANCODE_RSHIFT: return "SH";
++    case SDL_SCANCODE_LCTRL: case SDL_SCANCODE_RCTRL: return "CT";
++    case SDL_SCANCODE_LALT: case SDL_SCANCODE_RALT: return "AL";
++    case SDL_SCANCODE_TAB: return "TB";
++    case SDL_SCANCODE_BACKSPACE: return "BS";
++    case SDL_SCANCODE_ESCAPE: return "ES";
++    case SDL_SCANCODE_UP: return "^";
++    case SDL_SCANCODE_DOWN: return "v";
++    case SDL_SCANCODE_LEFT: return "<";
++    case SDL_SCANCODE_RIGHT: return ">";
++    default: break;
++    }
++    std::string name = SDL_GetScancodeName(static_cast<SDL_Scancode>(input));
++    if (name.rfind("Keypad ", 0) == 0) name = name.substr(7);
++    std::string out;
++    for (char ch : name) {
++        if (ch >= 'a' && ch <= 'z') ch = static_cast<char>(ch - 32);
++        if ((ch >= 'A' && ch <= 'Z') || (ch >= '0' && ch <= '9') || ch == '+' || ch == '-') out += ch;
++        if (out.size() == 3) break;
++    }
++    return out;
++}
++std::string with_reverb(const std::string &file_text, int on) { return with_line(file_text, "reverb", std::string("reverb = ") + (on ? "on" : "off")); }
++std::string with_window_size(const std::string &file_text, int w, int h) {
++    return with_line(file_text, "windowsize", "window_size = " + std::to_string(w) + "x" + std::to_string(h));
++}
+ std::string with_menu_skin(const std::string &file_text, int skin) { return with_line(file_text, "menuskin", std::string("menu_skin = ") + (skin == 1 ? "japanese" : "hazard")); }
+ std::string with_integer_scale(const std::string &file_text, int on) { return with_line(file_text, "integerscale", "integer_scale = " + std::to_string(on ? 1 : 0)); }
+ std::string with_lens_rain(const std::string &file_text, int level) { return with_line(file_text, "lensrain", "lens_rain = " + std::to_string(level)); }
+@@ -311,6 +353,26 @@ void parse(const std::string &text, Config &config, std::vector<std::string> &pr
+             else bad("smaa is on or off, ignored");
+             continue;
+         }
++        if (name == "keyprompts") {
++            const std::string v = squash(value);
++            if (v == "on" || v == "1") config.key_prompts = 1;
++            else if (v == "off" || v == "0") config.key_prompts = 0;
++            else bad("key_prompts is on or off, ignored");
++            continue;
++        }
++        if (name == "reverb") {
++            const std::string v = squash(value);
++            if (v == "on" || v == "1") config.reverb = 1;
++            else if (v == "off" || v == "0") config.reverb = 0;
++            else bad("reverb is on or off, ignored");
++            continue;
++        }
++        if (name == "windowsize") {
++            int w = 0, h = 0;
++            if (std::sscanf(value.c_str(), "%dx%d", &w, &h) == 2 && w >= 320 && h >= 224 && w <= 16384 && h <= 16384) config.window_w = w, config.window_h = h;
++            else bad("window_size is WIDTHxHEIGHT (1600x900), ignored");
++            continue;
++        }
+         if (name == "menuskin") {
+             const std::string v = squash(value);
+             if (v == "hazard" || v == "0") config.menu_skin = 0;
+diff --git a/host/keymap.hpp b/host/keymap.hpp
+index 43e0df5..302fb2d 100644
+--- a/host/keymap.hpp
++++ b/host/keymap.hpp
+@@ -42,6 +42,9 @@ struct Config {
+     int master_volume = 100;
+     int menu_skin = -1;        // rawdanger-recomp: the F1 menu's look: 0 hazard (yellow on black), 1 Japanese (blue on white, the
+                                // launcher's Japanese skin); -1 = from the game's language (PS2_LANGUAGE / PS2_MENU_SKIN)
++    int reverb = 1;            // rawdanger-recomp: the sound chip's reverb (0 off)
++    int key_prompts = 1;       // rawdanger-recomp: the game's texts show the keys instead of the PlayStation symbols (0: the symbols)
++    int window_w = 0, window_h = 0;  // rawdanger-recomp: the window's size from the menu's presets (0: the default)
+     int integer_scale = 0;     // rawdanger-recomp: the picture is enlarged by whole numbers only (every console pixel row the same height)
+     int lens_rain = 0;         // rawdanger-recomp: rain drops on the lens while playing: 0 off, 1 light, 2 heavy
+     int smaa = 0;              // rawdanger-recomp: SMAA 1x on the console picture (anti-aliasing), 0 off, 1 on   // rawdanger-recomp: the volume of everything the game plays, 0 to 100 (%)
+@@ -63,7 +66,12 @@ const char *sharp_2d_word(int sharp);  // "soft", "sharp", "sharpest"
+ std::string with_pause_unfocused(const std::string &file_text, int on);  // the 'pause_unfocused' line
+ std::string with_master_volume(const std::string &file_text, int percent);
+ std::string with_integer_scale(const std::string &file_text, int on);
+-std::string with_menu_skin(const std::string &file_text, int skin);   // the 'menu_skin' line: hazard / japanese
++std::string with_menu_skin(const std::string &file_text, int skin);
++std::string with_reverb(const std::string &file_text, int on);
++std::string with_key_prompts(const std::string &file_text, int on);
++// rawdanger-recomp: a key's name in at most 3 capitals for the caps drawn in the game's font ("E", "SP", "ML", "F10")
++std::string short_input_name(int input);
++std::string with_window_size(const std::string &file_text, int w, int h);   // the 'menu_skin' line: hazard / japanese
+ std::string with_lens_rain(const std::string &file_text, int level);
+ std::string with_smaa(const std::string &file_text, int on);  // the 'master_volume' line
+ 
+diff --git a/host/lens_rain.cpp b/host/lens_rain.cpp
+index fbe58ef..8adcb9b 100644
+--- a/host/lens_rain.cpp
++++ b/host/lens_rain.cpp
+@@ -1,10 +1,16 @@
+-// rawdanger-recomp: rain drops on the lens while playing (keys.ini lens_rain = 0 off, 1 light, 2 heavy; F1 -> Graphics and sound).
+-// Drops land at random places, stay a moment, then run down and fade, like rain on a camera; they are drawn over the picture by
+-// blit.wgsl (drops_over). Written for this project; the idea is the one of rain-drop mods for PC games, no code is taken from them.
++// rawdanger-recomp: rain on the lens while playing (keys.ini lens_rain = 0 off, 1 light, 2 heavy; F1 -> Graphics and sound).
++// Drops land at random places, cling a moment, then run down, leaving a thin wet trail that dries, like rain on a camera that is
++// out in it; heavy rain also mists the lens at its edges. They are drawn over the picture by blit.wgsl (drops_over). Written for
++// this project; the idea is the one of rain-drop mods for PC games, no code is taken from them.
+ //
+-// When: PS2_LENS_WHEN="ADDRESS=VALUE" (a 32-bit word of the game's memory, e.g. Raw Danger's scene 0x48F488=21 = playing; set by
+-// RawDangerPC.exe) lets drops land only while the game says it is playing; without it they land all the time (menus included).
+-// Off, or when the game stops playing (a menu, a film), the drops on the lens run off within a second.
++// What the game says decides when (both set by RawDangerPC.exe, both optional):
++//   PS2_LENS_WHEN="ADDRESS=VALUE"  a 32-bit word that holds VALUE while the player is playing (Raw Danger's scene 0x48F488=21).
++//   PS2_LENS_WEATHER="ADDRESS"     the map's weather, a 32-bit word: 0 dry (indoors, the underground, a clear night), 1 to 3 rain
++//                                  (light, steady, heavy), 4 to 6 snow. Raw Danger keeps it at 0x48F310 (gp - 0x4B60), set with
++//                                  every map by the function at 0x100BF0, which prints "MAP Wether = %d"; the code that reads
++//                                  it (0x14A784) treats 1-3 and 4-6 as two families of three strengths. Rain lands drops in
++//                                  proportion; snow and dry maps land none.
++// Off, or when the game stops playing (a menu, a film) or the map is dry, the drops on the lens run off within a second or two.
+ #include "lens_rain.hpp"
+ 
+ #include "ps2/memory.hpp"
+@@ -13,6 +19,7 @@
+ #include <algorithm>
+ #include <cmath>
+ #include <cstdint>
++#include <cstdio>
+ #include <cstdlib>
+ #include <random>
+ #include <string>
+@@ -21,99 +28,167 @@
+ namespace lens_rain {
+ namespace {
+ 
++constexpr std::size_t kMost = 64;
++
+ struct Drop {
+     float x, y, r;      // centre (0 ... 1 of the picture), radius (a share of its height)
+     float age, life;    // seconds
+     float hold;         // seconds it clings before it starts to run
+     float speed;        // picture heights per second once it runs
+     float alpha;
++    float trail;        // length of the wet trail above it (picture heights)
++    float stretch;      // 1 round, more: pulled long while it runs
++    float seed;         // per-drop variety for the shader (0 ... 1)
++    float wobble;       // the sideways drift it has picked
+ };
+ 
+ int g_level = 0;
+ std::vector<Drop> g_drops;
+ std::mt19937 g_random{20061108u};
+-bool g_when_set = false;
+-std::uint32_t g_when_address = 0, g_when_value = 0;
++bool g_when_set = false, g_weather_set = false;
++std::uint32_t g_when_address = 0, g_when_value = 0, g_weather_address = 0;
+ bool g_parsed = false;
++float g_mist = 0.0f;                  // how misted the lens is (0 ... 1), follows the rain slowly
++float g_clock = 0.0f;
++std::uint32_t g_last_weather = 0xFFFFFFFFu;
+ 
+-void parse_when() {
++std::uint32_t word(std::uint32_t address) {
++    std::uint32_t v = 0;
++    for (int i = 0; i < 4; ++i) v |= static_cast<std::uint32_t>(ps2::ld8(address + static_cast<std::uint32_t>(i))) << (8 * i);
++    return v;
++}
++
++void parse_env() {
+     g_parsed = true;
+-    const char *w = std::getenv("PS2_LENS_WHEN");
+-    if (!w || !*w) return;
+-    const std::string s(w);
+-    const std::size_t eq = s.find('=');
+-    if (eq == std::string::npos) return;
+-    g_when_address = static_cast<std::uint32_t>(std::strtoul(s.substr(0, eq).c_str(), nullptr, 0)) & 0x01FFFFFCu;
+-    g_when_value = static_cast<std::uint32_t>(std::strtoul(s.substr(eq + 1).c_str(), nullptr, 0));
+-    g_when_set = true;
++    if (const char *w = std::getenv("PS2_LENS_WHEN"); w && *w) {
++        const std::string s(w);
++        const std::size_t eq = s.find('=');
++        if (eq != std::string::npos) {
++            g_when_address = static_cast<std::uint32_t>(std::strtoul(s.substr(0, eq).c_str(), nullptr, 0)) & 0x01FFFFFCu;
++            g_when_value = static_cast<std::uint32_t>(std::strtoul(s.substr(eq + 1).c_str(), nullptr, 0));
++            g_when_set = true;
++        }
++    }
++    if (const char *w = std::getenv("PS2_LENS_WEATHER"); w && *w) {
++        g_weather_address = static_cast<std::uint32_t>(std::strtoul(w, nullptr, 0)) & 0x01FFFFFCu;
++        g_weather_set = g_weather_address != 0;
++    }
+ }
+ 
+ bool playing() {
+-    if (!g_parsed) parse_when();
+-    if (!g_when_set) return true;
+-    std::uint32_t v = 0;
+-    for (int i = 0; i < 4; ++i) v |= static_cast<std::uint32_t>(ps2::ld8(g_when_address + static_cast<std::uint32_t>(i))) << (8 * i);
+-    return v == g_when_value;
++    if (!g_parsed) parse_env();
++    return !g_when_set || word(g_when_address) == g_when_value;
++}
++
++// how hard it rains on the lens, 0 ... 1 (1 without a weather address: the old "always" behaviour)
++float rain() {
++    if (!g_weather_set) return 1.0f;
++    const std::uint32_t w = word(g_weather_address);
++    if (w != g_last_weather) {
++        g_last_weather = w;
++        std::fprintf(stderr, "[lens] map weather %u: %s\n", w, w == 0 ? "dry" : w <= 3 ? "rain" : w <= 6 ? "snow" : "unknown");
++    }
++    switch (w) {
++    case 1: return 0.4f;
++    case 2: return 0.7f;
++    case 3: return 1.0f;
++    default: return 0.0f;   // dry, snow, or a value this does not know
++    }
+ }
+ 
+ float uniform(float a, float b) { return std::uniform_real_distribution<float>(a, b)(g_random); }
+ 
++void spawn(float strength) {
++    Drop d;
++    d.x = uniform(0.02f, 0.98f);
++    d.y = uniform(-0.02f, 0.88f);
++    const float size = uniform(0.0f, 1.0f);
++    d.r = 0.006f + size * size * size * 0.032f * (0.7f + 0.3f * strength);   // mostly small, now and then a big one
++    d.age = 0.0f;
++    d.life = uniform(3.0f, 8.0f);
++    d.hold = uniform(0.4f, 3.0f) * (1.2f - 0.4f * strength);                 // in heavy rain they let go sooner
++    d.speed = 0.04f + d.r * 7.0f;                                            // big drops run faster
++    d.alpha = 0.0f;
++    d.trail = 0.0f;
++    d.stretch = 1.0f;
++    d.seed = uniform(0.0f, 1.0f);
++    d.wobble = uniform(-0.012f, 0.012f);
++    g_drops.push_back(d);
++}
++
+ }  // namespace
+ 
+ void set_level(int level) { g_level = std::clamp(level, 0, 2); }
+ int level() { return g_level; }
+ bool knows_when() {
+-    if (!g_parsed) parse_when();
++    if (!g_parsed) parse_env();
+     return g_when_set;
+ }
+ 
+ void frame(float seconds) {
+-    const bool on = g_level > 0 && playing();
+-    // new drops: light about 2 a second (up to 18 on the lens), heavy about 7 a second (up to 48)
++    g_clock += seconds;
++    const float strength = g_level > 0 && playing() ? rain() : 0.0f;
++    const bool on = strength > 0.0f;
++    // new drops: light about 2.5 a second at full rain (up to 24 on the lens), heavy about 8 (up to 64)
+     if (on) {
+-        const float rate = g_level == 1 ? 2.0f : 7.0f;
+-        const std::size_t most = g_level == 1 ? 18 : 48;
++        const float rate = (g_level == 1 ? 2.5f : 8.0f) * strength;
++        const std::size_t most = g_level == 1 ? 24 : kMost;
+         float expect = rate * seconds;
+         while (expect > 0.0f && g_drops.size() < most) {
+-            if (uniform(0.0f, 1.0f) < expect) {
+-                Drop d;
+-                d.x = uniform(0.02f, 0.98f);
+-                d.y = uniform(0.0f, 0.85f);
+-                const float size = uniform(0.0f, 1.0f);
+-                d.r = 0.008f + size * size * 0.03f;          // mostly small, now and then a big one
+-                d.age = 0.0f;
+-                d.life = uniform(2.5f, 7.0f);
+-                d.hold = uniform(0.3f, 2.5f);
+-                d.speed = 0.05f + d.r * 6.0f;                  // big drops run faster
+-                d.alpha = 0.0f;
+-                g_drops.push_back(d);
+-            }
++            if (uniform(0.0f, 1.0f) < expect) spawn(strength);
+             expect -= 1.0f;
+         }
+     }
++    // the mist follows the rain: up in a few seconds of heavy rain, gone within a few seconds out of it
++    const float mist_goal = on ? strength * (g_level == 1 ? 0.35f : 0.7f) : 0.0f;
++    g_mist += (mist_goal - g_mist) * std::min(1.0f, seconds * (mist_goal > g_mist ? 0.25f : 0.6f));
+     for (Drop &d : g_drops) {
+         d.age += seconds;
+-        if (!on) d.life = std::min(d.life, d.age + 0.6f);   // nothing more falls: the lens clears quickly
++        if (!on) d.life = std::min(d.life, d.age + 1.2f);   // nothing more falls: the lens clears
+         if (d.age > d.hold) {
+-            d.y += d.speed * seconds;
+-            d.x += uniform(-0.002f, 0.002f);                   // runs down a little crookedly
+-            d.r = std::max(0.006f, d.r - 0.004f * seconds);   // leaves water behind and gets smaller
++            const float step = d.speed * seconds;
++            d.y += step;
++            d.x += d.wobble * seconds + uniform(-0.0015f, 0.0015f);   // runs down a little crookedly
++            d.trail = std::min(0.28f, d.trail + step);
++            d.r = std::max(0.005f, d.r - 0.003f * seconds);           // leaves water behind and gets smaller
++            d.stretch = std::min(1.6f, d.stretch + seconds * 2.0f);
++        } else {
++            d.trail = std::max(0.0f, d.trail - seconds * 0.05f);
++        }
++        const float in = std::min(1.0f, d.age / 0.15f), out = std::clamp((d.life - d.age) / 1.0f, 0.0f, 1.0f);
++        d.alpha = 0.9f * in * out;
++    }
++    // merging: a running drop swallows still drops it reaches (the bigger result runs on)
++    for (Drop &d : g_drops) {
++        if (d.age <= d.hold || d.alpha <= 0.0f) continue;
++        for (Drop &o : g_drops) {
++            if (&o == &d || o.alpha <= 0.0f || o.age > o.hold) continue;
++            const float dx = (o.x - d.x) * 1.7f, dy = o.y - d.y;
++            if (dx * dx + dy * dy < (d.r + o.r) * (d.r + o.r)) {
++                d.r = std::min(0.045f, std::sqrt(d.r * d.r + o.r * o.r));
++                d.speed = 0.04f + d.r * 7.0f;
++                o.alpha = 0.0f;
++                o.life = o.age;
++            }
+         }
+-        const float in = std::min(1.0f, d.age / 0.12f), out = std::clamp((d.life - d.age) / 0.8f, 0.0f, 1.0f);
+-        d.alpha = 0.85f * in * out;
+     }
+     g_drops.erase(std::remove_if(g_drops.begin(), g_drops.end(), [](const Drop &d) { return d.age >= d.life || d.y - d.r > 1.05f; }), g_drops.end());
+-    float data[48 * 4];
++    float data[kMost * 8];
+     unsigned n = 0;
+     for (const Drop &d : g_drops) {
+-        if (n == 48) break;
+-        data[n * 4 + 0] = d.x;
+-        data[n * 4 + 1] = d.y;
+-        data[n * 4 + 2] = d.r;
+-        data[n * 4 + 3] = d.alpha;
++        if (n == kMost) break;
++        float *p = data + n * 8;
++        p[0] = d.x;
++        p[1] = d.y;
++        p[2] = d.r;
++        p[3] = d.alpha;
++        p[4] = d.trail;
++        p[5] = d.stretch;
++        p[6] = d.seed;
++        p[7] = 0.0f;
+         ++n;
+     }
+-    ps2::set_lens_drops(data, n);
++    ps2::set_lens_drops(data, n, g_mist, g_clock);
+ }
+ 
+ }  // namespace lens_rain
+diff --git a/host/quickmenu.cpp b/host/quickmenu.cpp
+index 6e6ecc4..4775fae 100644
+--- a/host/quickmenu.cpp
++++ b/host/quickmenu.cpp
+@@ -1,6 +1,7 @@
+ #include "quickmenu.hpp"
+ 
+ #include <algorithm>
++#include <cmath>
+ #include <cstring>
+ 
+ namespace quickmenu {
+@@ -108,16 +109,22 @@ constexpr const char *kFont[95] = {
+ };
+ 
+ // rawdanger-recomp: the menu laid out for Raw Danger - the game's own options first, then the picture, then controls.
+-constexpr int kEntries = 10;
+-constexpr Command kCommands[kEntries] = {Command::resume,   Command::save,         Command::load,  Command::recomp,      Command::graphics,
+-                                         Command::achievements, Command::language, Command::keys,     Command::change_keys, Command::quit};
++constexpr int kEntries = 7;
++constexpr Command kCommands[kEntries] = {Command::resume, Command::save, Command::load, Command::graphics, Command::achievements, Command::language, Command::quit};
+ // the program's key for the same thing, shown dim at the right end of the entry
+-constexpr const char *kKeys[kEntries] = {"F1", "F5", "F8", "F3", "", "F4", "", "", "", ""};
+-// the Graphics page
+-constexpr int kGraphicsEntries = 12;
+-constexpr Command kGraphics[kGraphicsEntries] = {Command::scale,      Command::look,      Command::antialias,     Command::integer_scale,   Command::sharp_2d, Command::fullscreen,
+-                                                 Command::widescreen, Command::lens_rain, Command::master_volume, Command::pause_unfocused, Command::menu_skin, Command::back};
+-constexpr const char *kGraphicsKeys[kGraphicsEntries] = {"", "F2", "", "", "", "F11", "", "", "", "", "", "Esc"};
++constexpr const char *kKeys[kEntries] = {"F1", "F5", "F8", "F3", "F4", "", ""};
++// Settings: one page, five tabs (the Game tab lists the game's own options, filled by the window)
++constexpr const char *kTabNames[Menu::kTabs] = {"DISPLAY", "PICTURE", "SOUND", "CONTROLS", "GAME"};
++constexpr Command kDisplay[] = {Command::scale, Command::window_size, Command::fullscreen, Command::widescreen, Command::integer_scale, Command::pause_unfocused, Command::menu_skin, Command::back};
++constexpr const char *kDisplayKeys[] = {"", "", "F11", "", "", "", "", "Esc"};
++constexpr Command kPicture[] = {Command::look, Command::antialias, Command::sharp_2d, Command::game_blur, Command::lens_rain, Command::back};
++constexpr const char *kPictureKeys[] = {"F2", "", "", "", "", "Esc"};
++constexpr Command kSound[] = {Command::master_volume, Command::reverb, Command::back};
++constexpr const char *kSoundKeys[] = {"", "", "Esc"};
++constexpr Command kControls[] = {Command::change_keys, Command::key_prompts, Command::keys, Command::back};
++constexpr const char *kControlsKeys[] = {"", "", "", "Esc"};
++struct TabList { const Command *commands; const char *const *keys; int n; };
++constexpr TabList kTabLists[Menu::kTabs - 1] = {{kDisplay, kDisplayKeys, 8}, {kPicture, kPictureKeys, 6}, {kSound, kSoundKeys, 3}, {kControls, kControlsKeys, 4}};
+ constexpr int kVisibleRows = 11;  // lines of the keys page shown at once; the page scrolls
+ constexpr int kKeysPageChars = 58;
+ 
+@@ -145,6 +152,42 @@ struct Canvas {
+         for (int j = y0; j < y1; ++j) std::fill(p.rgba.begin() + j * p.width + x0, p.rgba.begin() + j * p.width + x1, color);
+     }
+     // one letter is 5 x 8 pixels of the font, each `s` x `s` screen pixels; a letter is 6 font pixels wide with its gap
++    void box(int x, int y, int w, int h, int t, std::uint32_t color) {
++        fill(x, y, w, t, color);
++        fill(x, y + h - t, w, t, color);
++        fill(x, y, t, h, color);
++        fill(x + w - t, y, t, h, color);
++    }
++    // rawdanger-recomp: a key cap (a box with a lighter top edge and the key's name), `s` font pixels; returns its width
++    int keycap(int x, int y, int s, const std::string &name, std::uint32_t face, std::uint32_t edge, std::uint32_t ink) {
++        const int w = (static_cast<int>(name.size()) * 6 + 5) * s, h = 11 * s, t = std::max(1, s / 2);
++        fill(x, y, w, h, face);
++        box(x, y, w, h, t, edge);
++        fill(x + t, y + h - 2 * t, w - 2 * t, t, edge);   // its lower lip, like a real key
++        text(x + 3 * s, y + 2 * s, s, name, ink);
++        return w;
++    }
++    // rawdanger-recomp: the PlayStation's face buttons (cross, circle, square, triangle) as drawn symbols, d x d window pixels
++    void symbol(int x, int y, int d, int which, std::uint32_t color) {
++        const float r = d * 0.5f, cx = x + r, cy = y + r, line = std::max(1.0f, d / 9.0f);
++        for (int j = 0; j < d; ++j)
++            for (int i = 0; i < d; ++i) {
++                const float px = x + i + 0.5f - cx, py = y + j + 0.5f - cy;
++                bool on = false;
++                if (which == 0) on = (std::fabs(px - py) < line || std::fabs(px + py) < line) && std::fabs(px) < r * 0.72f && std::fabs(py) < r * 0.72f;  // cross
++                else if (which == 1) on = std::fabs(std::sqrt(px * px + py * py) - r * 0.7f) < line;                                                   // circle
++                else if (which == 2) on = std::max(std::fabs(px), std::fabs(py)) < r * 0.68f && std::max(std::fabs(px), std::fabs(py)) > r * 0.68f - line * 1.4f;  // square
++                else {
++                    // triangle: three edges of an upright triangle
++                    const float top = -r * 0.62f, bottom = r * 0.5f, half = r * 0.7f;
++                    if (py >= top - line && py <= bottom + line) {
++                        const float k = (py - top) / (bottom - top), edge_x = k * half;
++                        on = (std::fabs(std::fabs(px) - edge_x) < line * 1.3f && py <= bottom) || (std::fabs(py - bottom) < line && std::fabs(px) <= half);
++                    }
++                }
++                if (on && x + i >= 0 && y + j >= 0 && x + i < p.width && y + j < p.height) p.rgba[static_cast<std::size_t>(y + j) * p.width + x + i] = color;
++            }
++    }
+     void text(int x, int y, int s, const std::string &line, std::uint32_t color) {
+         for (unsigned char c : line) {
+             const char *glyph = kFont[(c >= 32 && c <= 126 ? c : '?') - 32];
+@@ -184,7 +227,15 @@ std::string entry_text(Command c, const Values &v, bool quit_armed) {
+     case Command::save: return "Quick save";
+     case Command::load: return "Quick load";
+     case Command::recomp: return "Game options";
+-    case Command::graphics: return "Graphics and sound";
++    case Command::graphics: return "Settings";
++    case Command::window_size: return "Window size:  < " + (v.window_size.empty() ? std::string("?") : v.window_size) + " >";
++    case Command::game_blur:
++        if (v.game_blur < 0) return "Game's blur filter: as built (no switch)";
++        return std::string("Game's blur filter:  < ") + (v.game_blur ? "on (as on the console)" : "off (sharper)") + " >";
++    case Command::key_prompts:
++        if (v.key_prompts < 0) return "Buttons in the game's texts: PlayStation (no key pictures here)";
++        return std::string("Buttons in the game's texts:  < ") + (v.key_prompts ? "your keys" : "PlayStation symbols") + " >";
++    case Command::reverb: return std::string("Reverb (rooms, tunnels):  < ") + (v.reverb ? "on" : "off") + " >";
+     case Command::widescreen: return v.widescreen < 0 ? "Widescreen: not in this game" : std::string("Widescreen 16:9:  < ") + (v.widescreen ? "on" : "off") + " >";
+     case Command::pause_unfocused: return std::string("Pause in the background:  < ") + (v.pause_unfocused ? "on" : "off") + " >";
+     case Command::master_volume: {
+@@ -221,8 +272,8 @@ std::string entry_text(Command c, const Values &v, bool quit_armed) {
+         return std::string("Text and menus:  < ") + name(v.sharp_next) + " >" + (v.sharp_next != v.sharp_now ? "  at the next start" : "");
+     }
+     case Command::fullscreen: return std::string("Full screen:  < ") + (v.fullscreen ? "on" : "off") + " >";
+-    case Command::keys: return "Key card";
+-    case Command::change_keys: return "Change keys";
++    case Command::keys: return "Key card (all keys at a glance)";
++    case Command::change_keys: return "Change keys (keyboard, mouse)";
+     case Command::quit: return quit_armed ? "Quit to desktop?  Enter / Cross again" : "Quit to desktop";
+     case Command::language:
+         if (v.language_other.empty())
+@@ -233,10 +284,45 @@ std::string entry_text(Command c, const Values &v, bool quit_armed) {
+     }
+ }
+ 
++// Settings' tab row: each name in a box, the current one filled; xs gets each tab's left edge and, last, the right end of the row
++void tabs_row(Canvas &c, int x, int y, int s, int current, int *xs) {
++    for (int i = 0; i < Menu::kTabs; ++i) {
++        const std::string name = kTabNames[i];
++        const int w = (static_cast<int>(name.size()) + 2) * 6 * s;
++        xs[i] = x;
++        if (i == current) c.fill(x, y, w, 12 * s, kBar);
++        else {
++            c.fill(x, y + 11 * s, w, std::max(1, s / 2), kFrame);
++        }
++        c.text(x + 6 * s, y + 2 * s, s, name, i == current ? kBarText : kDim);
++        x += w + 2 * s;
++    }
++    xs[Menu::kTabs] = x;
++}
++
+ }  // namespace
+ 
++bool Menu::click_tab(int x, int y) {
++    if (page_ != Page::graphics || tab_h_ <= 0 || y < tab_y_ || y >= tab_y_ + tab_h_) return false;
++    for (int i = 0; i < kTabs; ++i)
++        if (x >= tab_x_[i] && x < tab_x_[i + 1]) {
++            if (i != tab_) { tab_ = i; selected_ = 0; top_ = 0; }
++            return true;
++        }
++    return false;
++}
++
+ int Menu::count() const {
+-    return page_ == Page::keys ? key_rows_ + 2 : page_ == Page::recomp || page_ == Page::achievements ? recomp_rows_ + 1 : page_ == Page::graphics ? kGraphicsEntries : kEntries;
++    if (page_ == Page::graphics) return tab_ == kGameTab ? recomp_rows_ + 1 : kTabLists[tab_].n;
++    return page_ == Page::keys ? key_rows_ + 2 : page_ == Page::recomp || page_ == Page::achievements ? recomp_rows_ + 1 : kEntries;
++}
++
++void Menu::tab(int delta) {
++    if (page_ != Page::graphics) return;
++    tab_ = (tab_ + delta % kTabs + kTabs) % kTabs;
++    selected_ = 0;
++    top_ = 0;
++    quit_armed_ = false;
+ }
+ 
+ void Menu::fit() {
+@@ -250,6 +336,16 @@ void Menu::fit() {
+ 
+ bool Menu::back() {
+     if (page_ == Page::main) return false;
++    if (page_ == Page::keys && keys_from_settings_) {
++        // back to Settings > Controls, on Change keys
++        keys_from_settings_ = false;
++        page_ = Page::graphics;
++        tab_ = 3;
++        selected_ = 0;
++        capturing_ = false;
++        defaults_armed_ = false;
++        return true;
++    }
+     page_ = Page::main;
+     selected_ = main_selected_;
+     capturing_ = false;
+@@ -303,8 +399,21 @@ Command Menu::choose() {
+         return Command::none;
+     }
+     if (page_ == Page::graphics) {
+-        const Command g = kGraphics[selected_];
++        if (tab_ == kGameTab) {
++            if (selected_ < recomp_rows_) return Command::recomp_toggle;
++            back();
++            return Command::none;
++        }
++        const Command g = kTabLists[tab_].commands[selected_];
+         if (g == Command::back) { back(); return Command::none; }
++        if (g == Command::change_keys) {
++            keys_from_settings_ = true;
++            page_ = Page::keys;
++            selected_ = 0;
++            top_ = 0;
++            capturing_ = false;
++            defaults_armed_ = false;
++        }
+         return g;
+     }
+     const Command c = kCommands[selected_];
+@@ -312,6 +421,7 @@ Command Menu::choose() {
+         main_selected_ = selected_;
+         page_ = Page::graphics;
+         selected_ = 0;
++        top_ = 0;
+         return c;
+     }
+     if (c == Command::recomp) {
+@@ -343,15 +453,20 @@ Command Menu::choose() {
+ }
+ 
+ Command Menu::side() const {
+-    if (page_ != Page::graphics) return Command::none;
+-    const Command c = kGraphics[selected_];
++    if (page_ != Page::graphics || tab_ == kGameTab) return Command::none;
++    const Command c = kTabLists[tab_].commands[selected_];
+     return c == Command::look || c == Command::scale || c == Command::sharp_2d || c == Command::fullscreen || c == Command::widescreen || c == Command::pause_unfocused ||
+-                   c == Command::master_volume || c == Command::integer_scale || c == Command::lens_rain || c == Command::antialias || c == Command::menu_skin
++                   c == Command::master_volume || c == Command::integer_scale || c == Command::lens_rain || c == Command::antialias || c == Command::menu_skin ||
++                   c == Command::window_size || c == Command::game_blur || c == Command::reverb || c == Command::key_prompts
+                ? c : Command::none;
+ }
+ 
+ bool Menu::select_at(int x, int y) {
+-    if (page_ == Page::recomp || page_ == Page::achievements) {
++    if (page_ == Page::graphics && tab_h_ > 0 && y >= tab_y_ && y < tab_y_ + tab_h_) {
++        // a tab: hovering does nothing, the click (choose) is handled by click_tab
++        return false;
++    }
++    if (page_ == Page::recomp || page_ == Page::achievements || (page_ == Page::graphics && tab_ == kGameTab)) {
+         const int shown = std::min(recomp_rows_, 14);
+         if (entry_h_ <= 0 || x < entry_x_ || x >= entry_x_ + entry_w_ || y < rows_y_ || y >= rows_y_ + (shown + 1) * entry_h_) return false;
+         const int slot = (y - rows_y_) / entry_h_;
+@@ -416,8 +531,32 @@ void Menu::draw_keys(int window_width, int window_height, const Values &values,
+         const bool lit = index == selected_;
+         if (lit) c.fill(pad * s, y, inner_w, bar_h * s, kBar);
+         const std::uint32_t color = lit ? kBarText : kText;
+-        c.text(text_x, y + 2 * s, s, left, color);
+-        if (!right.empty()) c.text(text_x + (label_chars + 1) * 6 * s, y + 2 * s, s, fit_text(right, keys_chars), color);
++        // rawdanger-recomp: the PlayStation symbol before the face buttons, in their colours
++        int lx = text_x;
++        static const char *const kFaces[] = {"Cross", "Circle", "Square", "Triangle"};
++        static const std::uint32_t kFaceColors[] = {rgba(124, 178, 232, 255), rgba(255, 102, 102, 255), rgba(255, 105, 248, 255), rgba(64, 226, 160, 255)};
++        for (int f = 0; f < 4; ++f)
++            if (left == kFaces[f]) {
++                c.symbol(text_x - 2 * s, y + s, 10 * s, f, lit ? kBarText : kFaceColors[f]);
++                lx = text_x + 11 * s;
++            }
++        c.text(lx, y + 2 * s, s, left, color);
++        if (!right.empty()) {
++            // the keys as key caps ("E, Mouse 1" -> [E] [Mouse 1]); what does not fit ends in "..."
++            int kx = text_x + (label_chars + 1) * 6 * s;
++            const int end = pad * s + inner_w - 2 * s;
++            std::size_t from = 0;
++            while (from <= right.size()) {
++                std::size_t comma = right.find(", ", from);
++                const std::string name = right.substr(from, comma == std::string::npos ? std::string::npos : comma - from);
++                const int w = (static_cast<int>(name.size()) * 6 + 5) * s;
++                if (kx + w > end) { c.text(kx, y + 2 * s, s, "...", color); break; }
++                if (name == "none") c.text(kx, y + 2 * s, s, "(none)", lit ? kBarDim : kDim);
++                else kx += c.keycap(kx, y + s / 2, s, name, lit ? kBarText : kPanel | 0xFF000000u, lit ? kBarDim : kFrame, lit ? kBar : kText) + 3 * s;
++                if (comma == std::string::npos) break;
++                from = comma + 2;
++            }
++        }
+         y += bar_h * s;
+     };
+     for (int r = 0; r < shown; ++r) {
+@@ -442,9 +581,9 @@ void Menu::draw_keys(int window_width, int window_height, const Values &values,
+ 
+ // The Recomp options page: the game's patches, the live ones switchable here (and in RawDangerPC.exe, same file).
+ void Menu::draw_recomp(int window_width, int window_height, const Values &values, Picture &out) {
+-    const bool ach = page_ == Page::achievements;
+-    const std::string kTitleText = ach ? "ACHIEVEMENTS - offline" : "GAME OPTIONS - switched while you play",
+-                      kHint = ach ? "Enter / Cross: switch on / off     Esc / Circle: back" : "Enter / Cross: switch     Esc / Circle: back",
++    const bool ach = page_ == Page::achievements, tabs = page_ == Page::graphics;
++    const std::string kTitleText = ach ? "ACHIEVEMENTS - offline" : tabs ? "SETTINGS" : "GAME OPTIONS - switched while you play",
++                      kHint = ach ? "Enter / Cross: switch on / off     Esc / Circle: back" : tabs ? "Enter: switch   Tab / Q / E / L1 / R1: tabs   Esc: back" : "Enter / Cross: switch     Esc / Circle: back",
+                       kBuilt = ach ? "* unlocked. Kept next to the saves; nothing goes online" : "Also in RawDangerPC.exe (Recomp options). Dim: built in";
+     recomp_rows_ = static_cast<int>(values.recomp_rows.size());
+     const int all = recomp_rows_;
+@@ -458,10 +597,14 @@ void Menu::draw_recomp(int window_width, int window_height, const Values &values
+     const int n = std::min(all, shown_max);
+     const int pad = 8, bar_h = ach ? 14 : 12, bar_pad = 5, chars = 62;
+     const int units_w = 2 * pad + 2 * bar_pad + chars * 6;
+-    const int units_h = pad + 8 + 12 + (ach ? 8 : 0) + (n + 1) * bar_h + 3 + 11 + (ach ? 24 : 0) + 12 + 12 + 12 + 8 + pad;
+-    const int s = std::clamp(std::min(window_height * 4 / 5 / units_h, window_width * 23 / 25 / units_w), 1, 6);
++    const int units_h = pad + 8 + 12 + (ach ? 8 : 0) + (tabs ? 16 : 0) + (n + 1) * bar_h + 3 + 11 + (ach ? 24 : 0) + 12 + 12 + 12 + 8 + pad;
++    int s = std::clamp(std::min(window_height * 4 / 5 / units_h, window_width * 23 / 25 / units_w), 1, 6);
+     out.width = units_w * s;
+     out.height = units_h * s;
++    // Settings > Game: the very panel of the other tabs (size, hazard tape, title), so switching tabs does not make it jump
++    const int tape_h = tabs ? 6 : 0;
++    if (tabs && settings_s_ > 0) s = settings_s_, out.width = settings_w_, out.height = settings_h_;
++    else if (tabs) out.height += tape_h * s;
+     out.x = std::max(0, (window_width - out.width) / 2);
+     out.y = std::max(0, (window_height - out.height) / 2);
+     out.rgba.assign(static_cast<std::size_t>(out.width) * out.height, kPanel);
+@@ -472,9 +615,25 @@ void Menu::draw_recomp(int window_width, int window_height, const Values &values
+     c.fill(0, 0, frame, out.height, kFrame);
+     c.fill(out.width - frame, 0, frame, out.height, kFrame);
+     const int text_x = (pad + bar_pad) * s, inner_w = out.width - 2 * pad * s;
+-    int y = pad * s;
+-    c.text(text_x, y, s, kTitleText, kTitle);
++    int y = (pad + tape_h) * s;
++    if (tabs) {
++        c.tape(0, 0, out.width, tape_h * s, 4 * s);
++        c.fill(text_x, y, 2 * s, 8 * s, kAlarm);   // the red mark before the title, as on the other tabs
++        c.text(text_x + 4 * s, y, s, kTitleText, kTitle);
++    } else {
++        c.text(text_x, y, s, kTitleText, kTitle);
++    }
+     y += 8 * s + 6 * s;
++    if (tabs) {
++        int xs[kTabs + 1];
++        tabs_row(c, text_x - 2 * s, y, s, tab_, xs);
++        for (int i = 0; i <= kTabs; ++i) tab_x_[i] = out.x + xs[i];
++        tab_y_ = out.y + y;
++        tab_h_ = 12 * s;
++        y += 16 * s;
++    } else {
++        tab_h_ = 0;
++    }
+     if (ach) {
+         // how far the player is: a bar of the points won, hazard tape for the part still to win
+         const int bw = inner_w - 2 * bar_pad * s, bh = 4 * s;
+@@ -514,7 +673,8 @@ void Menu::draw_recomp(int window_width, int window_height, const Values &values
+         if (!right.empty()) c.text(out.width - text_x - static_cast<int>(right.size()) * 6 * s + s, y + (bar_h - 8) / 2 * s, s, right, lit ? kBarDim : color);
+         y += bar_h * s;
+     };
+-    if (n == 0) c.text(text_x, y + 2 * s, s, ach ? "No achievements loaded" : "No options file (the game was not built by RawDangerPC.exe)", kDim);
++    if (n == 0)
++        c.text(text_x, y + 2 * s, s, ach ? "No achievements loaded" : tabs ? "Nothing else here: widescreen is in Display, the blur in Picture" : "No options file (the game was not built by RawDangerPC.exe)", kDim);
+     for (int r = 0; r < n; ++r) {
+         const Values::RecompRow &row = values.recomp_rows[top_ + r];
+         line(top_ + r, row.label, row.state, !row.live, row.icon);
+@@ -550,7 +710,7 @@ void Menu::draw_recomp(int window_width, int window_height, const Values &values
+ }
+ 
+ void Menu::draw(int window_width, int window_height, const Values &values, Picture &out) {
+-    if (page_ == Page::recomp || page_ == Page::achievements) {
++    if (page_ == Page::recomp || page_ == Page::achievements || (page_ == Page::graphics && tab_ == kGameTab)) {
+         draw_recomp(window_width, window_height, values, out);
+         return;
+     }
+@@ -564,13 +724,13 @@ void Menu::draw(int window_width, int window_height, const Values &values, Pictu
+ // The main page and the Graphics page: a title under a strip of hazard tape, one bar per entry with its key at the right end.
+ void Menu::draw_list(int window_width, int window_height, const Values &values, Picture &out) {
+     const bool gfx = page_ == Page::graphics;
+-    const int n = gfx ? kGraphicsEntries : kEntries;
+-    const Command *commands = gfx ? kGraphics : kCommands;
+-    const char *const *keys = gfx ? kGraphicsKeys : kKeys;
++    const int n = gfx ? kTabLists[tab_].n : kEntries;
++    const Command *commands = gfx ? kTabLists[tab_].commands : kCommands;
++    const char *const *keys = gfx ? kTabLists[tab_].keys : kKeys;
+     std::string game = values.title.empty() ? "PAUSED" : values.title;
+     for (char &ch : game) ch = static_cast<char>(ch >= 'a' && ch <= 'z' ? ch - 32 : ch);
+-    const std::string kTitleText = gfx ? "GRAPHICS AND SOUND" : game + " - PAUSED";
+-    const std::string kHint = gfx ? "Left / Right: change     Esc / Circle: back" : "Enter / Cross: OK     F1 / Esc / Circle: resume";
++    const std::string kTitleText = gfx ? "SETTINGS" : game + " - PAUSED";
++    const std::string kHint = gfx ? "Left / Right: change   Tab / Q / E / L1 / R1: tabs   Esc: back" : "Enter / Cross: OK     F1 / Esc / Circle: resume";
+     const std::string kNote = gfx ? (values.scale_next != values.scale_now || values.sharp_next != values.sharp_now ? "Resolution and text filter: used at the next start" : "Saved in keys.ini next to the game")
+                                   : "rawdanger-recomp";
+     std::vector<std::string> lines(n);
+@@ -582,7 +742,16 @@ void Menu::draw_list(int window_width, int window_height, const Values &values,
+     // everything in font pixels first; one font pixel is `s` window pixels, as big as fits in about 80 % of the window
+     const int pad = 8, bar_h = 14, bar_pad = 5, tape_h = 6;
+     const int units_w = 2 * pad + 2 * bar_pad + static_cast<int>(chars) * 6;
+-    const int units_h = tape_h + pad + 8 + 12 + n * bar_h + 11 + 8 + 4 + 8 + pad;
++    // Settings: every tab's panel as big as the biggest, so switching tabs does not make it jump
++    int rows = n;
++    if (gfx) {
++        rows = 0;
++        for (const TabList &t : kTabLists) rows = std::max(rows, t.n);
++        for (const TabList &t : kTabLists)
++            for (int i = 0; i < t.n; ++i) chars = std::max(chars, entry_text(t.commands[i], values, false).size() + 5);
++        chars = std::max<std::size_t>(chars, 62);   // as wide as the Game tab (its list is 62 letters)
++    }
++    const int units_h = tape_h + pad + 8 + 12 + (gfx ? 16 : 0) + rows * bar_h + 11 + 8 + 4 + 8 + pad;
+     const int s = std::clamp(std::min(window_height * 4 / 5 / units_h, window_width * 23 / 25 / units_w), 1, 6);
+     out.width = units_w * s;
+     out.height = units_h * s;
+@@ -590,6 +759,7 @@ void Menu::draw_list(int window_width, int window_height, const Values &values,
+     out.y = std::max(0, (window_height - out.height) / 2);
+     out.rgba.assign(static_cast<std::size_t>(out.width) * out.height, kPanel);
+     Canvas c{out};
++    if (gfx) settings_s_ = s, settings_w_ = out.width, settings_h_ = out.height;
+     c.tape(0, 0, out.width, tape_h * s, 4 * s);
+     const int frame = std::max(1, s / 2);
+     c.fill(0, out.height - frame, out.width, frame, kFrame);
+@@ -599,6 +769,16 @@ void Menu::draw_list(int window_width, int window_height, const Values &values,
+     c.fill((pad + bar_pad) * s, y, 2 * s, 8 * s, kAlarm);  // a red mark before the title, like the warning signs
+     c.text((pad + bar_pad + 4) * s, y, s, kTitleText, kTitle);
+     y += 8 * s + 6 * s;
++    if (gfx) {
++        int xs[kTabs + 1];
++        tabs_row(c, (pad + bar_pad - 2) * s, y, s, tab_, xs);
++        for (int i = 0; i <= kTabs; ++i) tab_x_[i] = out.x + xs[i];
++        tab_y_ = out.y + y;
++        tab_h_ = 12 * s;
++        y += 16 * s;
++    } else {
++        tab_h_ = 0;
++    }
+     c.fill(pad * s, y, out.width - 2 * pad * s, std::max(1, s / 2), kFrame);
+     y += 6 * s;
+     entry_x_ = out.x + pad * s;
+@@ -609,12 +789,14 @@ void Menu::draw_list(int window_width, int window_height, const Values &values,
+         const bool lit = i == selected_;
+         const bool quit = commands[i] == Command::quit;
+         if (lit) c.fill(pad * s, y, out.width - 2 * pad * s, bar_h * s, quit ? kAlarm : kBar);
+-        const bool unusable = (commands[i] == Command::widescreen && values.widescreen < 0) || (commands[i] == Command::language && values.language_other.empty());
++        const bool unusable = (commands[i] == Command::widescreen && values.widescreen < 0) || (commands[i] == Command::language && values.language_other.empty()) ||
++                              (commands[i] == Command::game_blur && values.game_blur < 0) || (commands[i] == Command::key_prompts && values.key_prompts < 0);
+         c.text((pad + bar_pad) * s, y + 3 * s, s, lines[i], lit ? (quit ? kText : kBarText) : unusable ? kDim : kText);
+         const std::string key = keys[i];
+         c.text(out.width - (pad + bar_pad) * s - static_cast<int>(key.size()) * 6 * s + s, y + 3 * s, s, key, lit ? (quit ? kText : kBarDim) : kDim);
+         y += bar_h * s;
+     }
++    y += (rows - n) * bar_h * s;   // Settings: the room of a longer tab
+     y += 5 * s;
+     c.fill(pad * s, y, out.width - 2 * pad * s, std::max(1, s / 2), kFrame);
+     y += 6 * s;
+diff --git a/host/quickmenu.hpp b/host/quickmenu.hpp
+index c34ef15..d71551f 100644
+--- a/host/quickmenu.hpp
++++ b/host/quickmenu.hpp
+@@ -34,6 +34,10 @@ enum class Command {
+     lens_rain,     // Graphics and sound page: rain drops on the lens while playing (off / light / heavy)
+     master_volume, // Graphics and sound page: the volume of the game's sound (left / right: 10 % steps)
+     menu_skin,     // Graphics and sound page: the menu's look (hazard / Japanese)
++    window_size,   // Settings > Display: the window's size (presets; windowed only)
++    game_blur,     // Settings > Picture: the game's own full-screen blur (its "No post-processing filter" option, inverted)
++    reverb,        // Settings > Sound: the sound chip's reverb (echo of rooms and tunnels)
++    key_prompts,   // Settings > Controls: the game's texts show the keys (key caps) or the PlayStation symbols
+     language,      // rawdanger-recomp: restart the game in its other language (the launcher's other build; asked once, like Quit)
+     back           // a page's Back line
+ };
+@@ -57,7 +61,11 @@ struct Values {
+     bool lens_rain_known = true;   // the game says when it is playing (PS2_LENS_WHEN); false: the drops would also fall on menus
+     std::string title;             // the game's name for the panel's title ("Raw Danger! Enhanced Edition")
+     std::string language_now, language_other;
+-    int menu_skin = 0;             // 0 hazard, 1 Japanese  // "English", "Japanese": the other one is empty when the launcher has no other build
++    int menu_skin = 0;             // 0 hazard, 1 Japanese
++    std::string window_size;       // "1600 x 900", or "full screen"
++    int game_blur = -1;            // the game's blur: -1 this build has no switch for it, 0 off, 1 on (as on the console)
++    bool reverb = true;
++    int key_prompts = -1;          // -1: this game has no prompt font (PS2_PROMPT_FONT_KEY), 0 symbols, 1 keys
+     // the keys page: one row per button (label and its keys, in the order of keys.ini) and a message line (what the last change did)
+     struct KeyRow {
+         std::string label, keys;
+@@ -98,13 +106,20 @@ public:
+     bool select_at(int x, int y);
+     // --- the keys page (Change keys): the same panel, one line per button ---
+     bool on_keys_page() const { return page_ == Page::keys; }
+-    bool on_recomp_page() const { return page_ == Page::recomp; }
++    bool on_recomp_page() const { return page_ == Page::recomp || (page_ == Page::graphics && tab_ == kGameTab); }
+     bool on_achievements_page() const { return page_ == Page::achievements; }
+     bool on_graphics_page() const { return page_ == Page::graphics; }
+     void show_achievements() { main_selected_ = 5; page_ = Page::achievements; selected_ = 0; top_ = 0; }
+     void set_recomp_rows(int count) { recomp_rows_ = count; }
+     int recomp_row() const { return selected_; }
+-    void show_recomp() { main_selected_ = 3; page_ = Page::recomp; selected_ = 0; }  // F3: straight to the Recomp options page
++    void show_recomp() { main_selected_ = 3; page_ = Page::graphics; tab_ = kGameTab; selected_ = 0; top_ = 0; }  // F3: Settings > Game
++    // rawdanger-recomp: Settings is one page with tabs (Display, Picture, Sound, Controls, Game); Tab / Q / E / Page Up / Page Down
++    // / L1 / R1 or a click on a tab switch them
++    static constexpr int kTabs = 5, kGameTab = 4;
++    void tab(int delta);
++    int tab_index() const { return tab_; }
++    bool on_settings_page() const { return page_ == Page::graphics; }
++    bool click_tab(int x, int y);   // a click on the tab row: switches to that tab (true), else false
+     void set_key_rows(int count) { key_rows_ = count; }  // how many lines the page has (the window knows)
+     bool capturing() const { return capturing_; }        // a line waits for the next key or mouse button
+     int key_row() const { return selected_; }            // the highlighted line (a button of the controller, in the order of keys.ini)
+@@ -122,6 +137,10 @@ private:
+     int selected_ = 0;
+     bool quit_armed_ = false;  // Quit was chosen once; the next Enter ends the game, anything else takes it back
+     enum class Page { main, keys, recomp, achievements, graphics } page_ = Page::main;
++    int tab_ = 0;
++    bool keys_from_settings_ = false;      // the keys page was opened from Settings > Controls: Back returns there
++    int tab_x_[kTabs + 1] = {}, tab_y_ = 0, tab_h_ = 0;
++    int settings_s_ = 0, settings_w_ = 0, settings_h_ = 0;   // the Settings panel's last size, so the Game tab has the same panel   // where the last drawing put the tabs (window pixels), for the mouse
+     void draw_list(int window_width, int window_height, const Values &values, Picture &out);
+     int recomp_rows_ = 0;
+     void draw_recomp(int window_width, int window_height, const Values &values, Picture &out);
+diff --git a/host/window.cpp b/host/window.cpp
+index 88ab888..9fff291 100644
+--- a/host/window.cpp
++++ b/host/window.cpp
+@@ -122,6 +122,7 @@ void window_stage(const char *name) {
+ // gets the focus back after the file changed). The arrow keys are the D-pad only: they used to push the left stick as well, and
+ // a menu that reads both moved two entries for one press.
+ keymap::Config g_keys = keymap::defaults();
++void send_key_prompts();  // rawdanger-recomp: the keys for the game's font (below)
+ // the picture options for the GPU: the look (bits 0-2) and whole-number scaling (bit 3, rawdanger-recomp)
+ std::uint32_t video_bits();
+ std::atomic<int> g_master_volume{100};  // rawdanger-recomp: keys.ini master_volume (%), read by the sound device's thread
+@@ -160,6 +161,15 @@ quickmenu::Menu g_menu;
+ std::atomic<bool> g_menu_hold{false};
+ std::string g_key_note;  // the keys page's message line: what the last change did
+ std::string g_recomp_note;  // the Recomp options page's message line
++
++// rawdanger-recomp: the game's switchable blur option (recomp.ini "No post-processing filter"), shown as Settings > Picture >
++// Game's blur filter (its opposite); -1 when the build has none
++int blur_section() {
++    const std::vector<recomp::Section> &all = recomp::sections();
++    for (std::size_t i = 0; i < all.size(); ++i)
++        if (all[i].live && (all[i].name == "No post-processing filter" || all[i].label.find("blur") != std::string::npos)) return static_cast<int>(i);
++    return -1;
++}
+ bool g_menu_redraw = false;  // show the picture again: the panel changed while the game sends none
+ quickmenu::Picture g_menu_picture;
+ SDL_Texture *g_menu_texture = nullptr;  // the panel for the SDL renderer (PS2_SDL_RENDERER=1)
+@@ -582,6 +592,8 @@ void load_keys() {
+             skin = (want && (std::string(want) == "japanese" || std::string(want) == "1")) || (!want && lang && std::string(lang) == "Japanese") ? 1 : 0;
+         }
+         quickmenu::set_skin(skin);
++        ps2::set_reverb(g_keys.reverb != 0);
++        send_key_prompts();
+     }
+     g_master_volume = std::clamp(g_keys.master_volume, 0, 100);
+     lens_rain::set_level(g_keys.lens_rain);
+@@ -995,6 +1007,18 @@ void menu_paint(bool show_again = true) {
+         v.widescreen = -1;
+         for (const recomp::Section &sec : recomp::sections())
+             if (sec.aspect169 && sec.live) v.widescreen = sec.on ? 1 : 0;
++        // rawdanger-recomp: Settings' new lines
++        if (g_window) {
++            if (SDL_GetWindowFlags(g_window) & SDL_WINDOW_FULLSCREEN) v.window_size = "full screen (F11 for a window)";
++            else {
++                int ww = 0, wh = 0;
++                SDL_GetWindowSize(g_window, &ww, &wh);
++                v.window_size = std::to_string(ww) + " x " + std::to_string(wh);
++            }
++        }
++        if (const int blur = blur_section(); blur >= 0) v.game_blur = recomp::sections()[static_cast<std::size_t>(blur)].on ? 0 : 1;
++        v.reverb = ps2::reverb();
++        v.key_prompts = std::getenv("PS2_PROMPT_FONT_KEY") ? g_keys.key_prompts : -1;
+         if (g_menu.on_keys_page()) {
+             for (int a = 0; a < keymap::kChangeableCount; ++a) v.key_rows.push_back({keymap::action_label(a), keymap::keys_text(g_keys, a)});
+             v.key_note = g_key_note;
+@@ -1024,7 +1048,8 @@ void menu_paint(bool show_again = true) {
+             g_recomp_row_section.clear();
+             for (std::size_t i = 0; i < recomp::sections().size(); ++i) {
+                 const recomp::Section &sec = recomp::sections()[i];
+-                if (sec.aspect169 && sec.live) continue;  // the widescreen switch lives on the Graphics and sound page (one place only)
++                if (sec.aspect169 && sec.live) continue;  // the widescreen switch lives on Settings > Display (one place only)
++                if (static_cast<int>(i) == blur_section()) continue;  // and the blur on Settings > Picture
+                 g_recomp_row_section.push_back(i);
+                 quickmenu::Values::RecompRow row;
+                 row.label = sec.label;
+@@ -1129,7 +1154,19 @@ void set_notice(const std::string &text) {
+ }
+ 
+ // the lines of keys.ini for these buttons, written with the keys now in force (comments and every other line stay as they are)
++// rawdanger-recomp: the game's font shows the first key of Cross, Circle, Square and Triangle in place of their symbols
++void send_key_prompts() {
++    std::string labels[4];
++    if (g_keys.key_prompts) {
++        const int actions[4] = {keymap::Cross, keymap::Circle, keymap::Square, keymap::Triangle};
++        for (int i = 0; i < 4; ++i)
++            if (!g_keys.inputs[actions[i]].empty()) labels[i] = keymap::short_input_name(g_keys.inputs[actions[i]].front());
++    }
++    ps2::set_button_prompts(labels);
++}
++
+ void write_key_lines(const std::vector<int> &actions) {
++    send_key_prompts();
+     if (actions.empty()) return;
+     rewrite_keys_file(
+         [&](const std::string &text) {
+@@ -1230,6 +1267,57 @@ void menu_command(quickmenu::Command c, int step) {
+         set_notice(std::string("Anti-aliasing: ") + kAa[aa]);
+         break;
+     }
++    case Command::window_size: {
++        // presets of the picture's shape (16:9 or 4:3), each a common screen height; full screen first goes back to a window
++        if (SDL_GetWindowFlags(g_window) & SDL_WINDOW_FULLSCREEN) toggle_fullscreen();
++        SDL_RestoreWindow(g_window);
++        static const int kHeights[] = {720, 900, 1080, 1440, 2160};
++        int ww = 0, wh = 0;
++        SDL_GetWindowSize(g_window, &ww, &wh);
++        SDL_DisplayMode mode{};
++        const int room_h = SDL_GetDesktopDisplayMode(SDL_GetWindowDisplayIndex(g_window), &mode) == 0 && mode.h > 0 ? mode.h : 1080;
++        const int room_w = mode.w > 0 ? mode.w : 1920;
++        std::vector<int> fit;
++        for (int hh : kHeights) {
++            const int w = ps2::g_options.widescreen ? hh * 16 / 9 : hh * 4 / 3;
++            if (hh <= room_h - 60 && w <= room_w) fit.push_back(hh);   // leaves room for the title bar and the task bar
++        }
++        if (fit.empty()) fit.push_back(std::max(448, room_h - 120));
++        int at = 0;
++        for (std::size_t i = 0; i < fit.size(); ++i)
++            if (std::abs(fit[i] - wh) < std::abs(fit[static_cast<std::size_t>(at)] - wh)) at = static_cast<int>(i);
++        if (std::abs(fit[static_cast<std::size_t>(at)] - wh) > 8) step = 0;   // a size of its own: the nearest preset first
++        at = (at + step + static_cast<int>(fit.size())) % static_cast<int>(fit.size());
++        const int nh = fit[static_cast<std::size_t>(at)], nw = ps2::g_options.widescreen ? nh * 16 / 9 : nh * 4 / 3;
++        SDL_SetWindowSize(g_window, nw, nh);
++        SDL_SetWindowPosition(g_window, SDL_WINDOWPOS_CENTERED_DISPLAY(SDL_GetWindowDisplayIndex(g_window)), SDL_WINDOWPOS_CENTERED_DISPLAY(SDL_GetWindowDisplayIndex(g_window)));
++        g_keys.window_w = nw;
++        g_keys.window_h = nh;
++        rewrite_keys_file([nw, nh](const std::string &t) { return keymap::with_window_size(t, nw, nh); }, "window size");
++        set_notice("Window: " + std::to_string(nw) + " x " + std::to_string(nh));
++        break;
++    }
++    case Command::game_blur: {
++        const int blur = blur_section();
++        if (blur < 0) break;
++        recomp::toggle(static_cast<std::size_t>(blur), g_recomp_note);
++        const bool on = !recomp::sections()[static_cast<std::size_t>(blur)].on;
++        set_notice(on ? "Game's blur filter: on (as on the console)" : "Game's blur filter: off (sharper picture)");
++        break;
++    }
++    case Command::key_prompts:
++        if (!std::getenv("PS2_PROMPT_FONT_KEY")) break;
++        g_keys.key_prompts = g_keys.key_prompts ? 0 : 1;
++        send_key_prompts();
++        rewrite_keys_file([](const std::string &t) { return keymap::with_key_prompts(t, g_keys.key_prompts); }, "key pictures");
++        set_notice(g_keys.key_prompts ? "The game's texts show your keys" : "The game's texts show the PlayStation symbols");
++        break;
++    case Command::reverb:
++        g_keys.reverb = ps2::reverb() ? 0 : 1;
++        ps2::set_reverb(g_keys.reverb != 0);
++        rewrite_keys_file([](const std::string &t) { return keymap::with_reverb(t, g_keys.reverb); }, "reverb");
++        set_notice(g_keys.reverb ? "Reverb: on (rooms and tunnels echo)" : "Reverb: off (dry sound)");
++        break;
+     case Command::menu_skin:
+         g_keys.menu_skin = quickmenu::skin() ? 0 : 1;
+         quickmenu::set_skin(g_keys.menu_skin);
+@@ -1368,6 +1456,15 @@ bool is_menu_key(SDL_Scancode k) {
+ }
+ 
+ // the pointer in window pixels (events can be in the SDL renderer's logical units; the mouse state is not)
++// rawdanger-recomp: a click on Settings' tab row
++bool menu_pointer_tab() {
++    int x = 0, y = 0, ww = 1, wh = 1, pw = 0, ph = 0;
++    SDL_GetMouseState(&x, &y);
++    SDL_GetWindowSize(g_window, &ww, &wh);
++    window_pixels(pw, ph);
++    return g_menu.click_tab(x * pw / std::max(ww, 1), y * ph / std::max(wh, 1));
++}
++
+ bool menu_pointer_select() {
+     int x = 0, y = 0, ww = 1, wh = 1, pw = 0, ph = 0;
+     SDL_GetMouseState(&x, &y);
+@@ -1422,6 +1519,14 @@ bool menu_event(const SDL_Event &e) {
+         case SDL_SCANCODE_RETURN: case SDL_SCANCODE_KP_ENTER: case SDL_SCANCODE_SPACE:
+             if (!e.key.repeat) menu_command(g_menu.choose(), 1);
+             break;
++        // rawdanger-recomp: Settings' tabs
++        case SDL_SCANCODE_TAB: case SDL_SCANCODE_Q: case SDL_SCANCODE_E: case SDL_SCANCODE_PAGEUP: case SDL_SCANCODE_PAGEDOWN:
++            if (g_menu.on_settings_page()) {
++                const bool back_tab = k == SDL_SCANCODE_Q || k == SDL_SCANCODE_PAGEUP || (k == SDL_SCANCODE_TAB && (SDL_GetModState() & KMOD_SHIFT));
++                g_menu.tab(back_tab ? -1 : 1);
++                menu_paint();
++            }
++            break;
+         case SDL_SCANCODE_ESCAPE: case SDL_SCANCODE_BACKSPACE:
+             if (!e.key.repeat) back(k == SDL_SCANCODE_ESCAPE ? "Esc" : "Backspace");
+             break;
+@@ -1450,6 +1555,12 @@ bool menu_event(const SDL_Event &e) {
+         case SDL_CONTROLLER_BUTTON_DPAD_LEFT: side(-1); break;
+         case SDL_CONTROLLER_BUTTON_DPAD_RIGHT: side(1); break;
+         case SDL_CONTROLLER_BUTTON_A: menu_command(g_menu.choose(), 1); break;  // Cross (the bottom button)
++        case SDL_CONTROLLER_BUTTON_LEFTSHOULDER: case SDL_CONTROLLER_BUTTON_RIGHTSHOULDER:   // L1 / R1: Settings' tabs
++            if (g_menu.on_settings_page()) {
++                g_menu.tab(e.cbutton.button == SDL_CONTROLLER_BUTTON_LEFTSHOULDER ? -1 : 1);
++                menu_paint();
++            }
++            break;
+         case SDL_CONTROLLER_BUTTON_B: back("Circle"); break;              // Circle (the right one)
+         case SDL_CONTROLLER_BUTTON_GUIDE: close_menu("the Guide button"); break;
+         case SDL_CONTROLLER_BUTTON_START: close_menu("Start"); break;
+@@ -1470,7 +1581,8 @@ bool menu_event(const SDL_Event &e) {
+         if ((e.motion.xrel || e.motion.yrel) && menu_pointer_select()) menu_paint();  // only a pointer that moved (not one that the window moved under)
+         return true;
+     case SDL_MOUSEBUTTONDOWN:
+-        if (e.button.button == SDL_BUTTON_LEFT && menu_pointer_select()) menu_command(g_menu.choose(), 1);
++        if (e.button.button == SDL_BUTTON_LEFT && menu_pointer_tab()) menu_paint();
++        else if (e.button.button == SDL_BUTTON_LEFT && menu_pointer_select()) menu_command(g_menu.choose(), 1);
+         else if (e.button.button == SDL_BUTTON_RIGHT) back("the right mouse button");
+         return true;
+     case SDL_MOUSEBUTTONUP: return true;
+@@ -2179,7 +2291,9 @@ bool open_window(bool fullscreen) {
+ #endif
+     g_game_title = ps2::os::env("PS2_WINDOW_TITLE");
+     const std::string initial_title = g_game_title.empty() ? g_speed_title : g_game_title + "   |   " + g_speed_title;
+-    g_window = SDL_CreateWindow(initial_title.c_str(), SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, ps2::g_options.widescreen ? 1280 : 960, 720, flags);
++    // rawdanger-recomp: the size picked in F1 -> Settings -> Display (keys.ini window_size), else 960 x 720 / 1280 x 720
++    const int start_w = g_keys.window_w > 0 ? g_keys.window_w : ps2::g_options.widescreen ? 1280 : 960, start_h = g_keys.window_h > 0 ? g_keys.window_h : 720;
++    g_window = SDL_CreateWindow(initial_title.c_str(), SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, start_w, start_h, flags);
+     if (!g_window) {
+         std::fprintf(stderr, "SDL: %s\n", SDL_GetError());
+         return false;
+diff --git a/runtime/include/ps2/video.hpp b/runtime/include/ps2/video.hpp
+index 4cea2f4..826c4a5 100644
+--- a/runtime/include/ps2/video.hpp
++++ b/runtime/include/ps2/video.hpp
+@@ -1,4 +1,5 @@
+ #pragma once
++#include <string>
+ #include <cstdint>
+ 
+ namespace ps2 {
+@@ -10,5 +11,13 @@ void set_video_options(std::uint32_t options);
+ std::uint32_t video_options();
+ // bit 3 (rawdanger-recomp): whole-number scaling, every console row the same height in the window.
+ // rawdanger-recomp: rain drops on the lens (count drops of x, y, radius, opacity; up to 48), drawn over the picture
+-void set_lens_drops(const float *drops, unsigned count);
++// rawdanger-recomp: rain on the lens (host/lens_rain.cpp): count drops of 8 floats (x, y, radius, opacity, trail, stretch, seed,
++// 0), how misted the lens is (0 ... 1) and a clock in seconds
++void set_lens_drops(const float *drops, unsigned count, float mist, float clock);
++// rawdanger-recomp: the sound chip's reverb (the game's echo of rooms and tunnels), on unless the player switches it off
++void set_reverb(bool on);
++// rawdanger-recomp: the keys shown instead of the PlayStation symbols in the game's font (cross, circle, square, triangle; short
++// names of 1 to 3 letters, "" keeps the symbol); see gpu.cpp, draw_prompt_caps
++void set_button_prompts(const std::string labels[4]);
++bool reverb();
+ }
+diff --git a/runtime/src/gs/gpu/blit.wgsl b/runtime/src/gs/gpu/blit.wgsl
+index 20c66b5..3ca16a9 100644
+--- a/runtime/src/gs/gpu/blit.wgsl
++++ b/runtime/src/gs/gpu/blit.wgsl
+@@ -17,16 +17,22 @@ struct Blit {
+ @group(0) @binding(0) var<storage, read> pixels: array<u32>;
+ @group(0) @binding(1) var<uniform> blit: Blit;
+ 
+-// rawdanger-recomp: rain drops on the lens (host/lens_rain.cpp). Each drop: centre x, y (0 ... 1 over the picture), radius (a share
+-// of the picture's height) and opacity. A drop works like a small lens: it shows the picture behind it flipped and enlarged
+-// (the view through a water bead), with a darker rim and a light glint, and is see-through at its edge. Written for this project
+-// from how a bead of water looks, not from any other effect's code.
++// rawdanger-recomp: rain on the lens (host/lens_rain.cpp). Each drop: a = centre x, y (0 ... 1 over the picture), radius (a share
++// of the picture's height), opacity; b = the wet trail it left above it (picture heights), how much it is pulled long while it
++// runs, a random 0 ... 1 for variety. A drop works like a small lens: it shows the picture behind it flipped and enlarged (the
++// view through a water bead), with a darker rim, a light glint and a heavier, rounder bottom when it runs; the trail bends the
++// picture a little and catches a thin line of light. mist: heavy rain fogs the lens, mostly towards its edges. Written for this
++// project from how water on a lens looks, not from any other effect's code.
++struct LensDrop {
++    a: vec4<f32>,
++    b: vec4<f32>,
++}
+ struct Lens {
+     count: u32,
++    mist: f32,
++    clock: f32,
+     pad0: u32,
+-    pad1: u32,
+-    pad2: u32,
+-    drops: array<vec4<f32>, 48>,
++    drops: array<LensDrop, 64>,
+ }
+ @group(0) @binding(2) var<uniform> lens: Lens;
+ 
+@@ -324,26 +330,57 @@ fn reduced_scene(uv: vec2<f32>) -> vec3<f32> {
+     return sum / f32(n.x * n.y);
+ }
+ 
++fn lens_mist(uv: vec2<f32>, picture: vec3<f32>) -> vec3<f32> {
++    // a soft look through fogged glass: the picture spread over a few pixels, a little lifted and cooler, more at the edges
++    let px = vec2<f32>(2.5 / max(f32(blit.out_width), 1.0), 2.5 / max(f32(blit.out_height), 1.0));
++    let spread = (scene(clamp(uv + vec2<f32>(px.x, px.y), vec2<f32>(0.0), vec2<f32>(1.0))) +
++                  scene(clamp(uv + vec2<f32>(-px.x, px.y), vec2<f32>(0.0), vec2<f32>(1.0))) +
++                  scene(clamp(uv + vec2<f32>(px.x, -px.y), vec2<f32>(0.0), vec2<f32>(1.0))) +
++                  scene(clamp(uv + vec2<f32>(-px.x, -px.y), vec2<f32>(0.0), vec2<f32>(1.0)))) * 0.25;
++    let edge = smoothstep(0.2, 0.75, length((uv - vec2<f32>(0.5)) * vec2<f32>(1.0, 1.25)));
++    let fogged = spread * 0.9 + vec3<f32>(0.05, 0.06, 0.075);
++    return mix(picture, fogged, clamp(lens.mist, 0.0, 1.0) * (0.2 + 0.8 * edge) * 0.65);
++}
++
+ fn drops_over(uv: vec2<f32>, picture: vec3<f32>) -> vec3<f32> {
+     var c = picture;
++    if (lens.mist > 0.01) { c = lens_mist(uv, c); }
+     let aspect = f32(blit.out_width) / max(f32(blit.out_height), 1.0);
+-    let n = min(lens.count, 48u);
++    let n = min(lens.count, 64u);
+     for (var i = 0u; i < n; i = i + 1u) {
+-        let d = lens.drops[i];
+-        let q = (uv - d.xy) * vec2<f32>(aspect, 1.0);
++        let d = lens.drops[i].a;
++        let e = lens.drops[i].b;
+         let r = max(d.z, 0.0001);
++        let rel = (uv - d.xy) * vec2<f32>(aspect, 1.0);
++        // the trail: a thin streak above the drop, wavering a little, fading towards its top
++        if (e.x > 0.002 && rel.y < 0.0 && -rel.y < e.x) {
++            let t = -rel.y / e.x;
++            let wave = sin(rel.y * 90.0 + e.z * 40.0) * r * 0.18;
++            let half_w = r * (0.38 - 0.2 * t);
++            let dx = abs(rel.x - wave) / max(half_w, 0.0001);
++            if (dx < 1.0) {
++                let shift = vec2<f32>((rel.x - wave) * 0.6 / aspect, 0.004);
++                var view = scene(clamp(uv - shift, vec2<f32>(0.0), vec2<f32>(1.0))) * 0.94;
++                view = view + vec3<f32>(pow(1.0 - dx, 8.0) * 0.12);
++                c = mix(c, view, d.w * (1.0 - t) * (1.0 - dx * dx) * 0.6);
++            }
++        }
++        // the bead: pulled long while it runs, its bottom rounder and heavier than its top
++        var q = rel;
++        q.y = q.y / select(mix(1.0, e.y, 0.45), e.y, q.y < 0.0);
+         let dist = length(q) / r;
+         if (dist >= 1.0) { continue; }
+         let normal = q / r;
+         // through the bead: the picture around the drop, mirrored and drawn in (a water bead is a tiny fish-eye lens)
+-        let through = d.xy - normal * vec2<f32>(r / aspect, r) * 1.6 * (1.0 - 0.35 * dist * dist);
++        let through = d.xy - normal * vec2<f32>(r / aspect, r) * 1.7 * (1.0 - 0.35 * dist * dist);
+         var view = scene(clamp(through, vec2<f32>(0.0), vec2<f32>(1.0)));
+-        let rim = smoothstep(0.55, 1.0, dist);
+-        view = mix(view * 1.06 + vec3<f32>(0.03), view * 0.5, rim * 0.5);
+-        // a glint where the light from above left would catch the bead
+-        let glint = pow(max(dot(normal, vec2<f32>(-0.55, -0.62)), 0.0), 6.0) * (1.0 - rim) * 0.55;
+-        view = view + vec3<f32>(glint);
+-        let alpha = d.w * (1.0 - smoothstep(0.86, 1.0, dist));
++        let rim = smoothstep(0.5, 1.0, dist);
++        view = mix(view * 1.05 + vec3<f32>(0.025), view * 0.45, rim * 0.55);
++        // a glint where the light from above would catch the bead, and a faint second one under it
++        let glint = pow(max(dot(normal, vec2<f32>(-0.5, -0.66)), 0.0), 7.0) * (1.0 - rim) * 0.6;
++        let under = pow(max(dot(normal, vec2<f32>(0.3, 0.95)), 0.0), 10.0) * rim * 0.18;
++        view = view + vec3<f32>(glint + under);
++        let alpha = d.w * (1.0 - smoothstep(0.84, 1.0, dist));
+         c = mix(c, view, alpha);
+     }
+     return c;
+@@ -364,6 +401,6 @@ fn fs(in: VertexOut) -> @location(0) vec4<f32> {
+         }
+         if ((blit.options & 1u) != 0u) { c = edge_aa(in.uv, c); }
+     }
+-    if (lens.count > 0u) { c = drops_over(in.uv, c); }
++    if (lens.count > 0u || lens.mist > 0.01) { c = drops_over(in.uv, c); }
+     return vec4<f32>(clamp(c, vec3<f32>(0.0), vec3<f32>(1.0)), 1.0);
+ }
+diff --git a/runtime/src/gs/gpu/gpu.cpp b/runtime/src/gs/gpu/gpu.cpp
+index 5decba4..e167fec 100644
+--- a/runtime/src/gs/gpu/gpu.cpp
++++ b/runtime/src/gs/gpu/gpu.cpp
+@@ -71,6 +71,10 @@ constexpr std::uint32_t kSetupWords = 40;  // 25 fields, then the texture, frame
+ constexpr std::uint32_t kMipWords = 8;     // the mipmap words of a setup, in a table beside the setups (Batch::mips, make_mip)
+ constexpr std::uint32_t kDecodedWords = 4u << 20;
+ constexpr std::uint32_t kDecodedOverrideWords = 28u << 20;  // allocated in g_decoded only when PS2_TEX_OVERRIDES is enabled
++// rawdanger-recomp: what the device can bind of one storage buffer (D3D12 and many Vulkan drivers: 128 MiB): the override space
++// shrinks to fit, else enabling overrides failed every bind group ("Buffer binding 7 range 167772160 exceeds ... 134217728")
++std::uint64_t g_max_binding = 128ull << 20;
++std::uint32_t g_override_words = kDecodedOverrideWords;
+ constexpr std::uint32_t kDecodePrims = 64;
+ 
+ 
+@@ -91,9 +95,9 @@ WGPUBindGroup g_blit_group = nullptr;
+ WGPUBuffer g_blit_params = nullptr;
+ // rawdanger-recomp: rain drops on the lens (ps2::set_lens_drops, host/lens_rain.cpp), drawn by blit.wgsl over the picture
+ WGPUBuffer g_lens_params = nullptr;
+-constexpr std::uint32_t kLensDrops = 48, kLensBytes = 16 + kLensDrops * 16;
++constexpr std::uint32_t kLensDrops = 64, kLensBytes = 16 + kLensDrops * 32;
+ std::mutex g_lens_mutex;
+-float g_lens[4 + kLensDrops * 4] = {};
++float g_lens[4 + kLensDrops * 8] = {};
+ std::uint32_t g_view_rows = 448;  // the console picture's rows (both fields), for whole-number scaling
+ // rawdanger-recomp: SMAA 1x on the console picture (video option bit 4; smaa.wgsl), run in the same submit as the picture,
+ // before it is enlarged to the window
+@@ -1360,8 +1364,99 @@ struct TexIndexEntry {
+     bool tracked = false;
+     bool modified = false;
+     bool dirty = false;
++    int prompt_gen = -1;   // rawdanger-recomp: the key-prompt labels this entry's picture was made with (the game's font only)
+ };
+ 
++// rawdanger-recomp: PC key prompts in the game's own font. The font (Raw Danger: TEX\1001.TM2) has the PlayStation symbols as
++// characters; tools\rd_prompts.py writes it as a .png override (PS2_TEX_OVERRIDES) and names its key and the symbols' boxes
++// (PS2_PROMPT_FONT_KEY, PS2_PROMPT_CELLS = "x0,x1,y0,y1;..." for cross, circle, square, triangle). When the override is made, each
++// symbol's box gets a small key cap with the key the player gave that button (ps2::set_button_prompts, from the keys page), so
++// every text that shows a button shows the key; a change of key remakes it at the next drawing.
++std::uint64_t g_prompt_key = 0;
++int g_prompt_cells[4][4] = {};
++bool g_prompt_cells_set = false;
++std::mutex g_prompt_mutex;
++std::string g_prompt_labels[4];
++std::atomic<int> g_prompt_gen{0};
++
++void parse_prompt_env() {
++    const std::string key = os::env("PS2_PROMPT_FONT_KEY"), cells = os::env("PS2_PROMPT_CELLS");
++    if (key.empty() || cells.empty()) return;
++    g_prompt_key = std::strtoull(key.c_str(), nullptr, 16);
++    int n = 0;
++    std::size_t at = 0;
++    while (n < 4 && at < cells.size()) {
++        const std::size_t end = std::min(cells.find(';', at), cells.size());
++        int v[4] = {};
++        if (std::sscanf(cells.substr(at, end - at).c_str(), "%d,%d,%d,%d", &v[0], &v[1], &v[2], &v[3]) == 4) std::memcpy(g_prompt_cells[n++], v, sizeof v);
++        at = end + 1;
++    }
++    g_prompt_cells_set = n == 4;
++}
++
++// a 3 x 5 pixel font for the caps (digits, capitals, a few signs), one row per string, '#' set
++const char *prompt_glyph(char c) {
++    static const char *const digits[10] = {"####.##.##.####", ".#.##..#..#.###", "##...#.#.#..###", "##...#.#...###.", "#.##.####..#..#", "####..##...###.", ".###..####.####", "###..#.#..#..#.", "####.#####.####", "####.####..###."};
++    static const char *const letters[26] = {".#.#.#####.##.#", "##.#.###.#.###.", ".###..#..#...##", "##.#.##.##.###.", "####..##.#..###", "####..##.#..#..", ".###..#.##.#.##", "#.##.#####.##.#", "###.#..#..#.###", "..#..#..##.#.#.", "#.##.###.#.##.#", "#..#..#..#..###", "#.########.##.#", "##.#.##.##.##.#", ".#.#.##.##.#.#.", "##.#.###.#..#..", ".#.#.##.###..##", "##.#.###.#.##.#", ".###...#...###.", "###.#..#..#..#.", "#.##.##.##.####", "#.##.##.##.#.#.", "#.##.########.#", "#.##.#.#.#.##.#", "#.##.#.#..#..#.", "###..#.#.#..###"};
++    if (c >= '0' && c <= '9') return digits[c - '0'];
++    if (c >= 'A' && c <= 'Z') return letters[c - 'A'];
++    switch (c) {
++    case '^': return ".#.###.#..#..#.";   // up arrow
++    case 'v': return ".#..#..#.###.#.";   // down arrow
++    case '<': return "..#.#.#...#...#";
++    case '>': return "#...#...#.#.#..";
++    case '+': return "....#.###.#....";
++    case '-': return "......###......";
++    default: return "...............";
++    }
++}
++
++void draw_prompt_caps(std::vector<std::uint32_t> &words, std::uint32_t w, std::uint32_t h) {
++    std::string labels[4];
++    {
++        std::lock_guard<std::mutex> lock(g_prompt_mutex);
++        for (int i = 0; i < 4; ++i) labels[i] = g_prompt_labels[i];
++    }
++    const auto put = [&](int x, int y, std::uint32_t c) {
++        if (x >= 0 && y >= 0 && x < static_cast<int>(w) && y < static_cast<int>(h)) words[static_cast<std::size_t>(y) * w + x] = c;
++    };
++    const std::uint32_t face = 0x80E8E8E8u, rim = 0x80FFFFFFu, shade = 0x80909090u, ink = 0x80202020u, clear = 0u;
++    for (int i = 0; i < 4; ++i) {
++        if (labels[i].empty()) continue;
++        const int x0 = g_prompt_cells[i][0], x1 = g_prompt_cells[i][1], y0 = g_prompt_cells[i][2], y1 = g_prompt_cells[i][3];
++        // the symbol's box, a pixel bigger all round, becomes the cap, widened (about the symbol's middle, within its 24-pixel
++        // cell of the font) when the key's name needs more room
++        std::string t = labels[i];
++        // (never outside that cell: the game draws a character's whole cell, so a pixel in the next one shows beside that letter)
++        const int cell0 = (x0 / 24) * 24, cell1 = cell0 + 23, row0 = (y0 / 24) * 24, row1 = row0 + 23;
++        int bx0 = std::max(x0 - 1, cell0), bx1 = std::min(x1 + 1, cell1);
++        const int need = static_cast<int>(t.size()) * 4 - 1 + 4;
++        while (bx1 - bx0 + 1 < need && (bx0 > cell0 || bx1 < cell1)) {
++            if (bx0 > cell0) --bx0;
++            if (bx1 - bx0 + 1 < need && bx1 < cell1) ++bx1;
++        }
++        const int by0 = std::max(std::min(y0, (y0 + y1) / 2 - 6), row0 + 1), by1 = std::min(std::max(y1, (y0 + y1) / 2 + 6), row1 - 1);
++        for (int y = by0 - 1; y <= by1 + 1; ++y)
++            for (int x = bx0; x <= bx1; ++x) put(x, y, clear);
++        for (int y = by0; y <= by1; ++y)
++            for (int x = bx0; x <= bx1; ++x) {
++                const bool corner = (x == bx0 || x == bx1) && (y == by0 || y == by1);
++                if (corner) continue;
++                put(x, y, (x == bx0 || x == bx1 || y == by0) ? rim : y == by1 ? shade : face);
++            }
++        // the label, centred: up to as many 3-pixel letters as fit
++        const int room = bx1 - bx0 - 1;
++        while (!t.empty() && static_cast<int>(t.size()) * 4 - 1 > room) t.pop_back();
++        const int tw = static_cast<int>(t.size()) * 4 - 1, tx = bx0 + 1 + (room - tw) / 2, ty = (by0 + by1) / 2 - 2;
++        for (std::size_t k = 0; k < t.size(); ++k) {
++            const char *g = prompt_glyph(t[k]);
++            for (int r = 0; r < 5; ++r)
++                for (int col = 0; col < 3; ++col)
++                    if (g[r * 3 + col] == '#') put(tx + static_cast<int>(k) * 4 + col, ty + r, ink);
++        }
++    }
++}
++
+ std::unordered_map<std::uint64_t, TexIndexEntry> g_tex_index;
+ std::vector<std::uint64_t> g_tracked_tex_keys;
+ std::uint64_t g_dbp_tex_key[16384] = {};
+@@ -1700,6 +1795,7 @@ void load_tex_index_file(const std::filesystem::path &tsv_path) {
+ }
+ 
+ void init_tex_overrides() {
++    parse_prompt_env();
+     g_tex_index.clear();
+     g_tracked_tex_keys.clear();
+     g_override_used = 0;
+@@ -1817,6 +1913,8 @@ std::uint32_t resolve_tex_override(const std::uint32_t *w, std::uint32_t base_w,
+     if (it == g_tex_index.end()) return 0xFFFFFFFFu;
+     TexIndexEntry &e = it->second;
+     if (!e.modified || base_w != e.orig_w || base_h != e.orig_h) return 0xFFFFFFFFu;
++    const bool prompts = key == g_prompt_key && g_prompt_cells_set;
++    if (prompts && e.prompt_gen != g_prompt_gen.load()) e.dirty = true;   // the player changed a key: the font is made again
+     if (!e.dirty && e.cached_dec != 0xFFFFFFFFu) return e.cached_dec;
+ 
+     std::uint32_t png_w = 0, png_h = 0;
+@@ -1826,6 +1924,10 @@ std::uint32_t resolve_tex_override(const std::uint32_t *w, std::uint32_t base_w,
+         return 0xFFFFFFFFu;
+     }
+ 
++    if (prompts && png_w == base_w && png_h == base_h) {
++        e.prompt_gen = g_prompt_gen.load();
++        draw_prompt_caps(words, png_w, png_h);
++    }
+     std::uint32_t hd_shift = 0;
+     if (png_w == base_w * 2 && png_h == base_h * 2) hd_shift = 1;
+     else if (png_w == base_w * 4 && png_h == base_h * 4) hd_shift = 2;
+@@ -1836,10 +1938,10 @@ std::uint32_t resolve_tex_override(const std::uint32_t *w, std::uint32_t base_w,
+     }
+ 
+     const auto word_count = static_cast<std::uint32_t>(words.size());
+-    if (g_override_used + word_count > kDecodedOverrideWords) {
++    if (g_override_used + word_count > g_override_words) {
+         g_override_used = 0;
+         for (auto &kv : g_tex_index) kv.second.cached_dec = 0xFFFFFFFFu;
+-        if (word_count > kDecodedOverrideWords) return 0xFFFFFFFFu;
++        if (word_count > g_override_words) return 0xFFFFFFFFu;
+     }
+     const std::uint32_t dec_offset = kCachedWords + kDecodedWords + g_override_used;
+     g_override_used += word_count;
+@@ -3879,6 +3981,7 @@ static bool open_backend([[maybe_unused]] std::uint32_t backends, const char *na
+     WGPULimits limits = WGPU_LIMITS_INIT;
+     limits.maxStorageBufferBindingSize = supported.maxStorageBufferBindingSize;
+     limits.maxBufferSize = supported.maxBufferSize;
++    g_max_binding = std::min<std::uint64_t>(supported.maxStorageBufferBindingSize, supported.maxBufferSize);
+     WGPUDeviceDescriptor dd = WGPU_DEVICE_DESCRIPTOR_INIT;
+     dd.requiredLimits = &limits;
+     WGPUFeatureName features[2];
+@@ -4014,7 +4117,18 @@ bool init(Mode m) {
+     g_scratch = make_buffer((static_cast<std::uint64_t>(g_copy_words) + 2ull * g_field_words) * 4, WGPUBufferUsage_Storage | WGPUBufferUsage_CopySrc | WGPUBufferUsage_CopyDst);
+     g_cache = make_buffer(static_cast<std::uint64_t>(kCacheWords) * 4, WGPUBufferUsage_Storage | WGPUBufferUsage_CopyDst);
+     init_tex_overrides();
+-    const std::uint64_t decoded_words = static_cast<std::uint64_t>(kCachedWords) + kDecodedWords + (g_tex_overrides_enabled ? kDecodedOverrideWords : 0);
++    if (g_tex_overrides_enabled) {
++        const std::uint64_t room = g_max_binding / 4 > static_cast<std::uint64_t>(kCachedWords) + kDecodedWords ? g_max_binding / 4 - kCachedWords - kDecodedWords : 0;
++        g_override_words = static_cast<std::uint32_t>(std::min<std::uint64_t>(kDecodedOverrideWords, room));
++        if (g_override_words < (1u << 20)) {
++            std::fprintf(stderr, "[gpu] texture overrides off: the device binds only %llu MB of one buffer\n", static_cast<unsigned long long>(g_max_binding >> 20));
++            g_tex_overrides_enabled = false;
++            g_override_words = 0;
++        } else if (g_override_words < kDecodedOverrideWords) {
++            std::fprintf(stderr, "[gpu] texture overrides: %u MB for replaced textures (the device binds %llu MB of one buffer)\n", g_override_words >> 18, static_cast<unsigned long long>(g_max_binding >> 20));
++        }
++    }
++    const std::uint64_t decoded_words = static_cast<std::uint64_t>(kCachedWords) + kDecodedWords + (g_tex_overrides_enabled ? g_override_words : 0);
+     const WGPUBufferUsage decoded_usage = WGPUBufferUsage_Storage | (g_tex_overrides_enabled ? WGPUBufferUsage_CopyDst : 0);
+     g_decoded = make_buffer(decoded_words * 4, decoded_usage);  // the kept textures, then this submit's pictures (plus override space only when PS2_TEX_OVERRIDES is on)
+     if (const char *decode = std::getenv("PS2_DECODE")) g_decode = std::atoi(decode) != 0;
+@@ -5428,11 +5542,21 @@ bool display(const DisplaySource &src, std::vector<std::uint32_t> &rgba, std::ui
+ namespace ps2 {
+ // rawdanger-recomp: the drops on the lens for the next pictures: count drops of (x, y, radius, opacity), x and y from the
+ // picture's top left (0 ... 1), the radius a share of the picture's height. The next 4 floats after the count: unused.
+-void set_lens_drops(const float *drops, unsigned count) {
++void set_button_prompts(const std::string labels[4]) {
++    {
++        std::lock_guard<std::mutex> lock(ps2::gs::gpu::g_prompt_mutex);
++        for (int k = 0; k < 4; ++k) ps2::gs::gpu::g_prompt_labels[k] = labels[k];
++    }
++    ++ps2::gs::gpu::g_prompt_gen;
++}
++
++void set_lens_drops(const float *drops, unsigned count, float mist, float clock) {
+     count = std::min<unsigned>(count, ps2::gs::gpu::kLensDrops);
+     std::lock_guard<std::mutex> lock(ps2::gs::gpu::g_lens_mutex);
+     const std::uint32_t n = count;
+     std::memcpy(&ps2::gs::gpu::g_lens[0], &n, 4);
+-    if (count) std::memcpy(&ps2::gs::gpu::g_lens[4], drops, count * 16u);
++    ps2::gs::gpu::g_lens[1] = mist;
++    ps2::gs::gpu::g_lens[2] = clock;
++    if (count) std::memcpy(&ps2::gs::gpu::g_lens[4], drops, count * 32u);
+ }
+ }
+diff --git a/runtime/src/iop/spu2.cpp b/runtime/src/iop/spu2.cpp
+index 1ebd34a..a9941f9 100644
+--- a/runtime/src/iop/spu2.cpp
++++ b/runtime/src/iop/spu2.cpp
+@@ -102,6 +102,7 @@ std::uint16_t g_spdif_out = 0, g_spdif_mode = 0, g_spdif_media = 0;
+ std::function<void(const std::int16_t *, std::size_t)> g_sink;
+ std::uint64_t g_next_tick = 0;
+ bool g_reverb_off = false;  // PS2_SPU2_REVERB=0 leaves the reverb out (to compare with the sound from before it existed)
++std::atomic<bool> g_reverb_user_off{false};  // rawdanger-recomp: the player switched the reverb off (F1 -> Settings -> Sound)
+ bool g_tick_pending = false;
+ std::uint64_t g_first_tick = 0, g_last_tick = 0;
+ 
+@@ -322,7 +323,7 @@ Routing routing(const Core &k) {
+     const auto pair = [&k](std::uint32_t off) { return static_cast<std::uint32_t>(k.regs[off >> 1]) | static_cast<std::uint32_t>(k.regs[(off + 2) >> 1] & 0xFFu) << 16; };
+     const std::uint16_t mmix = k.regs[0x198 >> 1];
+     Routing r;
+-    r.reverb = (k.attr & 0x80u) != 0 && !g_reverb_off;
++    r.reverb = (k.attr & 0x80u) != 0 && !g_reverb_off && !g_reverb_user_off.load(std::memory_order_relaxed);
+     r.dry[0] = pair(0x188);
+     r.dry[1] = pair(0x190);
+     if (r.reverb) {
+@@ -1244,3 +1245,9 @@ std::string summary() {
+ }
+ 
+ }
++
++// rawdanger-recomp: the reverb switch of the quick menu (ps2/video.hpp)
++namespace ps2 {
++void set_reverb(bool on) { ps2::iop::spu2::g_reverb_user_off = !on; }
++bool reverb() { return !ps2::iop::spu2::g_reverb_user_off.load(); }
++}
+-- 
+2.43.0
+

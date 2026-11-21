@@ -1,0 +1,1064 @@
+From 0e668b9c626d1d9315ae847414fde7916ee8c14d Mon Sep 17 00:00:00 2001
+From: rawdanger-recomp <rawdanger-recomp@users.noreply.github.com>
+Date: Fri, 20 Nov 2026 02:28:22 +0000
+Subject: [PATCH] 
+ 0022-options-list-scroll-overrides-per-look-smaa-search-menu-runs-rain
+
+The game's Options list: every PC setting as rows of its own (spinners for settings with more than two values), the live
+recomp.ini options, eleven rows at a time with scrolling and scroll arrows; the page's fixed bars at their real address
+(0x73D3D0). Texture overrides with several pictures for one texture take the first of the look in force (the Japanese
+pictures under jp/ while that look is on), each decoded once. SMAA's search table read with point filtering, as the
+reference does. keys.ini menu_game_runs (on by default): the game goes on behind the F1 menu. Rain on the lens: one
+on/off setting (rain_on_lens, on by default), its strength from the map's rain, eased, with gusts.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01QNLFPekqhcU2dj7B3Utmea
+---
+ host/keymap.cpp              |  18 +-
+ host/keymap.hpp              |   5 +-
+ host/lens_rain.cpp           |  34 ++-
+ host/quickmenu.cpp           |  15 +-
+ host/quickmenu.hpp           |   7 +-
+ host/window.cpp              | 567 ++++++++++++++++++++++++-----------
+ runtime/src/gs/gpu/gpu.cpp   |  26 +-
+ runtime/src/gs/gpu/smaa.wgsl |  10 +-
+ 8 files changed, 481 insertions(+), 201 deletions(-)
+
+diff --git a/host/keymap.cpp b/host/keymap.cpp
+index bf6dfa7..e16b34b 100644
+--- a/host/keymap.cpp
++++ b/host/keymap.cpp
+@@ -219,7 +219,7 @@ std::string with_window_size(const std::string &file_text, int w, int h) {
+ }
+ std::string with_menu_skin(const std::string &file_text, int skin) { return with_line(file_text, "menuskin", std::string("menu_skin = ") + (skin == 2 ? "game" : skin == 1 ? "japanese" : "hazard")); }
+ std::string with_integer_scale(const std::string &file_text, int on) { return with_line(file_text, "integerscale", "integer_scale = " + std::to_string(on ? 1 : 0)); }
+-std::string with_lens_rain(const std::string &file_text, int level) { return with_line(file_text, "lensrain", "lens_rain = " + std::to_string(level)); }
++std::string with_lens_rain(const std::string &file_text, int level) { return with_line(file_text, "rainonlens", std::string("rain_on_lens = ") + (level ? "on" : "off")); }
+ std::string with_smaa(const std::string &file_text, int on) {
+     static const char *const kNames[5] = {"off", "low", "medium", "high", "ultra"};
+     return with_line(file_text, "smaa", std::string("smaa = ") + kNames[std::clamp(on, 0, 4)]);
+@@ -231,6 +231,7 @@ const char *sharp_2d_word(int sharp) {
+ }
+ 
+ std::string with_master_volume(const std::string &file_text, int percent) { return with_line(file_text, "mastervolume", "master_volume = " + std::to_string(percent)); }
++std::string with_menu_game_runs(const std::string &file_text, int on) { return with_line(file_text, "menugameruns", std::string("menu_game_runs = ") + (on ? "on" : "off")); }
+ std::string with_pause_unfocused(const std::string &file_text, int on) { return with_line(file_text, "pauseunfocused", std::string("pause_unfocused = ") + (on ? "on" : "off")); }
+ std::string with_sharp_2d(const std::string &file_text, int sharp) { return with_line(file_text, "sharp2d", std::string("sharp_2d = ") + sharp_2d_word(sharp)); }
+ 
+@@ -437,6 +438,14 @@ void parse(const std::string &text, Config &config, std::vector<std::string> &pr
+             else bad("menu_skin is hazard, japanese or game, ignored");
+             continue;
+         }
++        if (name == "lensrain") continue;   // rawdanger-recomp: the old off / light / heavy line (rain_on_lens took its place, on by default)
++        if (name == "rainonlens") {
++            const std::string v = squash(value);
++            if (v == "on" || v == "1" || v == "yes") config.lens_rain = 1;
++            else if (v == "off" || v == "0" || v == "no") config.lens_rain = 0;
++            else bad("rain_on_lens is on or off, ignored");
++            continue;
++        }
+         if (name == "integerscale" || name == "lensrain") {
+             char *tail = nullptr;
+             const long v = std::strtol(value.c_str(), &tail, 10);
+@@ -452,6 +461,13 @@ void parse(const std::string &text, Config &config, std::vector<std::string> &pr
+             else config.master_volume = static_cast<int>(v);
+             continue;
+         }
++        if (name == "menugameruns") {
++            const std::string v = squash(value);
++            if (v == "on" || v == "1" || v == "yes") config.menu_game_runs = 1;
++            else if (v == "off" || v == "0" || v == "no") config.menu_game_runs = 0;
++            else bad("menu_game_runs is on or off, ignored");
++            continue;
++        }
+         if (name == "pauseunfocused") {
+             const std::string v = squash(value);
+             if (v == "on" || v == "1" || v == "yes") config.pause_unfocused = 1;
+diff --git a/host/keymap.hpp b/host/keymap.hpp
+index 4b6943d..40345a3 100644
+--- a/host/keymap.hpp
++++ b/host/keymap.hpp
+@@ -38,6 +38,7 @@ struct Config {
+     int sharp_2d = -1;         // how upscaled 2D art is filtered (0 soft, 1 sharp, 2 sharpest) at the next start, -1 when the file has no line
+     std::string pace;          // the picture pace ('30', '60', 'off', ...; ps2/pace.hpp) used at the next start, "" when the file has no 'pace' line
+ 
++    int menu_game_runs = 1;    // rawdanger-recomp: the game goes on behind the quick menu (off: it waits, as before)
+     int pause_unfocused = 1;   // rawdanger-recomp: the quick menu opens (the game waits) when the window goes to the background
+     int master_volume = 100;
+     int menu_skin = -1;        // rawdanger-recomp: the F1 menu's look: 0 hazard (yellow on black), 1 Japanese (blue on white, the
+@@ -50,7 +51,8 @@ struct Config {
+     double look_speed = 2.0;   // rawdanger-recomp: how far the mouse look turns (0.2 to 4)
+     int window_w = 0, window_h = 0;  // rawdanger-recomp: the window's size from the menu's presets (0: the default)
+     int integer_scale = 0;     // rawdanger-recomp: the picture is enlarged by whole numbers only (every console pixel row the same height)
+-    int lens_rain = 0;         // rawdanger-recomp: rain drops on the lens while playing: 0 off, 1 light, 2 heavy
++    int lens_rain = 1;         // rawdanger-recomp: rain drops on the lens while playing (keys.ini rain_on_lens): 0 off, 1 on (how hard
++                               // follows the map's rain and its gusts); the old lens_rain line (off / light / heavy) is not read any more
+     int smaa = 0;              // rawdanger-recomp: SMAA 1x on the console picture (anti-aliasing), 0 off, 1 on   // rawdanger-recomp: the volume of everything the game plays, 0 to 100 (%)
+ };
+ 
+@@ -67,6 +69,7 @@ std::string with_scale(const std::string &file_text, int scale);
+ // the same for the 'sharp_2d' line (the quick menu's 2D art filter, used when the game starts the next time)
+ std::string with_sharp_2d(const std::string &file_text, int sharp);
+ const char *sharp_2d_word(int sharp);  // "soft", "sharp", "sharpest"
++std::string with_menu_game_runs(const std::string &file_text, int on);  // the 'menu_game_runs' line
+ std::string with_pause_unfocused(const std::string &file_text, int on);  // the 'pause_unfocused' line
+ std::string with_master_volume(const std::string &file_text, int percent);
+ std::string with_integer_scale(const std::string &file_text, int on);
+diff --git a/host/lens_rain.cpp b/host/lens_rain.cpp
+index c5ec48c..eba024c 100644
+--- a/host/lens_rain.cpp
++++ b/host/lens_rain.cpp
+@@ -1,4 +1,6 @@
+-// rawdanger-recomp: rain on the lens while playing (keys.ini lens_rain = 0 off, 1 light, 2 heavy; F1 -> Graphics and sound).
++// rawdanger-recomp: rain on the lens while playing (keys.ini rain_on_lens = on / off, on by default; F1 -> Settings -> Picture, and
++// the game's own Options list). How hard is not a setting: it follows the map's rain (light, steady, heavy), eased in and out over
++// a few seconds, and gusts: a slow random swell that makes the drops come in bursts and the mist come and go.
+ // Drops land at random places, cling a moment, then run down, leaving a thin wet trail that dries, like rain on a camera that is
+ // out in it; heavy rain also mists the lens at its edges. They are drawn over the picture by blit.wgsl (drops_over). Written for
+ // this project; the idea is the one of rain-drop mods for PC games, no code is taken from them.
+@@ -121,7 +123,7 @@ void spawn(float strength) {
+ }  // namespace
+ 
+ void set_level(int level) {
+-    g_level = std::clamp(level, 0, 2);
++    g_level = level ? 1 : 0;
+     ps2::set_ui_boxes(g_level > 0);   // the drops stay under the game's HUD and texts
+ }
+ int level() { return g_level; }
+@@ -167,23 +169,37 @@ void read_drift(float seconds) {
+     g_drift += (goal - g_drift) * std::min(1.0f, seconds * 4.0f);
+ }
+ 
++// the gust: a slow random swell around 1 (0.35 ... 1.6), a new goal every few seconds, followed smoothly
++float g_gust = 1.0f, g_gust_goal = 1.0f, g_gust_next = 0.0f;
++float g_strength = 0.0f;   // the map's rain, eased (0 ... 1)
++
+ void frame(float seconds) {
+     g_clock += seconds;
+     read_drift(seconds);
+-    const float strength = g_level > 0 && playing() ? rain() : 0.0f;
+-    const bool on = strength > 0.0f;
+-    // new drops: light about 2.5 a second at full rain (up to 24 on the lens), heavy about 8 (up to 64)
++    const float target = g_level > 0 && playing() ? rain() : 0.0f;
++    // in over about 4 s when it starts raining (or the player walks out), out over about 1.5 s
++    g_strength += (target - g_strength) * std::min(1.0f, seconds * (target > g_strength ? 0.35f : 1.2f));
++    if (target == 0.0f && g_strength < 0.02f) g_strength = 0.0f;
++    if (g_clock >= g_gust_next) {
++        const float r = uniform(0.0f, 1.0f);
++        g_gust_goal = r < 0.15f ? uniform(1.3f, 1.6f) : r < 0.35f ? uniform(0.35f, 0.6f) : uniform(0.75f, 1.15f);   // now and then a burst or a lull
++        g_gust_next = g_clock + uniform(2.0f, 6.0f);
++    }
++    g_gust += (g_gust_goal - g_gust) * std::min(1.0f, seconds * 0.8f);
++    const float strength = g_strength;
++    const bool on = target > 0.0f && strength > 0.01f;
++    // new drops: about 9 a second at full rain in an ordinary gust, more in a burst; the lens holds more the harder it rains
+     if (on) {
+-        const float rate = (g_level == 1 ? 2.5f : 8.0f) * strength;
+-        const std::size_t most = g_level == 1 ? 24 : kMost;
++        const float rate = 9.0f * strength * g_gust;
++        const std::size_t most = std::min<std::size_t>(kMost, static_cast<std::size_t>(16.0f + 48.0f * strength * std::min(g_gust, 1.0f)));
+         float expect = rate * seconds;
+         while (expect > 0.0f && g_drops.size() < most) {
+-            if (uniform(0.0f, 1.0f) < expect) spawn(strength);
++            if (uniform(0.0f, 1.0f) < expect) spawn(std::min(1.0f, strength * g_gust));
+             expect -= 1.0f;
+         }
+     }
+     // the mist follows the rain: up in a few seconds of heavy rain, gone within a few seconds out of it
+-    const float mist_goal = on ? strength * (g_level == 1 ? 0.35f : 0.7f) : 0.0f;
++    const float mist_goal = on ? std::min(0.85f, strength * 0.6f * (0.6f + 0.4f * g_gust)) : 0.0f;
+     g_mist += (mist_goal - g_mist) * std::min(1.0f, seconds * (mist_goal > g_mist ? 0.25f : 0.6f));
+     for (Drop &d : g_drops) {
+         d.age += seconds;
+diff --git a/host/quickmenu.cpp b/host/quickmenu.cpp
+index 38007ad..5771275 100644
+--- a/host/quickmenu.cpp
++++ b/host/quickmenu.cpp
+@@ -116,7 +116,7 @@ constexpr Command kCommands[kEntries] = {Command::resume, Command::save, Command
+ constexpr const char *kKeys[kEntries] = {"F1", "F5", "F8", "F3", "F4", "", ""};
+ // Settings: one page, five tabs (the Game tab lists the game's own options, filled by the window)
+ constexpr const char *kTabNames[Menu::kTabs] = {"DISPLAY", "PICTURE", "SOUND", "CONTROLS", "GAME"};
+-constexpr Command kDisplay[] = {Command::scale, Command::window_size, Command::fullscreen, Command::widescreen, Command::integer_scale, Command::pause_unfocused, Command::menu_skin, Command::back};
++constexpr Command kDisplay[] = {Command::scale, Command::window_size, Command::fullscreen, Command::widescreen, Command::integer_scale, Command::menu_game_runs, Command::pause_unfocused, Command::menu_skin, Command::back};
+ constexpr const char *kDisplayKeys[] = {"", "", "F11", "", "", "", "", "Esc"};
+ constexpr Command kPicture[] = {Command::look, Command::antialias, Command::sharpen, Command::sharp_2d, Command::game_blur, Command::black_bars, Command::lens_rain, Command::back};
+ constexpr const char *kPictureKeys[] = {"F2", "", "", "", "", "", "", "Esc"};
+@@ -368,6 +368,7 @@ std::string entry_text(Command c, const Values &v, bool quit_armed) {
+     case Command::black_bars: return "Cutscene black bars:  < " + (v.black_bars <= 0 ? std::string("removed") : std::to_string(v.black_bars) + " % opaque") + " >";
+     case Command::reverb: return std::string("Reverb (rooms, tunnels):  < ") + (v.reverb ? "on" : "off") + " >";
+     case Command::widescreen: return v.widescreen < 0 ? "Widescreen: not in this game" : std::string("Widescreen 16:9:  < ") + (v.widescreen ? "on" : "off") + " >";
++    case Command::menu_game_runs: return std::string("Game runs behind this menu:  < ") + (v.menu_game_runs ? "on" : "off") + " >";
+     case Command::pause_unfocused: return std::string("Pause in the background:  < ") + (v.pause_unfocused ? "on" : "off") + " >";
+     case Command::master_volume: {
+         const int pct = std::clamp(v.master_volume, 0, 100);
+@@ -383,10 +384,8 @@ std::string entry_text(Command c, const Values &v, bool quit_armed) {
+     }
+     case Command::integer_scale: return std::string("Whole-number scaling:  < ") + (v.integer_scale ? "on" : "off") + " >";
+     case Command::menu_skin: return std::string("Menu look:  < ") + (v.menu_skin == 2 ? "the game's Options screen" : v.menu_skin == 1 ? "Japanese (blue on white)" : "hazard (yellow on black)") + " >";
+-    case Command::lens_rain: {
+-        static const char *const kRain[] = {"off", "light", "heavy"};
+-        return std::string("Rain on the lens:  < ") + kRain[std::clamp(v.lens_rain, 0, 2)] + " >" + (v.lens_rain && !v.lens_rain_known ? "  (also on menus)" : "");
+-    }
++    case Command::lens_rain:
++        return std::string("Rain on the lens:  < ") + (v.lens_rain ? "on" : "off") + " >" + (v.lens_rain && !v.lens_rain_known ? "  (also on menus)" : "");
+     case Command::scale: {
+         // the inner resolution: the console's 640 x 448 times 1 to 8, or auto (the one at least as tall as the screen)
+         const auto name = [](int n) {
+@@ -589,7 +588,7 @@ Command Menu::choose() {
+ Command Menu::side() const {
+     if (page_ != Page::graphics || tab_ == kGameTab) return Command::none;
+     const Command c = kTabLists[tab_].commands[selected_];
+-    return c == Command::look || c == Command::scale || c == Command::sharp_2d || c == Command::fullscreen || c == Command::widescreen || c == Command::pause_unfocused ||
++    return c == Command::look || c == Command::scale || c == Command::sharp_2d || c == Command::fullscreen || c == Command::widescreen || c == Command::pause_unfocused || c == Command::menu_game_runs ||
+                    c == Command::master_volume || c == Command::integer_scale || c == Command::lens_rain || c == Command::antialias || c == Command::menu_skin ||
+                    c == Command::window_size || c == Command::game_blur || c == Command::reverb || c == Command::key_prompts || c == Command::mouse_look || c == Command::black_bars || c == Command::sharpen ||
+                    c == Command::mouse_speed || c == Command::mouse_invert || c == Command::mouse_invert_x
+@@ -862,9 +861,9 @@ void Menu::draw_list(int window_width, int window_height, const Values &values,
+     const int n = gfx ? kTabLists[tab_].n : kEntries;
+     const Command *commands = gfx ? kTabLists[tab_].commands : kCommands;
+     const char *const *keys = gfx ? kTabLists[tab_].keys : kKeys;
+-    std::string game = values.title.empty() ? "PAUSED" : values.title;
++    std::string game = values.title.empty() ? (values.game_waits ? "PAUSED" : "MENU") : values.title;
+     for (char &ch : game) ch = static_cast<char>(ch >= 'a' && ch <= 'z' ? ch - 32 : ch);
+-    const std::string kTitleText = gfx ? (native_ ? "PC SETTINGS" : "SETTINGS") : game + " - PAUSED";
++    const std::string kTitleText = gfx ? (native_ ? "PC SETTINGS" : "SETTINGS") : (values.game_waits || values.title.empty() ? game + (values.title.empty() ? "" : " - PAUSED") : game);
+     const std::string kHint = gfx ? "Left / Right: change   Tab / Q / E / L1 / R1: tabs   Esc: back" : "Enter / Cross: OK     F1 / Esc / Circle: resume";
+     const std::string kNote = gfx ? (values.scale_next != values.scale_now || values.sharp_next != values.sharp_now ? "Resolution and text filter: used at the next start" : "Changes apply at once and are kept")
+                                   : "";
+diff --git a/host/quickmenu.hpp b/host/quickmenu.hpp
+index 84d3ef1..7fc5f75 100644
+--- a/host/quickmenu.hpp
++++ b/host/quickmenu.hpp
+@@ -32,10 +32,11 @@ enum class Command {
+     achievement_toggle,  // achievements page: switch the highlighted achievement on / off (recomp_row())
+     graphics,      // rawdanger-recomp: the main menu's entry that opens the Graphics page
+     widescreen,    // Graphics page: the game's widescreen option (its recomp.ini section with aspect = 16:9)
++    menu_game_runs,   // Settings > Display: the game goes on behind this menu (off: it waits)
+     pause_unfocused,  // Graphics page: the game waits (this menu opens) when the window goes to the background
+     integer_scale, // Graphics and sound page: whole-number enlargement only (even pixel rows)
+     antialias,     // Graphics and sound page: off / smooth edges / SMAA
+-    lens_rain,     // Graphics and sound page: rain drops on the lens while playing (off / light / heavy)
++    lens_rain,     // Graphics and sound page: rain drops on the lens while playing (on / off; how hard follows the map)
+     master_volume, // Graphics and sound page: the volume of the game's sound (left / right: 10 % steps)
+     menu_skin,     // Graphics and sound page: the menu's look (hazard / Japanese)
+     window_size,   // Settings > Display: the window's size (presets; windowed only)
+@@ -62,12 +63,14 @@ struct Values {
+     bool sharp_locked = false;  // PS2_SHARP_2D is set
+     bool fullscreen = false;
+     int widescreen = -1;           // the game's widescreen option: -1 the game has none, 0 off, 1 on
++    bool menu_game_runs = true;    // the game goes on behind this menu
++    bool game_waits = true;        // the game waits while this menu is open now (the title says PAUSED)
+     bool pause_unfocused = true;   // the menu opens when the window goes to the background
+     int master_volume = 100;       // %
+     bool integer_scale = false;
+     int antialias = 0;             // 0 off, 1 smooth edges, 2 SMAA
+     std::string filter;            // the upscale filter's name (raw pixels, soft, sharp, FSR 1)
+-    int lens_rain = 0;             // 0 off, 1 light, 2 heavy
++    int lens_rain = 1;             // 0 off, 1 on
+     bool lens_rain_known = true;   // the game says when it is playing (PS2_LENS_WHEN); false: the drops would also fall on menus
+     std::string title;             // the game's name for the panel's title ("Raw Danger! Enhanced Edition")
+     std::string language_now, language_other;
+diff --git a/host/window.cpp b/host/window.cpp
+index 27e6b86..13ef2d5 100644
+--- a/host/window.cpp
++++ b/host/window.cpp
+@@ -43,6 +43,7 @@
+ #include <cmath>
+ #include <filesystem>
+ #include <functional>
++#include <array>
+ #include <map>
+ #include <cstdint>
+ #include <cstdio>
+@@ -1303,6 +1304,8 @@ void menu_paint(bool show_again) {
+         v.sharp_locked = g_sharp_locked;
+         v.fullscreen = SDL_GetWindowFlags(g_window) & SDL_WINDOW_FULLSCREEN;
+         v.pause_unfocused = g_keys.pause_unfocused != 0;
++        v.menu_game_runs = g_keys.menu_game_runs != 0;
++        v.game_waits = g_menu_hold.load();
+         v.master_volume = g_master_volume;
+         v.integer_scale = g_keys.integer_scale != 0;
+         v.menu_skin = quickmenu::skin();
+@@ -1463,7 +1466,10 @@ void open_menu(const char *why) {
+     g_key_note.clear();
+     g_menu.open();
+     g_menu.set_key_rows(keymap::kChangeableCount);
+-    g_menu_hold.store(true, std::memory_order_release);
++    // rawdanger-recomp: the game goes on behind the menu (keys.ini menu_game_runs, on by default) unless the window went to the
++    // background (Pause in background): then it waits
++    const bool hold = !g_keys.menu_game_runs || std::strcmp(why, "the window went to the background") == 0;
++    g_menu_hold.store(hold, std::memory_order_release);
+     g_menu_opened_ticks = SDL_GetTicks();
+     SDL_SetRelativeMouseMode(SDL_FALSE);  // the pointer can click the entries
+     SDL_ShowCursor(SDL_ENABLE);
+@@ -1471,8 +1477,8 @@ void open_menu(const char *why) {
+         g_notice_text.clear();
+         refresh_title();
+     }
+-    std::fprintf(stderr, "[menu] the quick menu opens (%s) at frame %llu; the game waits\n", why, static_cast<unsigned long long>(ps2::frames_run()));
+-    perf::pause(true);
++    std::fprintf(stderr, "[menu] the quick menu opens (%s) at frame %llu; the game %s\n", why, static_cast<unsigned long long>(ps2::frames_run()), hold ? "waits" : "goes on");
++    if (hold) perf::pause(true);
+     menu_paint();
+ }
+ 
+@@ -1485,7 +1491,7 @@ void close_menu(const char *why) {
+     SDL_ShowCursor(SDL_DISABLE);
+     apply_mouse_mode();
+     std::fprintf(stderr, "[menu] the quick menu closes (%s) after %.1f s; the game goes on\n", why, (SDL_GetTicks() - g_menu_opened_ticks) / 1000.0);
+-    perf::pause(false);
++    if (g_menu_hold.load()) perf::pause(false);
+     g_menu_hold.store(false, std::memory_order_release);
+ }
+ 
+@@ -1527,29 +1533,47 @@ void open_debug_scene(bool map_select) {
+ // placed by PS2_NATIVE_OPTIONS_ART. The rows are 30 pixels apart (50 in the game) to fit; each row carries its bar (the page's
+ // seven fixed bars are moved off the screen). PS2_NATIVE_OPTIONS=1 turns it on (the launcher: US program and Enhanced Edition).
+ namespace nopt {
+-constexpr std::uint32_t kWorkPtr = 0x48F504u, kTable = 0x73C8A0u, kRows = 7, kStride = 0x11Cu, kBars = 0x73D3CCu, kSprites = 0x73C260u;
+-constexpr std::uint32_t kFree = 0x80000u, kSpriteArea = kFree + 0x2000u, kHelpArea = kFree + 0x3000u, kTextArea = kFree + 0x3800u;
++// The game's Options list (OPTION.BIN, at 0x738600 in the US program) draws seven rows from a table of 0x11C-byte records at
++// 0x73C8A0: a value row has its getter at +4, its setter at +8 (called with the value's index), its count at +0x10 and its help
++// line at +0x1C; then sprites (index, (y << 16) | x, colour) for the label (+0x38, highlighted +0x50), the cursor (+0x44), the
++// row's bar (+0x2C) and per value the white word (+0x8C + 12 v), the glow under the value in force (+0xBC + 12 v) and its dark
++// word (+0xEC + 12 v). Here the list gets every PC setting as rows of its own, with records the game reads like its own: the
++// getters and setters are host calls (engine patch 0021), the words are sprites of the Options pictures (tools\rd_options.py
++// paints them). A value with more than two steps is a spinner: three values "<", the value now, ">" (the game moves to the
++// first or the third, the host steps and the game is back on the middle). Eleven rows show at once; the list scrolls as the
++// cursor nears the top or the bottom (the game's table is the eleven rows on screen, made again as it moves).
++constexpr std::uint32_t kWorkPtr = 0x48F504u, kTable = 0x73C8A0u, kRows = 7, kStride = 0x11Cu, kBars = 0x73D3D0u, kSprites = 0x73C260u;
++constexpr std::uint32_t kFree = 0x80000u, kSpriteArea = kFree + 0x1000u, kSpriteMax = 0x300u, kHelpArea = kFree + 0x4000u, kTextArea = kFree + 0x5000u;
+ constexpr std::uint32_t kGlow = 0x19, kBar = 0x29, kCursor = 0x34, kOnWhite = 0x11, kOffWhite = 0x12, kOnDark = 0x15, kOffDark = 0x16;
+-constexpr int kTop = 72, kSpacing = 30;
+-struct Art { int x = 0, y = 0, w = 0, h = 0; };
+-struct Value { std::string art; std::uint32_t game_white = 0xFFFFFFFFu, game_dark = 0xFFFFFFFFu; };
++constexpr std::uint32_t kNone = 0xFFFFFFFFu;
++constexpr int kTop = 72, kSpacing = 30, kVisible = 11, kMaxRows = 64;
++constexpr int kPairX[2] = {321, 463}, kSpinX = 392, kArrowDx = 128;
++struct Art { char tex = 'S'; int x = 0, y = 0, w = 0, h = 0; };
+ struct Row {
+     std::string label, help;
+-    std::vector<Value> values;
+-    std::function<int()> get;
++    std::vector<std::string> values;      // a two-value row: its words ("ON" and "OFF" are the game's own)
++    std::function<int()> get;             // two-value rows: 0 or 1
+     std::function<void(int)> set;
++    std::function<std::string()> text;    // a spinner: the word of the value in force
++    std::function<void(int)> step;        // a spinner: -1 or +1
++    bool spinner() const { return static_cast<bool>(text); }
+ };
+ std::map<std::string, Art> g_art;
+ std::vector<Row> g_rows;
+-std::atomic<int> g_pending[16];
++std::atomic<int> g_pending[kMaxRows];
+ bool g_on = false;
+-std::uint32_t g_table_built = 0;   // the count of rows of the table last built (0: none)
+-std::vector<int> g_map_from_game;  // the game's row -> ours
++// the whole list: the game's rows (>= 0, its index) and ours (-1 - our index)
++std::vector<int> g_list;
++std::vector<int> g_from_game;             // the game's row -> its place in g_list
++std::uint32_t g_list_at = 0;              // where the game keeps the list's table, count and cursor (0: not ours now)
++int g_offset = 0, g_last_cursor = 0;
+ 
+ int row_value(int i) {
++    const Row &r = g_rows[static_cast<std::size_t>(i)];
++    if (r.spinner()) return 1;            // the middle one, always
+     const int p = g_pending[i].load();
+     if (p >= 0) return p;
+-    return g_rows[static_cast<std::size_t>(i)].get ? g_rows[static_cast<std::size_t>(i)].get() : 0;
++    return r.get ? r.get() : 0;
+ }
+ template <int I> void host_get(ps2::Cpu &c) { c.r[2].sd[0] = I < static_cast<int>(g_rows.size()) ? row_value(I) : 0; }
+ template <int I> void host_set(ps2::Cpu &c) {
+@@ -1566,56 +1590,95 @@ void load_art() {
+     if (!path || !*path) return;
+     std::FILE *f = std::fopen(path, "rb");
+     if (!f) return;
+-    char line[256];
++    char line[512];
+     while (std::fgets(line, sizeof line, f)) {
+-        char name[128];
++        char name[400];
++        char tex = 'S';
+         Art a;
+-        if (std::sscanf(line, "%127[^\t]\t%d\t%d\t%d\t%d", name, &a.x, &a.y, &a.w, &a.h) == 5) g_art[name] = a;
++        if (std::sscanf(line, "%399[^\t]\t%c\t%d\t%d\t%d\t%d", name, &tex, &a.x, &a.y, &a.w, &a.h) == 6) {
++            a.tex = tex;
++            g_art[name] = a;
++        }
+     }
+     std::fclose(f);
+ }
++bool has_art(const std::string &name) { return g_art.count(name) != 0; }
+ 
+-void put(std::uint32_t at, std::uint32_t sprite, int x, int y) {
+-    ps2::st32(at, sprite);
+-    ps2::st32(at + 4, (static_cast<std::uint32_t>(y & 0xFFFF) << 16) | static_cast<std::uint32_t>(x & 0xFFFF));
+-    ps2::st32(at + 8, 0x80808080u);
++std::uint32_t texture_of(char tex) {
++    static std::uint32_t sheet = 0, back = 0;
++    if (!sheet) {
++        sheet = ps2::ld32(kSprites) & 0xFFFFu;   // sprite 0, "Vibration", is on the label sheet
++        for (std::uint32_t i = 0; i < 0x3C; ++i) {   // the 640 x 448 background
++            const std::uint32_t w0 = ps2::ld32(kSprites + 16u * i);
++            if ((w0 >> 16) == 640u && ps2::ld32(kSprites + 16u * i + 4) == 448u && (w0 & 0xFFFFu) != 0xFFFFu) back = w0 & 0xFFFFu;
++        }
++    }
++    return tex == 'B' ? back : sheet;
+ }
+ 
+-// a sprite of the sheet for one of our words: its entry in memory the game does not use, reached through the RAM's mirror at
+-// 32 MB (the game adds index * 16 to its sprite table with 32-bit sums and skips negative indexes)
++// a sprite of our own: its entry in memory the game does not use, reached through the RAM's mirror at 32 MB (the game adds
++// index * 16 to its sprite table with 32-bit sums and skips negative indexes)
++std::uint32_t sprite_index(std::uint32_t at) { return (0x02000000u + at - kSprites) / 16u; }
+ std::uint32_t g_next_sprite = 0;
++std::uint32_t new_sprite() { return g_next_sprite < kSpriteMax ? kSpriteArea + 16u * g_next_sprite++ : 0; }
++void write_sprite(std::uint32_t at, const Art &a, int w = -1) {
++    const std::uint32_t words[4] = {(static_cast<std::uint32_t>(w < 0 ? a.w : w) << 16) | texture_of(a.tex), static_cast<std::uint32_t>(a.h),
++                                    (static_cast<std::uint32_t>(a.y) << 16) | static_cast<std::uint32_t>(a.x),
++                                    (static_cast<std::uint32_t>(a.y + a.h) << 16) | static_cast<std::uint32_t>(a.x + a.w)};
++    for (int k = 0; k < 4; ++k)
++        if (ps2::ld32(at + 4u * static_cast<std::uint32_t>(k)) != words[k]) ps2::st32(at + 4u * static_cast<std::uint32_t>(k), words[k]);
++}
+ std::map<std::string, std::uint32_t> g_sprite_of;
+ std::uint32_t sprite_for(const std::string &name, int &w) {
+     const auto art = g_art.find(name);
+-    if (art == g_art.end()) { w = 0; return 0xFFFFFFFFu; }
++    if (art == g_art.end()) { w = 0; return kNone; }
+     w = art->second.w;
+     if (const auto it = g_sprite_of.find(name); it != g_sprite_of.end()) return it->second;
+-    const std::uint32_t at = kSpriteArea + 16u * g_next_sprite++;
+-    const std::uint32_t tex = ps2::ld32(kSprites) & 0xFFFFu;   // the label sheet (sprite 0, "Vibration", is on it)
+-    const Art &a = art->second;
+-    ps2::st32(at, (static_cast<std::uint32_t>(a.w) << 16) | tex);
+-    ps2::st32(at + 4, static_cast<std::uint32_t>(a.h));
+-    ps2::st32(at + 8, (static_cast<std::uint32_t>(a.y) << 16) | static_cast<std::uint32_t>(a.x));
+-    ps2::st32(at + 12, (static_cast<std::uint32_t>(a.y + a.h) << 16) | static_cast<std::uint32_t>(a.x + a.w));
+-    const std::uint32_t index = (0x02000000u + at - kSprites) / 16u;
+-    g_sprite_of[name] = index;
+-    return index;
+-}
+-
+-void copy_record(std::uint32_t from, std::uint32_t to) {
+-    for (std::uint32_t k = 0; k < kStride; k += 4) ps2::st32(to + k, ps2::ld32(from + k));
+-}
+-// moves every picture of a record by dy (the label's place: + 0x3C, the y in its high half)
+-void move_record(std::uint32_t at, int dy) {
+-    for (std::uint32_t k = 0x20; k + 12 <= kStride; k += 12) {
+-        const std::uint32_t sprite = ps2::ld32(at + k), pos = ps2::ld32(at + k + 4), colour = ps2::ld32(at + k + 8);
+-        if (colour != 0x80808080u || sprite == 0xFFFFFFFFu) continue;
+-        const int y = static_cast<int>(pos >> 16) + dy;
+-        ps2::st32(at + k + 4, (static_cast<std::uint32_t>(y & 0xFFFF) << 16) | (pos & 0xFFFFu));
+-    }
++    const std::uint32_t at = new_sprite();
++    if (!at) return kNone;
++    write_sprite(at, art->second);
++    return g_sprite_of[name] = sprite_index(at);
++}
++// the game's glow under a value (sprite 0x19, 81 pixels), stretched to a width
++Art glow_art() {
++    Art glow;
++    const std::uint32_t g2 = ps2::ld32(kSprites + 16u * kGlow + 8), g3 = ps2::ld32(kSprites + 16u * kGlow + 12);
++    glow.tex = 'S', glow.x = static_cast<int>(g2 & 0xFFFFu), glow.y = static_cast<int>(g2 >> 16);
++    glow.w = static_cast<int>(g3 & 0xFFFFu) - glow.x, glow.h = static_cast<int>(g3 >> 16) - glow.y;
++    return glow;
++}
++std::uint32_t glow_for(int w) {
++    if (w <= 81) return kGlow;
++    const std::string name = "G:" + std::to_string(w);
++    if (const auto it = g_sprite_of.find(name); it != g_sprite_of.end()) return it->second;
++    const std::uint32_t at = new_sprite();
++    if (!at) return kGlow;
++    write_sprite(at, glow_art(), w);
++    return g_sprite_of[name] = sprite_index(at);
++}
++// a spinner's two sprites that change with its value: the dark word, and the glow under it (the game's glow, stretched)
++std::uint32_t g_dyn[kMaxRows][2];
++
++int game_width(std::uint32_t sprite) { return static_cast<int>(ps2::ld32(kSprites + 16u * sprite) >> 16); }
++
++using Record = std::array<std::uint32_t, kStride / 4>;
++void put(Record &r, std::uint32_t off, std::uint32_t sprite, int x, int y) {
++    r[off / 4] = sprite;
++    r[off / 4 + 1] = (static_cast<std::uint32_t>(y & 0xFFFF) << 16) | static_cast<std::uint32_t>(x & 0xFFFF);
++    r[off / 4 + 2] = sprite == kNone ? 0u : 0x80808080u;
++}
++Record read_record(std::uint32_t at) {
++    Record r;
++    for (std::uint32_t k = 0; k < kStride / 4; ++k) r[k] = ps2::ld32(at + 4u * k);
++    return r;
++}
++// written over what is there word by word, only where it differs (the game draws from it meanwhile)
++void write_record(std::uint32_t at, const Record &r) {
++    for (std::uint32_t k = 0; k < kStride / 4; ++k)
++        if (ps2::ld32(at + 4u * k) != r[k]) ps2::st32(at + 4u * k, r[k]);
+ }
+ 
+-std::uint32_t write_help(int i, const std::string &text) {
++std::uint32_t help_for(int i, const std::string &text) {
+     const std::uint32_t s = kTextArea + 32u * static_cast<std::uint32_t>(i);
+     for (std::size_t k = 0; k < 31; ++k) ps2::st8(s + static_cast<std::uint32_t>(k), k < text.size() ? static_cast<std::uint8_t>(text[k]) : 0);
+     ps2::st8(s + 31, 0);
+@@ -1625,60 +1688,104 @@ std::uint32_t write_help(int i, const std::string &text) {
+     return h;
+ }
+ 
+-void build_table() {
+-    // the game's rows that stay, in order, and where ours go (after Sound)
+-    struct Out { int game; int ours; };
+-    std::vector<Out> order;
+-    order.push_back({0, -1});
+-    order.push_back({1, -1});
+-    for (int i = 0; i < static_cast<int>(g_rows.size()); ++i) order.push_back({-1, i});
+-    for (int g = 3; g < static_cast<int>(kRows); ++g) order.push_back({g, -1});
+-    g_map_from_game.assign(kRows, 0);
+-    for (std::size_t n = 0; n < order.size(); ++n) {
+-        const std::uint32_t at = kFree + static_cast<std::uint32_t>(n) * kStride;
+-        const int y = kTop + kSpacing * static_cast<int>(n);
+-        if (order[n].game >= 0) {
+-            const std::uint32_t from = kTable + static_cast<std::uint32_t>(order[n].game) * kStride;
+-            copy_record(from, at);
+-            const int label_y = static_cast<int>(ps2::ld32(from + 0x3C) >> 16);
+-            move_record(at, y - label_y);
+-            g_map_from_game[static_cast<std::size_t>(order[n].game)] = static_cast<int>(n);
+-        } else {
+-            const Row &r = g_rows[static_cast<std::size_t>(order[n].ours)];
+-            const int i = order[n].ours;
+-            copy_record(kTable, at);   // Vibration's record: a value row
+-            ps2::st32(at + 0x00, 0);
+-            ps2::st32(at + 0x04, ps2::kHostCallBase + 4u * static_cast<std::uint32_t>(2 * i));
+-            ps2::st32(at + 0x08, ps2::kHostCallBase + 4u * static_cast<std::uint32_t>(2 * i + 1));
+-            ps2::st32(at + 0x10, static_cast<std::uint32_t>(r.values.size()));
+-            ps2::st32(at + 0x1C, write_help(i, r.help));
+-            for (std::uint32_t k = 0x20; k + 12 <= kStride; k += 12) put(at + k, 0xFFFFFFFFu, 0, 0);
+-            int lw = 0;
+-            const std::uint32_t label = sprite_for("L:" + r.label, lw);
+-            put(at + 0x38, label, 78, y);
+-            put(at + 0x44, kCursor, 68, y - 11);
+-            put(at + 0x50, label, 78, y);
+-            // the values: centred in the right part of the bar, two to four of them
+-            const int nv = static_cast<int>(r.values.size());
+-            const int left = 250, right = 530;
+-            for (int v = 0; v < nv && v < 4; ++v) {
+-                const int cx = nv == 2 ? (v == 0 ? 321 : 463) : left + (right - left) * (2 * v + 1) / (2 * nv);
+-                int ww = 0, dw = 0;
+-                std::uint32_t white = r.values[static_cast<std::size_t>(v)].game_white, dark = r.values[static_cast<std::size_t>(v)].game_dark;
+-                if (white == 0xFFFFFFFFu) white = sprite_for("W:" + r.values[static_cast<std::size_t>(v)].art, ww);
+-                else ww = static_cast<int>(ps2::ld32(kSprites + 16u * white) >> 16);
+-                if (dark == 0xFFFFFFFFu) dark = sprite_for("D:" + r.values[static_cast<std::size_t>(v)].art, dw);
+-                else dw = static_cast<int>(ps2::ld32(kSprites + 16u * dark) >> 16);
+-                const std::uint32_t k = 12u * static_cast<std::uint32_t>(v);
+-                put(at + 0x8C + k, white, cx - ww / 2, y - 1);
+-                put(at + 0xBC + k, kGlow, cx - 41, y - 1);
+-                put(at + 0xEC + k, dark, cx - dw / 2, y - 1);
++// the record of one of the game's rows, moved to the slot's height
++Record game_record(int g, int y) {
++    Record r = read_record(kTable + static_cast<std::uint32_t>(g) * kStride);
++    const int dy = y - static_cast<int>(r[0x3C / 4] >> 16);
++    for (std::uint32_t k = 0x20; k + 12 <= kStride; k += 12) {
++        const std::uint32_t sprite = r[k / 4], pos = r[k / 4 + 1], colour = r[k / 4 + 2];
++        if (colour != 0x80808080u || sprite == kNone) continue;
++        const int ny = static_cast<int>(pos >> 16) + dy;
++        r[k / 4 + 1] = (static_cast<std::uint32_t>(ny & 0xFFFF) << 16) | (pos & 0xFFFFu);
++    }
++    r[0x2C / 4] = kBar, r[0x30 / 4] = (static_cast<std::uint32_t>((y - 1) & 0xFFFF) << 16) | 78u, r[0x34 / 4] = 0x80808080u;
++    return r;
++}
++
++Record our_record(int i, int y) {
++    const Row &row = g_rows[static_cast<std::size_t>(i)];
++    Record r{};
++    for (std::uint32_t k = 0x20; k + 12 <= kStride; k += 12) r[k / 4] = kNone;
++    r[0x04 / 4] = ps2::kHostCallBase + 4u * static_cast<std::uint32_t>(2 * i);
++    r[0x08 / 4] = ps2::kHostCallBase + 4u * static_cast<std::uint32_t>(2 * i + 1);
++    r[0x0C / 4] = ps2::ld32(kTable + 0x0C);   // the game's drawing of a value row
++    r[0x10 / 4] = row.spinner() ? 3u : static_cast<std::uint32_t>(row.values.size());
++    r[0x14 / 4] = ps2::ld32(kTable + 0x14);
++    r[0x18 / 4] = ps2::ld32(kTable + 0x18);
++    r[0x1C / 4] = ps2::ld32(kHelpArea + 32u * static_cast<std::uint32_t>(i) + 4) ? kHelpArea + 32u * static_cast<std::uint32_t>(i) : help_for(i, row.help);
++    int lw = 0;
++    const std::uint32_t label = sprite_for("L:" + row.label, lw);
++    put(r, 0x2C, kBar, 78, y - 1);
++    put(r, 0x38, label, 83, y);   // (the game's own label pictures start 5 pixels in)
++    put(r, 0x44, kCursor, 68, y - 11);
++    put(r, 0x50, label, 83, y);
++    if (row.spinner()) {
++        int aw = 0;
++        const std::uint32_t left = sprite_for("A:left", aw);
++        put(r, 0x8C, left, kSpinX - kArrowDx - aw / 2, y);
++        const std::uint32_t right = sprite_for("A:right", aw);
++        put(r, 0x8C + 24, right, kSpinX + kArrowDx - aw / 2, y);
++        // the middle value: its sprites follow the value in force (frame() keeps them so)
++        const auto art = g_art.find("D:" + row.text());
++        const int tw = art != g_art.end() ? art->second.w : 0;
++        const int gw = std::max(81, tw + 34);
++        if (!g_dyn[i][0]) {
++            const std::uint32_t a = new_sprite(), b = new_sprite();
++            g_dyn[i][0] = a ? sprite_index(a) : kNone;
++            g_dyn[i][1] = b ? sprite_index(b) : kNone;
++        }
++        if (g_dyn[i][0] != kNone && g_dyn[i][1] != kNone) {
++            const std::uint32_t text_at = kSprites + 16u * g_dyn[i][0] - 0x02000000u, glow_at = kSprites + 16u * g_dyn[i][1] - 0x02000000u;
++            if (art != g_art.end()) write_sprite(text_at, art->second);
++            else for (int k = 0; k < 4; ++k) ps2::st32(text_at + 4u * static_cast<std::uint32_t>(k), 0);
++            write_sprite(glow_at, glow_art(), gw);   // the game's glow, drawn wider
++            put(r, 0xBC + 12, g_dyn[i][1], kSpinX - gw / 2, y - 1);
++            put(r, 0xEC + 12, g_dyn[i][0], kSpinX - tw / 2, y - 1);
++            put(r, 0x8C + 12, g_dyn[i][0], kSpinX - tw / 2, y - 1);
++        }
++    } else {
++        for (std::size_t v = 0; v < row.values.size() && v < 2; ++v) {
++            const std::string &word = row.values[v];
++            std::uint32_t white, dark;
++            int ww = 0, dw = 0;
++            if (word == "ON" || word == "OFF") {
++                white = word == "ON" ? kOnWhite : kOffWhite, dark = word == "ON" ? kOnDark : kOffDark;
++                ww = game_width(white), dw = game_width(dark);
++            } else {
++                white = sprite_for("W:" + word, ww), dark = sprite_for("D:" + word, dw);
+             }
++            const std::uint32_t k = 12u * static_cast<std::uint32_t>(v);
++            const int cx = kPairX[v];
++            put(r, 0x8C + k, white, cx - ww / 2, y - 1);
++            const int gw = std::max(81, std::max(ww, dw) + 34);
++            put(r, 0xBC + k, glow_for(gw), cx - gw / 2, y - 1);
++            put(r, 0xEC + k, dark, cx - dw / 2, y - 1);
+         }
+-        // the row's own bar
+-        put(at + 0x2C, kBar, 78, y - 1);
+     }
+-    g_table_built = static_cast<std::uint32_t>(order.size());
++    return r;
++}
++
++int visible() { return std::min(kVisible, static_cast<int>(g_list.size())); }
++
++void build_window() {
++    for (int s = 0; s < visible(); ++s) {
++        const int item = g_list[static_cast<std::size_t>(g_offset + s)];
++        const int y = kTop + kSpacing * s;
++        write_record(kFree + static_cast<std::uint32_t>(s) * kStride, item >= 0 ? game_record(item, y) : our_record(-1 - item, y));
++    }
++    // the page's seven fixed bars: off the screen (each row draws its own); two of their places show the scroll arrows
++    for (std::uint32_t n = 0; n < kRows; ++n) {
++        std::uint32_t sprite = kBar;
++        int x = 78, y = 1000;
++        int aw = 0;
++        if (n == 0 && g_offset > 0) sprite = sprite_for("A:up", aw), x = 553 - aw / 2, y = kTop;
++        if (n == 1 && g_offset + visible() < static_cast<int>(g_list.size())) sprite = sprite_for("A:down", aw), x = 553 - aw / 2, y = kTop + kSpacing * (visible() - 1);
++        const std::uint32_t at = kBars + 12u * n;
++        const std::uint32_t pos = (static_cast<std::uint32_t>(y & 0xFFFF) << 16) | static_cast<std::uint32_t>(x);
++        if (ps2::ld32(at) != sprite) ps2::st32(at, sprite);
++        if (ps2::ld32(at + 4) != pos) ps2::st32(at + 4, pos);
++        if (ps2::ld32(at + 8) != 0x80808080u) ps2::st32(at + 8, 0x80808080u);
++    }
+ }
+ 
+ void setup() {
+@@ -1688,47 +1795,82 @@ void setup() {
+     const char *v = std::getenv("PS2_NATIVE_OPTIONS");
+     if (!v || *v != '1') return;
+     load_art();
+-    if (g_art.empty()) {
+-        std::fprintf(stderr, "[options] PS2_NATIVE_OPTIONS_ART has no pictures: the PC rows are left out\n");
++    if (!has_art("A:up")) {
++        std::fprintf(stderr, "[options] PS2_NATIVE_OPTIONS_ART has no letters (an older rd_options.py?): the PC rows are left out\n");
+         return;
+     }
+     for (auto &p : g_pending) p = -1;
+-    register_all(std::make_integer_sequence<int, 16>{});
++    register_all(std::make_integer_sequence<int, kMaxRows>{});
+     g_on = true;
+ }
+ 
+-// each frame of the window: on the Options screen, point its list at the table with our rows (built again each time the game
+-// sets its own table, which it does whenever it enters the list: from the title, the in-game menu, or back from a sub-page)
++// the order of the list: the game's Vibration, Sound, Brightness, Button configuration and Default settings, the PC rows, the
++// game's Return to Menu last ("Adjust Screen Position" is left out: the window is a PC window)
++void make_list() {
++    g_list = {0, 1, 3, 4, 5};
++    for (int i = 0; i < static_cast<int>(g_rows.size()); ++i) g_list.push_back(-1 - i);
++    g_list.push_back(6);
++    g_from_game.assign(kRows, 0);
++    for (std::size_t n = 0; n < g_list.size(); ++n)
++        if (g_list[n] >= 0) g_from_game[static_cast<std::size_t>(g_list[n])] = static_cast<int>(n);
++    g_from_game[2] = g_from_game[1];
++}
++
++// each frame of the window: on the Options screen, point its list at the rows on screen, scroll them with the cursor
+ void frame() {
+     setup();
+     if (!g_on || g_rows.empty()) return;
+     for (std::size_t i = 0; i < g_rows.size(); ++i) {   // the values the game set: applied here, on the window's thread
+         const int p = g_pending[i].exchange(-1);
+-        if (p >= 0 && g_rows[i].set) g_rows[i].set(p);
++        if (p < 0) continue;
++        if (g_rows[i].spinner()) { if (p != 1) g_rows[i].step(p > 1 ? 1 : -1); }
++        else if (g_rows[i].set) g_rows[i].set(p);
+     }
+-    if (ps2::ld32(0x48F488u) != 16u) return;   // the game's Options screen (scene SETTING), from the title or the in-game menu
++    if (ps2::ld32(0x48F488u) != 16u) { g_list_at = 0; return; }   // the game's Options screen (scene SETTING)
+     {   // the Options overlay (US) is in
+         static const char kHelp[] = "Adjust Screen Position";
+         for (std::uint32_t k = 0; k < sizeof kHelp - 1; ++k)
+-            if (ps2::ld8(0x73D6D0u + k) != static_cast<std::uint8_t>(kHelp[k])) return;
++            if (ps2::ld8(0x73D6D0u + k) != static_cast<std::uint8_t>(kHelp[k])) { g_list_at = 0; return; }
+     }
+     const std::uint32_t work = ps2::ld32(kWorkPtr);
+     if (work < 0x100000u || work >= 0x2000000u - 0x1000u) return;
+-    for (std::uint32_t off = 0; off < 0x1000u; off += 4) {
+-        if (ps2::ld32(work + off) != kTable || ps2::ld32(work + off + 4) != kRows) continue;
+-        build_table();
+-        const std::uint32_t cursor = ps2::ld32(work + off + 8);
+-        ps2::st32(work + off, kFree);
+-        ps2::st32(work + off + 4, g_table_built);
+-        if (cursor < kRows) ps2::st32(work + off + 8, static_cast<std::uint32_t>(g_map_from_game[cursor]));
+-        // the page's seven fixed bars: off the screen (each row draws its own)
+-        for (std::uint32_t n = 0; n < kRows; ++n) {
+-            const std::uint32_t sprite = ps2::ld32(kBars + 12u * n);
+-            if (sprite == kBar || sprite == 0x33u) ps2::st32(kBars + 12u * n + 4, (1000u << 16) | 78u);
+-        }
+-        std::fprintf(stderr, "[options] the Options list has the PC rows (%u rows)\n", g_table_built);
+-        break;
++    if (g_list.empty()) make_list();
++    const int shown = visible(), total = static_cast<int>(g_list.size());
++    if (g_list_at && (ps2::ld32(g_list_at) != kFree || ps2::ld32(g_list_at + 4) != static_cast<std::uint32_t>(shown))) g_list_at = 0;
++    if (!g_list_at) {
++        // the game has set its own table (entering the list: from the title, the in-game menu, or back from a sub-page)
++        for (std::uint32_t off = 0; off < 0x1000u; off += 4) {
++            if (ps2::ld32(work + off) != kTable || ps2::ld32(work + off + 4) != kRows) continue;
++            const std::uint32_t game_cursor = ps2::ld32(work + off + 8);
++            const int at = game_cursor < kRows ? g_from_game[game_cursor] : 0;
++            g_offset = std::clamp(at - (shown - 2), 0, total - shown);
++            g_last_cursor = at - g_offset;
++            build_window();
++            ps2::st32(work + off + 8, static_cast<std::uint32_t>(g_last_cursor));
++            ps2::st32(work + off + 4, static_cast<std::uint32_t>(shown));
++            ps2::st32(work + off, kFree);
++            g_list_at = work + off;
++            std::fprintf(stderr, "[options] the Options list has the PC rows (%d rows, %d at a time)\n", total, shown);
++            return;
++        }
++        return;
+     }
++    int cursor = static_cast<int>(ps2::ld32(g_list_at + 8));
++    if (cursor < 0 || cursor >= shown) return;
++    const int was = g_last_cursor;
++    if (std::getenv("PS2_TRACE_OPTIONS") && cursor != was) std::fprintf(stderr, "[options] cursor %d -> %d (offset %d)\n", was, cursor, g_offset);
++    if (was == shown - 1 && cursor == 0 && g_offset > 0) g_offset = 0;                                   // down past the last: the top
++    else if (was == 0 && cursor == shown - 1 && g_offset == 0 && total > shown) g_offset = total - shown;   // up past the first: the end
++    else if (cursor >= shown - 1 && g_offset + shown < total) {
++        const int by = std::min(cursor - (shown - 2), total - shown - g_offset);
++        g_offset += by, cursor -= by;
++    } else if (cursor <= 0 && g_offset > 0) {
++        const int by = std::min(1 - cursor, g_offset);
++        g_offset -= by, cursor += by;
++    }
++    build_window();
++    if (cursor != static_cast<int>(ps2::ld32(g_list_at + 8))) ps2::st32(g_list_at + 8, static_cast<std::uint32_t>(cursor));
++    g_last_cursor = cursor;
+ }
+ }  // namespace nopt
+ 
+@@ -1827,54 +1969,132 @@ bool capture_event(const SDL_Event &e) {
+ 
+ // what an entry does; step is -1 or 1 for left and right (Enter and a click go forward)
+ void menu_command(quickmenu::Command c, int step);
+-// the PC rows of the game's Options list (nopt above): each value, read and set through the same steps as the F1 menu
++// the PC rows of the game's Options list (nopt above): every setting of the F1 menu's Settings pages, read and set through the
++// same steps, then the live Game options of recomp.ini
+ void native_option_rows() {
+     using quickmenu::Command;
+     if (!nopt::g_rows.empty()) return;
+-    nopt::Row r;
+-    // Resolution: AUTO, 2x, 4x, 8x (the F1 menu has every step)
+-    r.label = "Resolution"; r.help = "Internal resolution";
+-    r.values = {{"AUTO"}, {"2x"}, {"4x"}, {"8x"}};
+-    r.get = [] { const int s = g_scale_next; return s == keymap::kScaleAuto ? 0 : s <= 2 ? 1 : s <= 4 ? 2 : 3; };
+-    r.set = [](int v) {
+-        const int want[4] = {keymap::kScaleAuto, 2, 4, 8};
+-        for (int k = 0; k < 8 && g_scale_next != want[std::clamp(v, 0, 3)]; ++k) menu_command(Command::scale, 1);
++    auto &rows = nopt::g_rows;
++    const auto spin = [&](const char *label, const char *help, std::function<std::string()> text, std::function<void(int)> step) {
++        nopt::Row r;
++        r.label = label, r.help = help, r.text = std::move(text), r.step = std::move(step);
++        rows.push_back(std::move(r));
+     };
+-    nopt::g_rows.push_back(r);
+-    r = {};
+-    r.label = "Anti-aliasing"; r.help = "Smooth edges: SMAA";
+-    r.values = {{"OFF", 0x12, 0x16}, {"SMAA"}};
+-    r.get = [] { return g_keys.smaa ? 1 : 0; };
+-    r.set = [](int v) {   // OFF: no edge smoothing at all; SMAA: high (the F1 menu has the other steps)
+-        for (int k = 0; k < 6; ++k) {
+-            const bool there = v == 0 ? (g_keys.smaa == 0 && !(g_look & 1)) : g_keys.smaa == 3;
+-            if (there) break;
+-            menu_command(Command::antialias, 1);
+-        }
++    const auto pick = [&](const char *label, const char *help, std::vector<std::string> values, std::function<int()> get, std::function<void(int)> set) {
++        nopt::Row r;
++        r.label = label, r.help = help, r.values = std::move(values), r.get = std::move(get), r.set = std::move(set);
++        rows.push_back(std::move(r));
+     };
+-    nopt::g_rows.push_back(r);
+-    r = {};
+-    r.label = "Cutscene bars"; r.help = "Black bars in cutscenes";
+-    r.values = {{"ON", 0x11, 0x15}, {"OFF", 0x12, 0x16}};
+-    r.get = [] { return g_keys.black_bars >= 50 ? 0 : 1; };
+-    r.set = [](int v) {
+-        g_keys.black_bars = v == 0 ? 100 : 0;
+-        ps2::set_bar_opacity(static_cast<unsigned>(g_keys.black_bars));
+-        rewrite_keys_file([](const std::string &t) { return keymap::with_black_bars(t, g_keys.black_bars); }, "cutscene bars");
+-    };
+-    nopt::g_rows.push_back(r);
+-    r = {};
+-    r.label = "Lens rain"; r.help = "Rain drops on the camera";
+-    r.values = {{"OFF", 0x12, 0x16}, {"LIGHT"}, {"HEAVY"}};
+-    r.get = [] { return lens_rain::level(); };
+-    r.set = [](int v) { for (int k = 0; k < 3 && lens_rain::level() != v; ++k) menu_command(Command::lens_rain, 1); };
+-    nopt::g_rows.push_back(r);
+-    r = {};
+-    r.label = "Mouse look"; r.help = "The mouse turns the camera";
+-    r.values = {{"ON", 0x11, 0x15}, {"OFF", 0x12, 0x16}};
+-    r.get = [] { return g_keys.mouse_look ? 0 : 1; };
+-    r.set = [](int v) { if ((g_keys.mouse_look ? 0 : 1) != v) menu_command(Command::mouse_look, 1); };
+-    nopt::g_rows.push_back(r);
++    const auto command = [](Command c) { return [c](int d) { menu_command(c, d); }; };
++    const auto toggle_to = [](Command c, std::function<int()> get) { return [c, get](int v) { if (get() != v) menu_command(c, 1); }; };
++    // Display
++    spin("Resolution", "Internal resolution", [] { return g_scale_next == keymap::kScaleAuto ? std::string("AUTO") : std::to_string(g_scale_next) + "x"; },
++         command(Command::scale));
++    spin("Window size", "The window's size", [] {
++            if (!g_window || (SDL_GetWindowFlags(g_window) & SDL_WINDOW_FULLSCREEN)) return std::string("FULL SCREEN");
++            int ww = 0, wh = 0;
++            SDL_GetWindowSize(g_window, &ww, &wh);
++            const std::string t = std::to_string(ww) + " x " + std::to_string(wh);
++            return nopt::has_art("D:" + t) ? t : std::string("CUSTOM");
++        }, command(Command::window_size));
++    {
++        const auto get = [] { return g_window && (SDL_GetWindowFlags(g_window) & SDL_WINDOW_FULLSCREEN) ? 0 : 1; };
++        pick("Full screen", "Full screen or a window (F11)", {"ON", "OFF"}, get, [get](int v) { if (get() != v) toggle_fullscreen(); });
++    }
++    for (const recomp::Section &sec : recomp::sections())
++        if (sec.aspect169 && sec.live) {
++            const auto get = [] { return ps2::g_options.widescreen ? 0 : 1; };
++            pick("Widescreen 16:9", "The game's picture in 16:9", {"ON", "OFF"}, get, toggle_to(Command::widescreen, get));
++            break;
++        }
++    {
++        const auto get = [] { return g_keys.integer_scale ? 0 : 1; };
++        pick("Whole-number scaling", "Even pixel rows, borders", {"ON", "OFF"}, get, toggle_to(Command::integer_scale, get));
++    }
++    {
++        const auto get = [] { return g_keys.pause_unfocused ? 0 : 1; };
++        pick("Pause in background", "Wait while in the background", {"ON", "OFF"}, get, toggle_to(Command::pause_unfocused, get));
++    }
++    {
++        const auto get = [] { return g_keys.menu_game_runs ? 0 : 1; };
++        pick("Game runs behind F1", "The game goes on in the F1 menu", {"ON", "OFF"}, get, toggle_to(Command::menu_game_runs, get));
++    }
++    spin("Menu look", "The F1 menu's look", [] {
++            static const char *const kSkins[] = {"HAZARD", "JAPANESE", "GAME"};
++            return std::string(kSkins[std::clamp(quickmenu::skin(), 0, 2)]);
++        }, [](int d) {
++            const int n = quickmenu::game_font_loaded() ? 3 : 2;
++            for (int k = 0; k < (d > 0 ? 1 : n - 1); ++k) menu_command(Command::menu_skin, 1);
++        });
++    // Picture
++    spin("Upscale filter", "How the picture is enlarged", [] {
++            static const char *const kFilters[] = {"RAW", "SOFT", "SHARP", "FSR 1"};
++            return std::string(kFilters[std::clamp(g_look / 2, 0, 3)]);
++        }, [](int d) { cycle_look(d); });
++    spin("Anti-aliasing", "Smooth edges", [] {
++            static const char *const kAa[] = {"OFF", "EDGES", "SMAA LOW", "SMAA MEDIUM", "SMAA HIGH", "SMAA ULTRA"};
++            return std::string(kAa[std::clamp(g_keys.smaa ? 1 + g_keys.smaa : (g_look & 1) ? 1 : 0, 0, 5)]);
++        }, command(Command::antialias));
++    spin("Sharpen", "Contrast-adaptive sharpening", [] {
++            static const char *const kLevels[] = {"OFF", "LOW", "MEDIUM", "HIGH"};
++            return std::string(kLevels[std::clamp(g_keys.sharpen, 0, 3)]);
++        }, command(Command::sharpen));
++    spin("Text and menus", "The filter of 2D art and text", [] {
++            static const char *const kSharp[] = {"SOFT", "SHARP", "SHARPEST"};
++            return std::string(kSharp[std::clamp(g_sharp_next, 0, 2)]);
++        }, command(Command::sharp_2d));
++    spin("Cutscene bars", "Black bars: how opaque", [] {
++            const int b = std::clamp(g_keys.black_bars, 0, 100) / 10 * 10;
++            return b == 0 ? std::string("OFF") : std::to_string(b) + " %";
++        }, command(Command::black_bars));
++    {
++        const auto get = [] { return lens_rain::level() ? 0 : 1; };
++        pick("Lens rain", "Rain drops on the camera", {"ON", "OFF"}, get, toggle_to(Command::lens_rain, get));
++    }
++    // Sound
++    spin("Master volume", "The volume of the game", [] {
++            const int v = std::clamp(static_cast<int>(g_master_volume), 0, 100) / 10 * 10;
++            return v == 0 ? std::string("MUTE") : std::to_string(v) + " %";
++        }, command(Command::master_volume));
++    {
++        const auto get = [] { return ps2::reverb() ? 0 : 1; };
++        pick("Reverb", "Echo of rooms and tunnels", {"ON", "OFF"}, get, toggle_to(Command::reverb, get));
++    }
++    // Controls
++    parse_mouse_look();
++    if (g_look_yaw.set) {
++        const auto get = [] { return g_keys.mouse_look ? 0 : 1; };
++        pick("Mouse look", "The mouse turns the camera", {"ON", "OFF"}, get, toggle_to(Command::mouse_look, get));
++        spin("Mouse speed", "How far the camera turns", [] {
++                char t[16];
++                std::snprintf(t, sizeof t, "%.1f", std::clamp(std::round(g_keys.look_speed * 5.0) / 5.0, 0.2, 4.0));
++                return std::string(t);
++            }, command(Command::mouse_speed));
++        const auto get_x = [] { return (g_keys.mouse_invert & 1) ? 1 : 0; };
++        pick("Mouse left/right", "The mouse's left and right", {"NORMAL", "INVERTED"}, get_x, toggle_to(Command::mouse_invert_x, get_x));
++        const auto get_y = [] { return (g_keys.mouse_invert & 2) ? 1 : 0; };
++        pick("Mouse up/down", "The mouse's up and down", {"NORMAL", "INVERTED"}, get_y, toggle_to(Command::mouse_invert, get_y));
++    }
++    if (std::getenv("PS2_PROMPT_FONT_KEY")) {
++        const auto get = [] { return g_keys.key_prompts ? 0 : 1; };
++        pick("Key names in texts", "Your keys in the game's texts", {"ON", "OFF"}, get, toggle_to(Command::key_prompts, get));
++    }
++    // Game options: the live sections of recomp.ini (the widescreen one is above)
++    for (std::size_t i = 0; i < recomp::sections().size() && rows.size() < static_cast<std::size_t>(nopt::kMaxRows); ++i) {
++        const recomp::Section &sec = recomp::sections()[i];
++        if (!sec.live || sec.aspect169) continue;
++        const std::string label = nopt::has_art("L:" + sec.label) ? sec.label : sec.name;
++        nopt::Row r;
++        r.label = label, r.help = "Game option (recomp.ini)", r.values = {"ON", "OFF"};
++        r.get = [i] { return recomp::sections()[i].on ? 0 : 1; };
++        r.set = [i](int v) {
++            if ((recomp::sections()[i].on ? 0 : 1) == v) return;
++            std::string note;
++            recomp::toggle(i, note), sync_jp_textures();
++            set_notice(note.empty() ? recomp::sections()[i].label + (recomp::sections()[i].on ? ": on" : ": off") : note);
++        };
++        rows.push_back(std::move(r));
++    }
+ }
+ 
+ void menu_command(quickmenu::Command c, int step) {
+@@ -2019,12 +2239,11 @@ void menu_command(quickmenu::Command c, int step) {
+         set_notice(std::string("Whole-number scaling: ") + (g_keys.integer_scale ? "on (every console row the same height)" : "off (fills the window)"));
+         break;
+     case Command::lens_rain: {
+-        const int level = (lens_rain::level() + step + 3) % 3;
++        const int level = lens_rain::level() ? 0 : 1;
+         lens_rain::set_level(level);
+         g_keys.lens_rain = level;
+         rewrite_keys_file([level](const std::string &t) { return keymap::with_lens_rain(t, level); }, "rain on the lens");
+-        static const char *const kRain[] = {"off", "light", "heavy"};
+-        set_notice(std::string("Rain on the lens: ") + kRain[level]);
++        set_notice(level ? "Rain on the lens: on (as hard as it rains)" : "Rain on the lens: off");
+         break;
+     }
+     case Command::master_volume: {
+@@ -2036,6 +2255,11 @@ void menu_command(quickmenu::Command c, int step) {
+         set_notice(v == 0 ? std::string("Master volume: muted") : "Master volume: " + std::to_string(v) + "%");
+         break;
+     }
++    case Command::menu_game_runs:
++        g_keys.menu_game_runs = g_keys.menu_game_runs ? 0 : 1;
++        rewrite_keys_file([](const std::string &t) { return keymap::with_menu_game_runs(t, g_keys.menu_game_runs); }, "game runs behind the menu");
++        set_notice(std::string("Game runs behind the F1 menu: ") + (g_keys.menu_game_runs ? "on" : "off (it waits)"));
++        break;
+     case Command::pause_unfocused:
+         g_keys.pause_unfocused = g_keys.pause_unfocused ? 0 : 1;
+         rewrite_keys_file([](const std::string &t) { return keymap::with_pause_unfocused(t, g_keys.pause_unfocused); }, "pause in the background");
+@@ -2444,6 +2668,9 @@ void poll() {
+                 reload_keys_if_changed();
+             } else if (g_keys.pause_unfocused && !g_menu.is_open() && g_card.state.load() == 0) {
+                 open_menu("the window went to the background");  // rawdanger-recomp: the game waits until the player is back
++            } else if (g_keys.pause_unfocused && g_menu.is_open() && !g_menu_hold.load()) {
++                g_menu_hold.store(true, std::memory_order_release);   // the game ran behind the menu: it waits now
++                perf::pause(true);
+             }
+             apply_mouse_mode();
+         }
+@@ -2761,9 +2988,9 @@ void on_vblank() {
+     present();
+     pace();
+     if (g_frame_log.file) g_frame_log.frame(0.0, 0.0, queued_ms());
+-    if (g_menu.is_open()) {  // the quick menu: this thread is the window's too, so it answers the window while the game waits
++    if (g_menu.is_open() && g_menu_hold.load()) {  // the quick menu: this thread is the window's too, so it answers the window while the game waits
+         const double since = audio_seconds();
+-        while (g_menu.is_open()) {
++        while (g_menu.is_open() && g_menu_hold.load()) {
+             poll();
+             SDL_Delay(10);
+         }
+diff --git a/runtime/src/gs/gpu/gpu.cpp b/runtime/src/gs/gpu/gpu.cpp
+index 3850f52..c8c0dbd 100644
+--- a/runtime/src/gs/gpu/gpu.cpp
++++ b/runtime/src/gs/gpu/gpu.cpp
+@@ -28,6 +28,7 @@
+ #include <deque>
+ #include <filesystem>
+ #include <fstream>
++#include <map>
+ #include <memory>
+ #include <mutex>
+ #include <string>
+@@ -1375,6 +1376,7 @@ struct TexIndexEntry {
+     bool modified = false;
+     bool dirty = false;
+     int prompt_gen = -1;   // rawdanger-recomp: the key-prompt labels this entry's picture was made with (the game's font only)
++    std::map<std::string, std::uint32_t> kept;   // rawdanger-recomp: the pictures of the other look, already decoded (by path)
+ };
+ 
+ // rawdanger-recomp: PC key prompts in the game's own font. The font (Raw Danger: TEX\1001.TM2) has the PlayStation symbols as
+@@ -1946,10 +1948,26 @@ std::uint32_t resolve_tex_override(const std::uint32_t *w, std::uint32_t base_w,
+     if (!e.modified || base_w != e.orig_w || base_h != e.orig_h) return 0xFFFFFFFFu;
+     // rawdanger-recomp: the pictures under jp/ (the Japanese release's, tools/rd_jp_overrides.py) only while that look is on;
+     // switched at once: the next drawing uses the game's own picture again, or the kept Japanese one
+-    if (!g_jp_textures.load(std::memory_order_relaxed) && !e.files.empty()) {
+-        const std::string &path = e.files.back().png_path;
+-        for (const char *dir : {"/jp/", "\\jp/", "\\jp\\", "/jp\\"})
+-            if (path.find(dir) != std::string::npos) return 0xFFFFFFFFu;
++    // a texture with several pictures (the Options sheet: one with the PC rows' words for each look) takes the first of the
++    // look in force; none of that look: the game's own picture
++    {
++        const auto is_jp = [](const std::string &path) {
++            for (const char *dir : {"/jp/", "\\jp/", "\\jp\\", "/jp\\"})
++                if (path.find(dir) != std::string::npos) return true;
++            return false;
++        };
++        const bool jp = g_jp_textures.load(std::memory_order_relaxed);
++        const std::string *want = nullptr;
++        for (const TexCandidateFile &cf : e.files)
++            if (is_jp(cf.png_path) == jp) { want = &cf.png_path; break; }
++        if (!want) return 0xFFFFFFFFu;
++        if (e.active_path != *want) {
++            if (e.cached_dec != 0xFFFFFFFFu && !e.dirty) e.kept[e.active_path] = e.cached_dec;
++            e.active_path = *want;
++            const auto kept = e.kept.find(*want);
++            e.cached_dec = kept != e.kept.end() ? kept->second : 0xFFFFFFFFu;
++            e.dirty = kept == e.kept.end();
++        }
+     }
+     const bool prompts = key == g_prompt_key && g_prompt_cells_set;
+     if (prompts && e.prompt_gen != g_prompt_gen.load()) e.dirty = true;   // the player changed a key: the font is made again
+diff --git a/runtime/src/gs/gpu/smaa.wgsl b/runtime/src/gs/gpu/smaa.wgsl
+index f5019e5..20f5752 100644
+--- a/runtime/src/gs/gpu/smaa.wgsl
++++ b/runtime/src/gs/gpu/smaa.wgsl
+@@ -64,13 +64,11 @@ fn sample_area(uv: vec2<f32>) -> vec2<f32> {
+     return mix(mix(area_texel(x, y), area_texel(x + 1, y), f.x), mix(area_texel(x, y + 1), area_texel(x + 1, y + 1), f.x), f.y);
+ }
+ 
++// SearchTex is read with point filtering (as in the reference, where its sampler is a point sampler): its values are lengths,
++// a blend of two neighbours is no length at all (the searches came back short and the edges got hardly any weight)
+ fn sample_search(uv: vec2<f32>) -> f32 {
+-    let p = uv * SEARCHTEX_PACKED_SIZE - 0.5;
+-    let o = floor(p);
+-    let f = p - o;
+-    let x = i32(o.x);
+-    let y = i32(o.y);
+-    return mix(mix(search_texel(x, y), search_texel(x + 1, y), f.x), mix(search_texel(x, y + 1), search_texel(x + 1, y + 1), f.x), f.y);
++    let p = floor(uv * SEARCHTEX_PACKED_SIZE);
++    return search_texel(i32(p.x), i32(p.y));
+ }
+ 
+ fn edge_texel(x: i32, y: i32) -> vec2<f32> {
+-- 
+2.43.0
+

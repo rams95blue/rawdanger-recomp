@@ -1,0 +1,11 @@
+Launcher music
+==============
+
+RawDangerPC.exe plays the first music file it finds in this folder (.flac, .mp3, .wav, .wma or .m4a; a file named
+music.* is picked first). The volume is MusicVolume= in launcher.ini (0 to 1, default 0.25); the Music button in the
+launcher switches it on and off.
+
+"SHINOHARA NAME L.flac" (the character-select / name entry music) is from the Raw Danger! (PS2) game rip:
+https://downloads.khinsider.com/game-soundtracks/album/raw-danger-ps2-gamerip-2006
+
+The music belongs to Irem. It is not part of rawdanger-recomp and is not included in its download; put your own copy here.

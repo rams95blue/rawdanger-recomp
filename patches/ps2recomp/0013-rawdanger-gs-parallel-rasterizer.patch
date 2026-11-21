@@ -1,0 +1,272 @@
+diff --git a/ps2xRuntime/include/runtime/gs/gs_cpu_backend.h b/ps2xRuntime/include/runtime/gs/gs_cpu_backend.h
+index 2421f9e..348ef6c 100644
+--- a/ps2xRuntime/include/runtime/gs/gs_cpu_backend.h
++++ b/ps2xRuntime/include/runtime/gs/gs_cpu_backend.h
+@@ -4,6 +4,8 @@
+ #include "runtime/gs/gs_texture_page_cache.h"
+ 
+ #include <array>
++#include <atomic>
++#include <functional>
+ #include <mutex>
+ #include <vector>
+ 
+@@ -73,6 +75,12 @@ private:
+     std::array<uint16_t, 512> m_clut{};
+     std::array<uint32_t, 2> m_clutCbp{};
+     GSMem::TexturePageCache m_texturePageCache;
++    // Bumped whenever m_texturePageCache is invalidated; the per-thread
++    // caches used by the row-parallel rasterizer compare against it.
++    std::atomic<uint64_t> m_textureCacheGeneration{0};
++    // Runs fn(rowBegin, rowEnd) over [y0, y1] on the rasterizer worker pool
++    // (PS2_GS_THREADS, default: hardware threads); serial for small spans.
++    void ForEachRowBand(int y0, int y1, uint64_t pixelCount, const std::function<void(int, int)> &fn);
+ 
+     GSTransferCommand m_transfer{};
+     GSTransferSnapshot m_transferState{};
+diff --git a/ps2xRuntime/src/lib/gs/gs_cpu_backend.cpp b/ps2xRuntime/src/lib/gs/gs_cpu_backend.cpp
+index d7376ee..1c5c3b0 100644
+--- a/ps2xRuntime/src/lib/gs/gs_cpu_backend.cpp
++++ b/ps2xRuntime/src/lib/gs/gs_cpu_backend.cpp
+@@ -14,6 +14,11 @@
+ #include <fstream>
+ #include <iostream>
+ #include <stdexcept>
++#include <condition_variable>
++#include <cstdlib>
++#include <thread>
++
++static uint64_t nextTextureCacheGeneration();
+ 
+ using namespace GSInternal;
+ 
+@@ -535,6 +540,7 @@ void GSCpuBackend::ResetUnlocked()
+     m_clut.fill(0u);
+     m_clutCbp.fill(0u);
+     m_texturePageCache.Invalidate();
++    m_textureCacheGeneration.store(nextTextureCacheGeneration(), std::memory_order_release);
+     m_transfer = {};
+     m_transfer.direction = 3u;
+     m_transferState = {};
+@@ -645,6 +651,7 @@ void GSCpuBackend::TextureFlush()
+ {
+     std::lock_guard<std::mutex> lock(m_mutex);
+     m_texturePageCache.Invalidate();
++    m_textureCacheGeneration.store(nextTextureCacheGeneration(), std::memory_order_release);
+ }
+ 
+ void GSCpuBackend::Sync(GSSyncReason)
+@@ -665,12 +672,162 @@ uint32_t GSCpuBackend::ReadVramUnlocked(uint32_t psm, uint32_t base, uint32_t bw
+     return m_readVramFuncs[psm & 0x3Fu](m_vram, base, bw, x, y);
+ }
+ 
++namespace
++{
++    // Row-band worker pool for the CPU rasterizer (Raw Danger recomp, patch
++    // 0013). One primitive's pixels are independent of each other (each is
++    // written once, reading only its own framebuffer/Z value), so a large
++    // sprite or triangle is split into horizontal bands drawn in parallel.
++    // Primitives still run one after another, in order.
++    class RasterPool
++    {
++    public:
++        static RasterPool &instance()
++        {
++            static RasterPool pool;
++            return pool;
++        }
++
++        unsigned workers() const { return static_cast<unsigned>(m_threads.size()) + 1u; }
++
++        void run(int y0, int y1, const std::function<void(int, int)> &fn)
++        {
++            const int rows = y1 - y0 + 1;
++            const int bands = std::min<int>(rows, static_cast<int>(workers()));
++            if (bands <= 1)
++            {
++                fn(y0, y1);
++                return;
++            }
++            {
++                std::unique_lock<std::mutex> lock(m_mutex);
++                m_fn = &fn;
++                m_y0 = y0;
++                m_y1 = y1;
++                m_bands = bands;
++                m_nextBand = 1; // band 0 runs on the calling thread
++                m_pending = bands - 1;
++                ++m_epoch;
++            }
++            m_wake.notify_all();
++            runBand(0);
++            std::unique_lock<std::mutex> lock(m_mutex);
++            m_done.wait(lock, [&] { return m_pending == 0; });
++            m_fn = nullptr;
++        }
++
++    private:
++        RasterPool()
++        {
++            unsigned n = std::thread::hardware_concurrency();
++            if (const char *env = std::getenv("PS2_GS_THREADS"))
++                n = static_cast<unsigned>(std::max(1, std::atoi(env)));
++            n = std::clamp(n, 1u, 32u);
++            for (unsigned i = 1; i < n; ++i)
++                m_threads.emplace_back([this] { workerLoop(); });
++        }
++
++        ~RasterPool()
++        {
++            {
++                std::lock_guard<std::mutex> lock(m_mutex);
++                m_quit = true;
++            }
++            m_wake.notify_all();
++            for (auto &t : m_threads)
++                t.join();
++        }
++
++        void runBand(int band)
++        {
++            const int rows = m_y1 - m_y0 + 1;
++            const int begin = m_y0 + (rows * band) / m_bands;
++            const int end = m_y0 + (rows * (band + 1)) / m_bands - 1;
++            if (begin <= end)
++                (*m_fn)(begin, end);
++        }
++
++        void workerLoop()
++        {
++            uint64_t seen = 0;
++            for (;;)
++            {
++                int band = -1;
++                {
++                    std::unique_lock<std::mutex> lock(m_mutex);
++                    m_wake.wait(lock, [&] { return m_quit || (m_epoch != seen && m_nextBand < m_bands); });
++                    if (m_quit)
++                        return;
++                    band = m_nextBand++;
++                    if (m_nextBand >= m_bands)
++                        seen = m_epoch;
++                }
++                runBand(band);
++                {
++                    std::lock_guard<std::mutex> lock(m_mutex);
++                    if (--m_pending == 0)
++                        m_done.notify_one();
++                }
++            }
++        }
++
++        std::vector<std::thread> m_threads;
++        std::mutex m_mutex;
++        std::condition_variable m_wake;
++        std::condition_variable m_done;
++        const std::function<void(int, int)> *m_fn = nullptr;
++        int m_y0 = 0, m_y1 = 0, m_bands = 0, m_nextBand = 0, m_pending = 0;
++        uint64_t m_epoch = 0;
++        bool m_quit = false;
++    };
++
++    // Generations are unique across all backend instances: a backend
++    // allocated at a destroyed one's address must not reuse its thread caches.
++    std::atomic<uint64_t> g_textureCacheGeneration{1};
++}
++
++static uint64_t nextTextureCacheGeneration()
++{
++    return g_textureCacheGeneration.fetch_add(1, std::memory_order_acq_rel) + 1u;
++}
++
++namespace
++{
++    struct ThreadTextureCache
++    {
++        GSMem::TexturePageCache cache;
++        uint64_t generation = 0;
++    };
++}
++
++void GSCpuBackend::ForEachRowBand(int y0, int y1, uint64_t pixelCount, const std::function<void(int, int)> &fn)
++{
++    if (y1 < y0)
++        return;
++    constexpr uint64_t kParallelMinPixels = 8192u;
++    if (pixelCount < kParallelMinPixels || (y1 - y0) < 8)
++    {
++        fn(y0, y1);
++        return;
++    }
++    RasterPool::instance().run(y0, y1, fn);
++}
++
+ uint32_t GSCpuBackend::ReadTextureVramUnlocked(uint32_t psm, uint32_t base, uint32_t bw, uint32_t x, uint32_t y)
+ {
+     if (!m_vram)
+         return 0u;
+ 
+-    return GSMem::ReadTexture(m_texturePageCache, m_vram, psm, base, bw, x, y);
++    // Each rasterizer thread keeps its own single-page cache; a TEXFLUSH or
++    // reset (generation bump) drops it the same way it drops the shared one.
++    thread_local ThreadTextureCache tls;
++    const uint64_t generation = m_textureCacheGeneration.load(std::memory_order_acquire);
++    if (tls.generation != generation)
++    {
++        tls.cache.Invalidate();
++        tls.generation = generation;
++    }
++    return GSMem::ReadTexture(tls.cache, m_vram, psm, base, bw, x, y);
+ }
+ 
+ void GSCpuBackend::WriteVram(uint32_t psm, uint32_t base, uint32_t bw, uint32_t x, uint32_t y, uint32_t value)
+@@ -1234,7 +1391,9 @@ void GSCpuBackend::DrawSprite(const GSPrimitiveBatch &batch)
+         if (spriteH < 1.0f)
+             spriteH = 1.0f;
+ 
+-        for (int y = drawY0; y <= drawY1; ++y)
++        const uint64_t spritePixels = static_cast<uint64_t>(drawX1 - drawX0 + 1) * static_cast<uint64_t>(drawY1 - drawY0 + 1);
++        ForEachRowBand(drawY0, drawY1, spritePixels, [&](int bandY0, int bandY1) {
++        for (int y = bandY0; y <= bandY1; ++y)
+         {
+             float ty = (static_cast<float>(y - unclippedY0) + 0.5f) / spriteH;
+             float texVf = v0f + (v1f - v0f) * ty;
+@@ -1266,12 +1425,16 @@ void GSCpuBackend::DrawSprite(const GSPrimitiveBatch &batch)
+                 WritePixel(state, x, y, z1, color.r, color.g, color.b, color.a, v1.fog);
+             }
+         }
++        });
+     }
+     else
+     {
+-        for (int y = drawY0; y <= drawY1; ++y)
++        const uint64_t spritePixels = static_cast<uint64_t>(drawX1 - drawX0 + 1) * static_cast<uint64_t>(drawY1 - drawY0 + 1);
++        ForEachRowBand(drawY0, drawY1, spritePixels, [&](int bandY0, int bandY1) {
++        for (int y = bandY0; y <= bandY1; ++y)
+             for (int x = drawX0; x <= drawX1; ++x)
+                 WritePixel(state, x, y, z1, r, g, b, a, v1.fog);
++        });
+     }
+ }
+ 
+@@ -1321,7 +1484,11 @@ void GSCpuBackend::DrawTriangle(const GSPrimitiveBatch &batch)
+     const float invAbsDenom = 1.0f / std::fabs(denom);
+     constexpr float kEdgeEpsilon = 1.0e-4f;
+ 
+-    for (int y = minY; y <= maxY; ++y)
++    const uint64_t trianglePixels = (maxX >= minX && maxY >= minY)
++                                        ? static_cast<uint64_t>(maxX - minX + 1) * static_cast<uint64_t>(maxY - minY + 1) / 2u
++                                        : 0u;
++    ForEachRowBand(minY, maxY, trianglePixels, [&](int bandY0, int bandY1) {
++    for (int y = bandY0; y <= bandY1; ++y)
+     {
+         float py = static_cast<float>(y) + 0.5f;
+         for (int x = minX; x <= maxX; ++x)
+@@ -1404,6 +1571,7 @@ void GSCpuBackend::DrawTriangle(const GSPrimitiveBatch &batch)
+             WritePixel(state, x, y, static_cast<u32>(zConstant ? z : std::min(z + 0.5, zHi)), r, g, b, a, fog);
+         }
+     }
++    });
+ }
+ 
+ void GSCpuBackend::DrawLine(const GSPrimitiveBatch &batch)

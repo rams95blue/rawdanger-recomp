@@ -1,0 +1,191 @@
+diff --git a/ps2xRuntime/src/lib/ps2_vif1_interpreter.cpp b/ps2xRuntime/src/lib/ps2_vif1_interpreter.cpp
+index f872edd..8c09c1d 100644
+--- a/ps2xRuntime/src/lib/ps2_vif1_interpreter.cpp
++++ b/ps2xRuntime/src/lib/ps2_vif1_interpreter.cpp
+@@ -1,3 +1,5 @@
++#include <vector>
++#include <algorithm>
+ // Based on Blackline Interactive implementation
+ #include "runtime/ps2_memory.h"
+ #include <cstring>
+@@ -304,31 +306,54 @@ void PS2Memory::processVIF1Data(const uint8_t *data, uint32_t sizeBytes)
+ 
+     while (pos + 4 <= sizeBytes)
+     {
++        // A GIF IMAGE tag whose data did not fit in its DIRECT/DIRECTHL keeps
++        // PATH2 in IMAGE mode. On hardware the data arrives in the *next*
++        // DIRECT/DIRECTHL command(s) and the VIF keeps decoding VIFcodes in
++        // between; that case is handled in the DIRECT branch below. Reading the
++        // following bytes as raw image data swallowed the next DMA tag's two
++        // TTE VIFcodes (`NOP; DIRECTHL n`): every upload split that way landed
++        // 8 bytes late with its last 8 bytes lost (garbage CLUTs and sheared
++        // textures in Raw Danger). The raw continuation is kept only when the
++        // next VIFcodes are not NOPs leading to a DIRECT/DIRECTHL.
+         if (m_vif1PendingPath2ImageQwc != 0u)
+         {
+-            const uint32_t availableQw = (sizeBytes - pos) / 16u;
+-            if (availableQw == 0u)
++            bool directFollows = false;
++            for (uint32_t peek = pos; peek + 4u <= sizeBytes && peek < pos + 16u; peek += 4u)
+             {
+-                break;
++                uint32_t code = 0u;
++                std::memcpy(&code, data + peek, 4);
++                const uint8_t op = static_cast<uint8_t>((code >> 24) & 0x7Fu);
++                if (op == VIF_DIRECT || op == VIF_DIRECTHL)
++                {
++                    directFollows = true;
++                    break;
++                }
++                if (op != 0x00u) // anything but NOP: not a VIFcode run
++                    break;
+             }
+ 
+-            const uint32_t chunkQw = std::min<uint32_t>(m_vif1PendingPath2ImageQwc, availableQw);
+-            std::vector<uint8_t> imagePacket(16u + static_cast<size_t>(chunkQw) * 16u, 0u);
+-            const uint64_t imageTag =
+-                static_cast<uint64_t>(chunkQw & 0x7FFFu) |
+-                ((m_vif1PendingPath2ImageQwc == chunkQw) ? (1ull << 15) : 0ull) |
+-                (static_cast<uint64_t>(kGifFmtImage) << 58);
+-            std::memcpy(imagePacket.data(), &imageTag, sizeof(imageTag));
+-            std::memcpy(imagePacket.data() + 16u, data + pos, static_cast<size_t>(chunkQw) * 16u);
+-            submitGifPacket(GifPathId::Path2, imagePacket.data(), static_cast<uint32_t>(imagePacket.size()), true, m_vif1PendingPath2DirectHl);
+-
+-            pos += chunkQw * 16u;
+-            m_vif1PendingPath2ImageQwc -= chunkQw;
+-            if (m_vif1PendingPath2ImageQwc == 0u)
++            if (!directFollows)
+             {
+-                m_vif1PendingPath2DirectHl = false;
++                const uint32_t availableQw = (sizeBytes - pos) / 16u;
++                if (availableQw == 0u)
++                    break;
++
++                const uint32_t chunkQw = std::min<uint32_t>(m_vif1PendingPath2ImageQwc, availableQw);
++                std::vector<uint8_t> imagePacket(16u + static_cast<size_t>(chunkQw) * 16u, 0u);
++                const uint64_t imageTag =
++                    static_cast<uint64_t>(chunkQw & 0x7FFFu) |
++                    ((m_vif1PendingPath2ImageQwc == chunkQw) ? (1ull << 15) : 0ull) |
++                    (static_cast<uint64_t>(kGifFmtImage) << 58);
++                std::memcpy(imagePacket.data(), &imageTag, sizeof(imageTag));
++                std::memcpy(imagePacket.data() + 16u, data + pos, static_cast<size_t>(chunkQw) * 16u);
++                submitGifPacket(GifPathId::Path2, imagePacket.data(), static_cast<uint32_t>(imagePacket.size()), true, m_vif1PendingPath2DirectHl);
++
++                pos += chunkQw * 16u;
++                m_vif1PendingPath2ImageQwc -= chunkQw;
++                if (m_vif1PendingPath2ImageQwc == 0u)
++                    m_vif1PendingPath2DirectHl = false;
++                continue;
+             }
+-            continue;
+         }
+ 
+         uint32_t cmd;
+@@ -498,13 +523,41 @@ void PS2Memory::processVIF1Data(const uint8_t *data, uint32_t sizeBytes)
+             if (qwCount > 0)
+             {
+                 const bool directHl = (opcode == VIF_DIRECTHL);
+-                submitGifPacket(GifPathId::Path2, data + pos, qwCount * 16, true, directHl);
++                const uint8_t *payload = data + pos;
++                uint32_t payloadQw = qwCount;
+ 
+-                const uint32_t pendingImageQw = pendingGifImageQwc(data + pos, qwCount * 16u);
+-                if (pendingImageQw != 0u)
++                // Continue an IMAGE transfer started by an earlier DIRECT: the
++                // GS frontend parses each packet on its own, so the remaining
++                // data gets a synthetic IMAGE tag for the qwords still owed.
++                if (m_vif1PendingPath2ImageQwc != 0u)
+                 {
+-                    m_vif1PendingPath2ImageQwc = pendingImageQw;
+-                    m_vif1PendingPath2DirectHl = directHl;
++                    const uint32_t chunkQw = std::min<uint32_t>(m_vif1PendingPath2ImageQwc, payloadQw);
++                    std::vector<uint8_t> imagePacket(16u + static_cast<size_t>(chunkQw) * 16u, 0u);
++                    const uint64_t imageTag =
++                        static_cast<uint64_t>(chunkQw & 0x7FFFu) |
++                        ((m_vif1PendingPath2ImageQwc == chunkQw) ? (1ull << 15) : 0ull) |
++                        (static_cast<uint64_t>(kGifFmtImage) << 58);
++                    std::memcpy(imagePacket.data(), &imageTag, sizeof(imageTag));
++                    std::memcpy(imagePacket.data() + 16u, payload, static_cast<size_t>(chunkQw) * 16u);
++                    submitGifPacket(GifPathId::Path2, imagePacket.data(), static_cast<uint32_t>(imagePacket.size()), true,
++                                    m_vif1PendingPath2DirectHl || directHl);
++                    m_vif1PendingPath2ImageQwc -= chunkQw;
++                    if (m_vif1PendingPath2ImageQwc == 0u)
++                        m_vif1PendingPath2DirectHl = false;
++                    payload += static_cast<size_t>(chunkQw) * 16u;
++                    payloadQw -= chunkQw;
++                }
++
++                if (payloadQw > 0u)
++                {
++                    submitGifPacket(GifPathId::Path2, payload, payloadQw * 16u, true, directHl);
++
++                    const uint32_t pendingImageQw = pendingGifImageQwc(payload, payloadQw * 16u);
++                    if (pendingImageQw != 0u)
++                    {
++                        m_vif1PendingPath2ImageQwc = pendingImageQw;
++                        m_vif1PendingPath2DirectHl = directHl;
++                    }
+                 }
+             }
+ 
+diff --git a/ps2xTest/src/ps2_memory_tests.cpp b/ps2xTest/src/ps2_memory_tests.cpp
+index 0b22fe0..de7c6d4 100644
+--- a/ps2xTest/src/ps2_memory_tests.cpp
++++ b/ps2xTest/src/ps2_memory_tests.cpp
+@@ -2216,6 +2216,56 @@ void register_ps2_memory_tests()
+             t.IsTrue(imageOk, "raw image continuation after packed setup should not be decoded as VIF/GIF registers");
+         });
+ 
++        tc.Run("VIF1 DIRECT image tag continues in the next DIRECTHL (TTE VIFcodes are not image data)", [](TestCase &t)
++        {
++            PS2Memory mem;
++            t.IsTrue(mem.initialize(), "PS2Memory initialize should succeed");
++
++            GS gs;
++            gs.init(mem.getGSVRAM(), static_cast<uint32_t>(PS2_GS_VRAM_SIZE), &mem.gs());
++            GifArbiter arbiter([&](const uint8_t *data, uint32_t sizeBytes)
++            {
++                gs.processGIFPacket(data, sizeBytes);
++            });
++            mem.setGifArbiter(&arbiter);
++
++            gs.writeRegister(GS_REG_BITBLTBUF, (static_cast<uint64_t>(1u) << 48));
++            gs.writeRegister(GS_REG_TRXPOS, 0ull);
++            gs.writeRegister(GS_REG_TRXREG, (4ull << 0) | (1ull << 32));
++            gs.writeRegister(GS_REG_TRXDIR, 0ull);
++
++            // What a VIF1 chain with TTE produces (Raw Danger's texture/CLUT uploads):
++            // [NOP][DIRECTHL 1] IMAGE tag, then the next DMA tag's VIFcodes
++            // [NOP][DIRECTHL 1] and the image qword.
++            std::vector<uint8_t> packet;
++            appendU32(packet, 0u);
++            appendU32(packet, makeVifCmd(0x51u, 0u, 1u));
++            appendU64(packet, makeGifTag(1u, GIF_FMT_IMAGE, 0u, true));
++            appendU64(packet, 0ull);
++            appendU32(packet, 0u);
++            appendU32(packet, makeVifCmd(0x51u, 0u, 1u));
++            for (uint32_t i = 0; i < 16u; ++i)
++                packet.push_back(static_cast<uint8_t>(0xE0u + i));
++
++            mem.processVIF1Data(packet.data(), static_cast<uint32_t>(packet.size()));
++
++            const uint8_t *vramOut = mem.getGSVRAM();
++            bool imageOk = true;
++            for (uint32_t x = 0; x < 4u && imageOk; ++x)
++            {
++                const uint32_t off = GSPSMCT32::addrPSMCT32(0u, 1u, x, 0u);
++                for (uint32_t c = 0; c < 4u; ++c)
++                {
++                    if (vramOut[off + c] != static_cast<uint8_t>(0xE0u + x * 4u + c))
++                    {
++                        imageOk = false;
++                        break;
++                    }
++                }
++            }
++            t.IsTrue(imageOk, "image data of the second DIRECTHL should land at the transfer start, VIFcodes excluded");
++        });
++
+         tc.Run("unaligned accesses throw", [](TestCase &t)
+         {
+             PS2Memory mem;

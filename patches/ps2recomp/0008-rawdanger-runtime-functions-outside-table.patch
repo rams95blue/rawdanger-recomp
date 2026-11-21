@@ -1,0 +1,84 @@
+ps2xRuntime: keep run-time registered functions for guest addresses outside the
+generated dense table (code overlays loaded by the game), and look them up in
+hasFunction/lookupFunction. replaceFunction(addr, nullptr) removes an entry.
+
+diff --git a/ps2xRuntime/src/lib/ps2_runtime.cpp b/ps2xRuntime/src/lib/ps2_runtime.cpp
+index 6fdf916..c0eb99f 100644
+--- a/ps2xRuntime/src/lib/ps2_runtime.cpp
++++ b/ps2xRuntime/src/lib/ps2_runtime.cpp
+@@ -26,6 +26,7 @@
+ #include <atomic>
+ #include <thread>
+ #include <unordered_map>
++#include <shared_mutex>
+ #include <sstream>
+ 
+ namespace ps2_stubs
+@@ -1087,11 +1088,45 @@ namespace
+         slot = offset >> 2;
+         return slot < g_ps2RecompiledFunctionTableSlotCount;
+     }
++
++    // Functions registered at run time for guest addresses outside the generated
++    // dense table, e.g. code overlays the game loads into its own memory (Raw
++    // Danger's MWo3 overlays at 0x718A00..0x8xxxxx). Registering nullptr removes
++    // an entry again when another overlay takes the same memory.
++    struct ExtraFunctionMap
++    {
++        std::shared_mutex mutex;
++        std::unordered_map<uint32_t, PS2Runtime::RecompiledFunction> functions;
++    };
++
++    ExtraFunctionMap &extraFunctions()
++    {
++        static ExtraFunctionMap map;
++        return map;
++    }
++
++    PS2Runtime::RecompiledFunction findExtraFunction(uint32_t address)
++    {
++        ExtraFunctionMap &map = extraFunctions();
++        std::shared_lock<std::shared_mutex> lock(map.mutex);
++        const auto it = map.functions.find(address);
++        return it != map.functions.end() ? it->second : nullptr;
++    }
+ }
+ 
+ bool PS2Runtime::replaceFunction(uint32_t address, RecompiledFunction func)
+ {
+     uint32_t slot = 0u;
++    if (!generatedFunctionTableSlot(address, slot) && (address & 3u) == 0u)
++    {
++        ExtraFunctionMap &map = extraFunctions();
++        std::unique_lock<std::shared_mutex> lock(map.mutex);
++        if (func)
++            map.functions[address] = func;
++        else
++            map.functions.erase(address);
++        return true;
++    }
+     if (!generatedFunctionTableSlot(address, slot))
+     {
+         std::cerr << "[function-table] cannot replace guest PC 0x" << std::hex << address
+@@ -1113,7 +1148,9 @@ bool PS2Runtime::registerFunction(uint32_t address, RecompiledFunction func)
+ bool PS2Runtime::hasFunction(uint32_t address) const
+ {
+     uint32_t slot = 0u;
+-    return generatedFunctionTableSlot(address, slot) && g_ps2RecompiledFunctionTable[slot] != nullptr;
++    if (generatedFunctionTableSlot(address, slot))
++        return g_ps2RecompiledFunctionTable[slot] != nullptr;
++    return findExtraFunction(address) != nullptr;
+ }
+ 
+ const char *describeGuestBranchKind(PS2Runtime::GuestBranchKind kind)
+@@ -1148,6 +1185,10 @@ PS2Runtime::RecompiledFunction PS2Runtime::lookupFunction(uint32_t address)
+             return fn;
+         }
+     }
++    else if (RecompiledFunction extra = findExtraFunction(address))
++    {
++        return extra;
++    }
+ 
+     std::cerr << "Error: No exact recompiled function for guest PC 0x" << std::hex << address
+               << " tableBase=0x" << g_ps2RecompiledFunctionTableBase

@@ -1,0 +1,459 @@
+From 06bfcdec6f703f88577a8d0f889adb2a121ebe90 Mon Sep 17 00:00:00 2001
+From: rams95 <rams95@users.noreply.github.com>
+Date: Thu, 19 Nov 2026 19:46:09 +0000
+Subject: [PATCH] 0018-native-options-line-jp-live-walk-speed.patch
+
+The game's own Options list (from the title and from the in-game menu's Options tab) gets a PC settings line in place of
+'Adjust screen position' (PS2_NATIVE_ROW): the game's cursor (found by the list's table pointer), its help line rewritten in
+the game's text, Cross opens the PC settings in the screen's look. The Japanese pictures (overrides under jp/) switch at
+once with the in-game switch (ps2::set_jp_textures, PS2_JP_TEXTURES). Readable key names in the game's texts (LMB, RMB,
+Spc, Ent...), key caps sized to the game's font, no key card. F6 held: fast forward. The mouse wheel sets the walk speed of
+the walk keys (5 steps) when no button has the wheel.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01QNLFPekqhcU2dj7B3Utmea
+---
+ host/keymap.cpp               |  30 +++----
+ host/quickmenu.cpp            |  29 +++++--
+ host/quickmenu.hpp            |   3 +
+ host/window.cpp               | 148 +++++++++++++++++++++++++++++++---
+ runtime/include/ps2/video.hpp |   2 +
+ runtime/src/gs/gpu/gpu.cpp    |   9 +++
+ 6 files changed, 192 insertions(+), 29 deletions(-)
+
+diff --git a/host/keymap.cpp b/host/keymap.cpp
+index e5ddec0..f5c2c31 100644
+--- a/host/keymap.cpp
++++ b/host/keymap.cpp
+@@ -173,25 +173,25 @@ std::string with_mouse_invert(const std::string &file_text, int invert) {
+ std::string with_key_prompts(const std::string &file_text, int on) { return with_line(file_text, "keyprompts", std::string("key_prompts = ") + (on ? "on" : "off")); }
+ std::string short_input_name(int input) {
+     switch (input) {
+-    case kMouseLeft: return "ML";
+-    case kMouseRight: return "MR";
+-    case kMouseMiddle: return "MM";
+-    case kMouseX1: return "M4";
+-    case kMouseX2: return "M5";
+-    case kWheelUp: return "WU";
+-    case kWheelDown: return "WD";
++    case kMouseLeft: return "LMB";
++    case kMouseRight: return "RMB";
++    case kMouseMiddle: return "MMB";
++    case kMouseX1: return "MB4";
++    case kMouseX2: return "MB5";
++    case kWheelUp: return "Wh^";
++    case kWheelDown: return "Whv";
+     default: break;
+     }
+     if (input <= 0 || input >= kScancodes) return "";
+     switch (static_cast<SDL_Scancode>(input)) {
+-    case SDL_SCANCODE_SPACE: return "SP";
+-    case SDL_SCANCODE_RETURN: case SDL_SCANCODE_KP_ENTER: return "EN";
+-    case SDL_SCANCODE_LSHIFT: case SDL_SCANCODE_RSHIFT: return "SH";
+-    case SDL_SCANCODE_LCTRL: case SDL_SCANCODE_RCTRL: return "CT";
+-    case SDL_SCANCODE_LALT: case SDL_SCANCODE_RALT: return "AL";
+-    case SDL_SCANCODE_TAB: return "TB";
+-    case SDL_SCANCODE_BACKSPACE: return "BS";
+-    case SDL_SCANCODE_ESCAPE: return "ES";
++    case SDL_SCANCODE_SPACE: return "Spc";
++    case SDL_SCANCODE_RETURN: case SDL_SCANCODE_KP_ENTER: return "Ent";
++    case SDL_SCANCODE_LSHIFT: case SDL_SCANCODE_RSHIFT: return "Shf";
++    case SDL_SCANCODE_LCTRL: case SDL_SCANCODE_RCTRL: return "Ctl";
++    case SDL_SCANCODE_LALT: case SDL_SCANCODE_RALT: return "Alt";
++    case SDL_SCANCODE_TAB: return "Tab";
++    case SDL_SCANCODE_BACKSPACE: return "Bks";
++    case SDL_SCANCODE_ESCAPE: return "Esc";
+     case SDL_SCANCODE_UP: return "^";
+     case SDL_SCANCODE_DOWN: return "v";
+     case SDL_SCANCODE_LEFT: return "<";
+diff --git a/host/quickmenu.cpp b/host/quickmenu.cpp
+index cc0d08f..859a2b7 100644
+--- a/host/quickmenu.cpp
++++ b/host/quickmenu.cpp
+@@ -122,10 +122,10 @@ constexpr Command kPicture[] = {Command::look, Command::antialias, Command::shar
+ constexpr const char *kPictureKeys[] = {"F2", "", "", "", "", "Esc"};
+ constexpr Command kSound[] = {Command::master_volume, Command::reverb, Command::back};
+ constexpr const char *kSoundKeys[] = {"", "", "Esc"};
+-constexpr Command kControls[] = {Command::change_keys, Command::mouse_look, Command::mouse_speed, Command::mouse_invert_x, Command::mouse_invert, Command::key_prompts, Command::keys, Command::back};
+-constexpr const char *kControlsKeys[] = {"", "", "", "", "", "", "", "Esc"};
++constexpr Command kControls[] = {Command::change_keys, Command::mouse_look, Command::mouse_speed, Command::mouse_invert_x, Command::mouse_invert, Command::key_prompts, Command::back};
++constexpr const char *kControlsKeys[] = {"", "", "", "", "", "", "Esc"};
+ struct TabList { const Command *commands; const char *const *keys; int n; };
+-constexpr TabList kTabLists[Menu::kTabs - 1] = {{kDisplay, kDisplayKeys, 8}, {kPicture, kPictureKeys, 6}, {kSound, kSoundKeys, 3}, {kControls, kControlsKeys, 8}};
++constexpr TabList kTabLists[Menu::kTabs - 1] = {{kDisplay, kDisplayKeys, 8}, {kPicture, kPictureKeys, 6}, {kSound, kSoundKeys, 3}, {kControls, kControlsKeys, 7}};
+ constexpr int kVisibleRows = 11;  // lines of the keys page shown at once; the page scrolls
+ constexpr int kKeysPageChars = 58;
+ 
+@@ -233,7 +233,9 @@ struct Canvas {
+     }
+     // rawdanger-recomp: a key cap (a box with a lighter top edge and the key's name), `s` font pixels; returns its width
+     int keycap(int x, int y, int s, const std::string &name, std::uint32_t face, std::uint32_t edge, std::uint32_t ink) {
+-        const int w = (static_cast<int>(name.size()) * 6 + 5) * s, h = 11 * s, t = std::max(1, s / 2);
++        // as wide as its name in the letters in use (the game's own font is narrower or wider than the menu's)
++        const int text_w = (g_skin == 2 && g_font.ok) ? game_text_width(s, name) : static_cast<int>(name.size()) * 6 * s;
++        const int w = text_w + 5 * s, h = 11 * s, t = std::max(1, s / 2);
+         fill(x, y, w, h, face);
+         box(x, y, w, h, t, edge);
+         fill(x + t, y + h - 2 * t, w - 2 * t, t, edge);   // its lower lip, like a real key
+@@ -619,7 +621,7 @@ bool Menu::select_at(int x, int y) {
+ 
+ void Menu::draw_keys(int window_width, int window_height, const Values &values, Picture &out) {
+     static const std::string kTitleText = "Change keys - the game waits", kHint = "Enter / click: change a key     Esc / Circle: back",
+-                             kFixed = "Not usable: F1 F2 F5 F8 F9 F11 (the program's)", kCapture = "Press a key or mouse button... (Esc: cancel)";
++                             kFixed = "Not usable: F1 F2 F3 F5 F6 F8 F9 F11 (the program's)", kCapture = "Press a key or mouse button... (Esc: cancel)";
+     key_rows_ = static_cast<int>(values.key_rows.size());
+     fit();
+     const int n = key_rows_, shown = std::min(n, kVisibleRows);
+@@ -990,6 +992,23 @@ void Menu::draw_note(int window_width, int window_height, const std::string &tex
+     c.text(pad * s, pad * s, s, text, kTitle);
+ }
+ 
++void Menu::draw_native_label(int x, int y, int w, int h, bool selected, const std::string &text, Picture &out) {
++    out.x = x;
++    out.y = y;
++    out.width = std::max(1, w);
++    out.height = std::max(1, h);
++    out.rgba.assign(static_cast<std::size_t>(out.width) * out.height, 0);
++    // the line's own fill: a navy that darkens downwards, or the flat steel blue of the chosen line (measured on the screen)
++    for (int j = 0; j < out.height; ++j) {
++        const float f = out.height > 1 ? static_cast<float>(j) / (out.height - 1) : 0.f;
++        const std::uint32_t c = selected ? rgba(54, 102, 134, 255) : rgba(static_cast<int>(33 - 18 * f), static_cast<int>(63 - 28 * f), static_cast<int>(83 - 35 * f), 255);
++        for (int i = 0; i < out.width; ++i) out.rgba[static_cast<std::size_t>(j) * out.width + i] = c;
++    }
++    // the words in the game's font, the height of the game's own (its capitals about 55% of the line)
++    const int s = std::max(1, static_cast<int>(std::lround(out.height * 0.55 / 7.0 / 0.47 * 0.47)));
++    if (g_font.ok) game_text(out, 0, std::max(0, (out.height - static_cast<int>(19 * game_font_k(s))) / 2 + static_cast<int>(game_font_k(s))), s, text, rgba(236, 242, 250, 255));
++}
++
+ // rawdanger-recomp: over the game's Options screen, at the bottom left: which button opens the PC settings, in the game's look
+ void Menu::draw_native_hint(int window_width, int window_height, const std::string &text, Picture &out) {
+     const int was = g_skin;
+diff --git a/host/quickmenu.hpp b/host/quickmenu.hpp
+index b5da241..41cfd4d 100644
+--- a/host/quickmenu.hpp
++++ b/host/quickmenu.hpp
+@@ -115,6 +115,9 @@ public:
+     bool native() const { return native_; }
+     // the small sign over the game's Options screen that says which button opens these settings
+     static void draw_native_hint(int window_width, int window_height, const std::string &text, Picture &out);
++    // rawdanger-recomp: one line of the game's own Options list drawn again with other words (x, y, w, h: where its words are, in
++    // window pixels; `selected`: the game's cursor is on it, so the lighter fill of a chosen line)
++    static void draw_native_label(int x, int y, int w, int h, bool selected, const std::string &text, Picture &out);
+     void close() { open_ = false; }
+     void move(int delta);                      // up (-1) and down (+1), round at the ends
+     Command choose();                          // Enter, Cross, a click: what the highlighted entry does (Quit asks once: the first time it only arms itself)
+diff --git a/host/window.cpp b/host/window.cpp
+index f7434a7..47b25bd 100644
+--- a/host/window.cpp
++++ b/host/window.cpp
+@@ -123,6 +123,16 @@ void window_stage(const char *name) {
+ // gets the focus back after the file changed). The arrow keys are the D-pad only: they used to push the left stick as well, and
+ // a menu that reads both moved two entries for one press.
+ keymap::Config g_keys = keymap::defaults();
++std::atomic<bool> g_fast_forward{false};   // rawdanger-recomp: F6 held
++// rawdanger-recomp: the Japanese pictures inside maps and models (texture overrides under jp/) follow the Enhanced Edition's
++// "Textures: Japanese faces" and "... signs" switches, at once
++void sync_jp_textures() {
++    bool on = false;
++    for (const recomp::Section &sec : recomp::sections())
++        if (sec.on && sec.name.rfind("Textures: Japanese", 0) == 0) on = true;
++    if (const char *f = std::getenv("PS2_JP_TEXTURES"); f && *f) on = *f == '1';   // forced (the US build has no such switch)
++    ps2::set_jp_textures(on);
++}
+ // rawdanger-recomp: the game's own Options screen (PS2_NATIVE_MENU="ADDRESS=VALUE", Raw Danger's scene word 0x48F488 = 16):
+ // while it is on, a sign at the bottom left says Select opens the PC settings, drawn in the game's look
+ std::uint32_t g_native_address = 0, g_native_value = 0;
+@@ -130,6 +140,62 @@ bool g_native_set = false, g_native_hint = false;
+ int g_skin_chosen = 0;
+ void open_menu(const char *why);
+ void menu_paint(bool show_again = true);   // the menu's look chosen in keys.ini (the native page borrows the game's look while it is open)
++// rawdanger-recomp: the PC settings as a line of the game's own Options list. PS2_NATIVE_ROW="POINTER+OFFSET=ROW;X0,Y0,X1,Y1;
++// HELP_ADDRESS": while the Options screen is on (PS2_NATIVE_MENU), the game's cursor is the word at [POINTER] + OFFSET; line ROW
++// (Raw Danger: "Adjust screen position", which means nothing on a PC) gets the words "PC settings" over its own (X0..Y1: where its
++// words are, in the console's 640 x 448 picture), the game's help line under the list says what it does (the game's own text,
++// at HELP_ADDRESS, written in its place), and Cross on it opens the PC settings in the screen's look instead of the game's
++// screen-position page. Up, Down and the rest stay the game's.
++bool native_scene();
++struct NativeRow {
++    bool set = false;
++    std::uint32_t pointer = 0, offset = 0, row = 0, help = 0, shown = 0;   // shown: [POINTER] + this is 1 while the list is up
++    int x0 = 0, y0 = 0, x1 = 0, y1 = 0;
++} g_native_row;
++bool g_native_label = false, g_native_label_selected = false;
++const char kNativeHelpWas[] = "Adjust Screen Position";
++const char kNativeHelp[] = "Picture, sound, keys";   // no longer than the game's own words
++
++void parse_native_row() {
++    static bool parsed = false;
++    if (parsed) return;
++    parsed = true;
++    const char *v = std::getenv("PS2_NATIVE_ROW");
++    if (!v || !*v) return;
++    unsigned long p = 0, o = 0, r = 0, h = 0, sh = 0;
++    int x0 = 0, y0 = 0, x1 = 0, y1 = 0;
++    if (std::sscanf(v, "%lx+%lx=%lu;%d,%d,%d,%d;%lx;%lx", &p, &o, &r, &x0, &y0, &x1, &y1, &h, &sh) >= 7) {
++        g_native_row = {true, static_cast<std::uint32_t>(p), static_cast<std::uint32_t>(o), static_cast<std::uint32_t>(r), static_cast<std::uint32_t>(h), static_cast<std::uint32_t>(sh), x0, y0, x1, y1};
++        std::fprintf(stderr, "[menu] the game's Options list: line %lu is the PC settings\n", r);
++    }
++}
++
++int native_cursor() {
++    parse_native_row();
++    if (!g_native_row.set || !native_scene()) return -1;   // the Options screen only
++    const std::uint32_t base = ps2::ld32(g_native_row.pointer);
++    if (base < 0x100000 || base >= 0x2000000) return -1;
++    // the list's state sits at another place in the work memory from the title and from the in-game menu: it is found by the
++    // pointer to the list's table (OFFSET is that table's address, 0x73C8A0 in OPTION.BIN), then the number of lines, then the
++    // cursor; 24 bytes before the table pointer is 1 while the list (not one of its pages) is up
++    for (std::uint32_t at = base; at < base + 0x1000; at += 4) {
++        if (ps2::ld32(at) != g_native_row.offset || ps2::ld32(at + 4) != 7) continue;
++        if (ps2::ld32(at - 24) != 1) return -1;
++        return static_cast<int>(ps2::ld32(at + 8));
++    }
++    return -1;
++}
++
++// the game's help line for that line, in its own text (only where the game's words are still there, so nothing else is touched)
++void native_help_text() {
++    if (!g_native_row.help) return;
++    bool same = true;
++    for (std::size_t i = 0; i < sizeof kNativeHelpWas - 1 && same; ++i) same = ps2::ld8(g_native_row.help + static_cast<std::uint32_t>(i)) == static_cast<std::uint8_t>(kNativeHelpWas[i]);
++    if (!same) return;
++    for (std::size_t i = 0; i < sizeof kNativeHelpWas; ++i)
++        ps2::st8(g_native_row.help + static_cast<std::uint32_t>(i), i < sizeof kNativeHelp - 1 && i < sizeof kNativeHelpWas - 1 ? static_cast<std::uint8_t>(kNativeHelp[i]) : 0);
++}
++
+ bool native_scene() {
+     static bool parsed = false;
+     if (!parsed) {
+@@ -145,6 +211,21 @@ bool native_scene() {
+     }
+     return g_native_set && ps2::ld32(g_native_address) == g_native_value;
+ }
++
++// rawdanger-recomp: the game's pause box while playing (PS2_NATIVE_PAUSE="ADDRESS=VALUE": Raw Danger 0x48F4EC = 1): the same sign
++// and Select open the PC settings from there too
++bool native_pause() {
++    static bool parsed = false, set = false;
++    static std::uint32_t address = 0, value = 0;
++    if (!parsed) {
++        parsed = true;
++        if (const char *w = std::getenv("PS2_NATIVE_PAUSE"); w && *w) {
++            unsigned long a = 0, v = 0;
++            if (std::sscanf(w, "%lx=%lu", &a, &v) == 2) address = static_cast<std::uint32_t>(a), value = static_cast<std::uint32_t>(v), set = true;
++        }
++    }
++    return set && ps2::ld32(address) == value;
++}
+ void send_key_prompts();  // rawdanger-recomp: the keys for the game's font (below)
+ // the picture options for the GPU: the look (bits 0-2) and whole-number scaling (bit 3, rawdanger-recomp)
+ std::uint32_t video_bits();
+@@ -801,6 +882,17 @@ void show_key_card(const char *why) {
+ 
+ // A stick pushed by keys: all the way in a direction; two keys make a diagonal that is as far from the middle as a straight push
+ // (not 1.4 times as far, which the game would take as a push past the stick's circle).
++// rawdanger-recomp: walk speed for the walk keys, set with the mouse wheel when the wheel is not given to a button (keys.ini)
++constexpr int kWalkSteps = 5;
++int g_walk_step = kWalkSteps;   // 1 slowest ... 5 full push (a run)
++double walk_push() { return 60.0 + (127.0 - 60.0) * (g_walk_step - 1) / (kWalkSteps - 1); }   // past the game's dead zone (about 59)
++bool wheel_is_a_button() {
++    for (const auto &list : g_keys.inputs)
++        for (int input : list)
++            if (input == keymap::kWheelUp || input == keymap::kWheelDown) return true;
++    return false;
++}
++
+ void push_stick(int dx, int dy, std::uint8_t &x, std::uint8_t &y) {
+     const bool diagonal = dx != 0 && dy != 0;
+     if (dx) x = diagonal ? static_cast<std::uint8_t>(0x80 + dx * 90) : (dx < 0 ? 0x00 : 0xFF);
+@@ -952,6 +1044,13 @@ void read_keyboard(std::uint16_t &pressed, std::uint8_t &lx, std::uint8_t &ly, s
+     const int rdx = (any(keymap::RightRight) ? 1 : 0) - (any(keymap::RightLeft) ? 1 : 0);
+     const int rdy = (any(keymap::RightDown) ? 1 : 0) - (any(keymap::RightUp) ? 1 : 0);
+     push_stick(ldx, ldy, lx, ly);
++    // rawdanger-recomp: the walk keys push the left stick only so far (the mouse wheel sets how far: a slow walk to a run, as a
++    // stick pushed part of the way)
++    if ((ldx || ldy) && g_walk_step < kWalkSteps) {
++        const double k = walk_push() / 127.0;
++        lx = static_cast<std::uint8_t>(std::clamp(128.0 + (static_cast<int>(lx) - 128) * k, 0.0, 255.0));
++        ly = static_cast<std::uint8_t>(std::clamp(128.0 + (static_cast<int>(ly) - 128) * k, 0.0, 255.0));
++    }
+     push_stick(rdx, rdy, rx, ry);
+     if (ldx || ldy) {
+         g_last_dx = ldx;
+@@ -1039,8 +1138,10 @@ void poll_port(int port) {
+         stick(pad, SDL_CONTROLLER_AXIS_LEFTX, SDL_CONTROLLER_AXIS_LEFTY, lx, ly);
+         stick(pad, SDL_CONTROLLER_AXIS_RIGHTX, SDL_CONTROLLER_AXIS_RIGHTY, rx, ry);
+     }
+-    // rawdanger-recomp: Select on the game's Options screen opens the PC settings in the game's look (the game does not get it)
+-    if (port == 0 && (pressed & kSelect) && !g_menu.is_open() && native_scene()) {
++    // rawdanger-recomp: Cross on the game's own "PC settings" line, or Select anywhere on its Options screen, opens the PC settings
++    // in the screen's look (the game does not get the button)
++    if (port == 0 && !g_menu.is_open() && (native_scene() || native_pause()) &&
++        ((pressed & kSelect) || ((pressed & kCross) && g_native_row.set && native_cursor() == static_cast<int>(g_native_row.row)))) {
+         open_menu("Select on the game's Options screen");
+         g_menu.open_native();
+         if (quickmenu::game_font_loaded()) quickmenu::set_skin(2);
+@@ -1228,6 +1329,14 @@ void menu_paint(bool show_again) {
+             v.recomp_note = g_recomp_note;
+         }
+         g_menu.draw(w, h, v, g_menu_picture);
++    } else if (g_note_text.empty() && g_native_hint && g_native_label) {
++        // the label of the game's line, where the game draws its words (the game's picture in the window: its shape fitted)
++        const float aspect = ps2::g_options.widescreen ? 16.0f / 9.0f : 4.0f / 3.0f;
++        const float vw = std::min(static_cast<float>(w), h * aspect), vh = vw / aspect;
++        const float ox = (w - vw) * 0.5f, oy = (h - vh) * 0.5f, kx = vw / 640.0f, ky = vh / 448.0f;
++        quickmenu::Menu::draw_native_label(static_cast<int>(ox + g_native_row.x0 * kx), static_cast<int>(oy + g_native_row.y0 * ky),
++                                           static_cast<int>((g_native_row.x1 - g_native_row.x0) * kx), static_cast<int>((g_native_row.y1 - g_native_row.y0) * ky),
++                                           g_native_label_selected, "PC settings", g_menu_picture);
+     } else if (g_note_text.empty() && g_native_hint) {
+         std::string key = "SELECT";
+         if (!g_keys.inputs[keymap::Select].empty()) key += " / " + keymap::input_name(g_keys.inputs[keymap::Select].front());
+@@ -1416,7 +1525,7 @@ void menu_command(quickmenu::Command c, int step) {
+             if (recomp::sections()[i].aspect169 && recomp::sections()[i].live) {
+                 std::string note;
+                 const bool wide = ps2::g_options.widescreen;
+-                recomp::toggle(i, note);
++                recomp::toggle(i, note), sync_jp_textures();
+                 if (wide != ps2::g_options.widescreen) { g_tex_w = 0; fit_window_to_shape(); }
+                 set_notice(note);
+                 found = true;
+@@ -1473,7 +1582,7 @@ void menu_command(quickmenu::Command c, int step) {
+     case Command::game_blur: {
+         const int blur = blur_section();
+         if (blur < 0) break;
+-        recomp::toggle(static_cast<std::size_t>(blur), g_recomp_note);
++        recomp::toggle(static_cast<std::size_t>(blur), g_recomp_note), sync_jp_textures();
+         const bool on = !recomp::sections()[static_cast<std::size_t>(blur)].on;
+         set_notice(on ? "Game's blur filter: on (as on the console)" : "Game's blur filter: off (sharper picture)");
+         break;
+@@ -1557,7 +1666,7 @@ void menu_command(quickmenu::Command c, int step) {
+     case Command::recomp_toggle: {
+         const bool wide = ps2::g_options.widescreen;
+         const std::size_t row = static_cast<std::size_t>(g_menu.recomp_row());
+-        if (row < g_recomp_row_section.size()) recomp::toggle(g_recomp_row_section[row], g_recomp_note);
++        if (row < g_recomp_row_section.size()) recomp::toggle(g_recomp_row_section[row], g_recomp_note), sync_jp_textures();
+         if (wide != ps2::g_options.widescreen) { g_tex_w = 0; fit_window_to_shape(); }  // the SDL picture takes the new shape at the next frame
+         break;
+     }
+@@ -1916,6 +2025,15 @@ void poll() {
+             if (e.key.keysym.scancode == SDL_SCANCODE_F5) ps2::quick_request(ps2::QuickKey::save);
+             else if (e.key.keysym.scancode == SDL_SCANCODE_F8) ps2::quick_request(ps2::QuickKey::load);
+             else if (e.key.keysym.scancode == SDL_SCANCODE_F9) ps2::quick_request(ps2::QuickKey::report);
++            // rawdanger-recomp: F6 held: the game as fast as it can go (cutscenes, talk, walks it has no skip for); let go: normal
++            if (e.key.keysym.scancode == SDL_SCANCODE_F6 && !e.key.repeat && !g_menu.is_open()) {
++                g_fast_forward = true;
++                set_notice("Fast forward (F6 held)");
++            }
++        }
++        if (e.type == SDL_KEYUP && e.key.keysym.scancode == SDL_SCANCODE_F6 && g_fast_forward) {
++            g_fast_forward = false;
++            set_notice("Normal speed");
+         }
+         if (e.type == SDL_WINDOWEVENT && e.window.event == SDL_WINDOWEVENT_SIZE_CHANGED && g_gpu_present) {
+             int w = 0, h = 0;
+@@ -1944,6 +2062,11 @@ void poll() {
+         if (e.type == SDL_MOUSEWHEEL) {
+             // a turn of the wheel is a press of about a tenth of a second, which the game sees for a few frames
+             (e.wheel.y > 0 ? g_wheel_up_until : g_wheel_down_until) = SDL_GetTicks() + 100;
++            // rawdanger-recomp: or, when no button has the wheel, the walk speed of the walk keys
++            if (!g_menu.is_open() && e.wheel.y != 0 && !wheel_is_a_button()) {
++                g_walk_step = std::clamp(g_walk_step + (e.wheel.y > 0 ? 1 : -1), 1, kWalkSteps);
++                set_notice("Walk speed " + std::to_string(g_walk_step) + " of " + std::to_string(kWalkSteps) + (g_walk_step == kWalkSteps ? " (run)" : g_walk_step == 1 ? " (slow walk)" : ""));
++            }
+         }
+         if (e.type == SDL_CONTROLLERDEVICEADDED) open_pad(e.cdevice.which);
+         if (e.type == SDL_CONTROLLERDEVICEREMOVED) close_pad(e.cdevice.which);
+@@ -1957,9 +2080,15 @@ void poll() {
+     poll_port(1);
+     show_notice();
+     {
+-        const bool want = !g_menu.is_open() && g_note_text.empty() && native_scene();
+-        if (want != g_native_hint) {
++        const bool want = !g_menu.is_open() && g_note_text.empty() && (native_scene() || native_pause());
++        const int cursor = want ? native_cursor() : -1;
++        const bool label = want && g_native_row.set && cursor >= 0 && cursor < 16;   // the list is up (not one of its pages)
++        const bool selected = label && cursor == static_cast<int>(g_native_row.row);
++        if (want) native_help_text();
++        if (want != g_native_hint || label != g_native_label || selected != g_native_label_selected) {
+             g_native_hint = want;
++            g_native_label = label;
++            g_native_label_selected = selected;
+             menu_paint(false);
+         }
+     }
+@@ -2003,6 +2132,7 @@ void note_audio();
+ // measure what the processor threads and the graphics chip can do. The sound plays out of step (it is dropped when it runs too far
+ // behind). Off unless set; "0" counts as off.
+ bool no_limit() {
++    if (g_fast_forward) return true;
+     static const bool on = [] {
+         const std::string value = ps2::os::env("PS2_NO_LIMIT");
+         const bool set = !value.empty() && value != "0";
+@@ -2452,7 +2582,7 @@ void fit_window_to_shape() {
+ 
+ bool open_window(bool fullscreen) {
+     // rawdanger-recomp: the game's options first, so the window opens in the shape the player chose (recomp.ini)
+-    if (!recomp::loaded() && recomp::load(std::getenv("PS2_RECOMP_OPTIONS"))) recomp::apply_startup();
++    if (!recomp::loaded() && recomp::load(std::getenv("PS2_RECOMP_OPTIONS"))) recomp::apply_startup(), sync_jp_textures();
+     const std::string script = ps2::os::env("PS2_PAD_SCRIPT"), pad_log = ps2::os::env("PS2_PAD_LOG"), no_beep = ps2::os::env("PS2_NO_BEEP");
+     g_beep_on = no_beep.empty() || no_beep == "0";
+     g_pad_log = !pad_log.empty() && pad_log != "0";
+@@ -2682,7 +2812,7 @@ void watchdog() {
+ 
+ int run_window(const std::function<int()> &emulate) {
+     // rawdanger-recomp: the game's patch options (games\\<name>\\recomp.ini, from RawDangerPC.exe), applied before the game starts
+-    if (!recomp::loaded() && recomp::load(std::getenv("PS2_RECOMP_OPTIONS"))) recomp::apply_startup();
++    if (!recomp::loaded() && recomp::load(std::getenv("PS2_RECOMP_OPTIONS"))) recomp::apply_startup(), sync_jp_textures();
+     // rawdanger-recomp: offline achievements (PS2_ACHIEVEMENTS=<set file>; unlocks kept in PS2_ACHIEVEMENTS_UNLOCKS or next to the set)
+     if (const char *set = std::getenv("PS2_ACHIEVEMENTS")) {
+         const char *u = std::getenv("PS2_ACHIEVEMENTS_UNLOCKS");
+diff --git a/runtime/include/ps2/video.hpp b/runtime/include/ps2/video.hpp
+index 42e54bc..45361dc 100644
+--- a/runtime/include/ps2/video.hpp
++++ b/runtime/include/ps2/video.hpp
+@@ -23,6 +23,8 @@ unsigned internal_scale();
+ void set_smaa_quality(unsigned quality);
+ // rawdanger-recomp: the filter of upscaled 2D art (0 soft, 1 sharp, 2 sharpest), at the next picture
+ void set_sharp_2d(unsigned sharp);
++// rawdanger-recomp: the Japanese release's pictures (texture overrides under jp/) on or off, at once
++void set_jp_textures(bool on);
+ // rawdanger-recomp: the keys shown instead of the PlayStation symbols in the game's font (cross, circle, square, triangle; short
+ // names of 1 to 3 letters, "" keeps the symbol); see gpu.cpp, draw_prompt_caps
+ void set_button_prompts(const std::string labels[4]);
+diff --git a/runtime/src/gs/gpu/gpu.cpp b/runtime/src/gs/gpu/gpu.cpp
+index 6afaf60..9ac1e9b 100644
+--- a/runtime/src/gs/gpu/gpu.cpp
++++ b/runtime/src/gs/gpu/gpu.cpp
+@@ -1381,6 +1381,7 @@ bool g_prompt_cells_set = false;
+ std::mutex g_prompt_mutex;
+ std::string g_prompt_labels[4];
+ std::atomic<int> g_prompt_gen{0};
++std::atomic<bool> g_jp_textures{false};   // rawdanger-recomp: the jp/ override pictures are used (ps2::set_jp_textures)
+ 
+ void parse_prompt_env() {
+     const std::string key = os::env("PS2_PROMPT_FONT_KEY"), cells = os::env("PS2_PROMPT_CELLS");
+@@ -1936,6 +1937,13 @@ std::uint32_t resolve_tex_override(const std::uint32_t *w, std::uint32_t base_w,
+     if (it == g_tex_index.end()) return 0xFFFFFFFFu;
+     TexIndexEntry &e = it->second;
+     if (!e.modified || base_w != e.orig_w || base_h != e.orig_h) return 0xFFFFFFFFu;
++    // rawdanger-recomp: the pictures under jp/ (the Japanese release's, tools/rd_jp_overrides.py) only while that look is on;
++    // switched at once: the next drawing uses the game's own picture again, or the kept Japanese one
++    if (!g_jp_textures.load(std::memory_order_relaxed) && !e.files.empty()) {
++        const std::string &path = e.files.back().png_path;
++        for (const char *dir : {"/jp/", "\\jp/", "\\jp\\", "/jp\\"})
++            if (path.find(dir) != std::string::npos) return 0xFFFFFFFFu;
++    }
+     const bool prompts = key == g_prompt_key && g_prompt_cells_set;
+     if (prompts && e.prompt_gen != g_prompt_gen.load()) e.dirty = true;   // the player changed a key: the font is made again
+     if (!e.dirty && e.cached_dec != 0xFFFFFFFFu) return e.cached_dec;
+@@ -5672,6 +5680,7 @@ namespace ps2 {
+ // picture's top left (0 ... 1), the radius a share of the picture's height. The next 4 floats after the count: unused.
+ void set_smaa_quality(unsigned quality) { ps2::gs::gpu::g_smaa_quality = std::clamp(quality, 1u, 4u); }
+ void set_sharp_2d(unsigned sharp) { ps2::gs::gpu::g_sharp_request = static_cast<int>(std::min(sharp, 2u)); }
++void set_jp_textures(bool on) { ps2::gs::gpu::g_jp_textures = on; }
+ void set_internal_scale(unsigned scale) { ps2::gs::gpu::g_scale_request = std::clamp(scale, 1u, 8u); }
+ unsigned internal_scale() { return ps2::gs::gpu::g_scale; }
+ 
+-- 
+2.43.0
+

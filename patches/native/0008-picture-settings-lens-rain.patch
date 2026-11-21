@@ -1,0 +1,699 @@
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+index 0d97f62..69caab9 100644
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -543,7 +543,7 @@ if(PS2_GENERATED)
+     endif()
+     find_package(SDL2 QUIET)
+     if(SDL2_FOUND AND NOT EMSCRIPTEN)
+-        target_sources(ps2run PRIVATE host/window.cpp host/keymap.cpp host/quickmenu.cpp host/stretch.cpp host/recomp_options.cpp host/achievements.cpp host/perf_log.cpp)
++        target_sources(ps2run PRIVATE host/window.cpp host/keymap.cpp host/quickmenu.cpp host/stretch.cpp host/recomp_options.cpp host/achievements.cpp host/perf_log.cpp host/lens_rain.cpp)
+         target_compile_definitions(ps2run PRIVATE PS2_WINDOW)
+         if(WIN32 AND PS2_WIN_STATIC AND TARGET SDL2::SDL2-static)
+             target_link_libraries(ps2run PRIVATE SDL2::SDL2-static)
+@@ -567,7 +567,7 @@ if(PS2_GENERATED)
+             set_target_properties(ps2run PROPERTIES WIN32_EXECUTABLE ON)
+         endif()
+         # the game controller path tested with SDL's virtual controllers, no game needed: ninja -C build/native-<game> ps2padtest
+-        add_executable(ps2padtest EXCLUDE_FROM_ALL host/pad_test.cpp host/window.cpp host/keymap.cpp host/quickmenu.cpp host/stretch.cpp host/recomp_options.cpp host/achievements.cpp host/perf_log.cpp)
++        add_executable(ps2padtest EXCLUDE_FROM_ALL host/pad_test.cpp host/window.cpp host/keymap.cpp host/quickmenu.cpp host/stretch.cpp host/recomp_options.cpp host/achievements.cpp host/perf_log.cpp host/lens_rain.cpp)
+         target_include_directories(ps2padtest PRIVATE runtime/src)
+         target_link_libraries(ps2padtest PRIVATE ps2runtime SDL2::SDL2)
+     endif()
+diff --git a/host/keymap.cpp b/host/keymap.cpp
+index 0545a91..7fbd8ee 100644
+--- a/host/keymap.cpp
++++ b/host/keymap.cpp
+@@ -121,7 +121,7 @@ bool lookup(const std::string &text, int &input) {
+ const char *action_name(int action) { return kInfo[action].name; }
+ 
+ const char *look_name(int look) {
+-    static const char *const names[kLookCount] = {"Crisp", "Crisp + smooth edges", "Soft", "Soft + smooth edges", "Sharp", "Sharp + smooth edges"};
++    static const char *const names[kLookCount] = {"Raw pixels", "Raw pixels + smooth edges", "Soft (TV)", "Soft + smooth edges", "Sharp", "Sharp + smooth edges"};
+     return names[look < 0 || look >= kLookCount ? 0 : look];
+ }
+ 
+@@ -159,7 +159,9 @@ std::string with_line(const std::string &file_text, const std::string &name, con
+ 
+ std::string with_look(const std::string &file_text, int look) { return with_line(file_text, "look", std::string("look = ") + look_word(look)); }
+ 
+-std::string with_scale(const std::string &file_text, int scale) { return with_line(file_text, "scale", "scale = " + std::to_string(scale)); }
++std::string with_scale(const std::string &file_text, int scale) { return with_line(file_text, "scale", "scale = " + (scale == kScaleAuto ? std::string("auto") : std::to_string(scale))); }
++std::string with_integer_scale(const std::string &file_text, int on) { return with_line(file_text, "integerscale", "integer_scale = " + std::to_string(on ? 1 : 0)); }
++std::string with_lens_rain(const std::string &file_text, int level) { return with_line(file_text, "lensrain", "lens_rain = " + std::to_string(level)); }
+ 
+ const char *sharp_2d_word(int sharp) {
+     static const char *const kWords[] = {"soft", "sharp", "sharpest"};
+@@ -282,7 +284,8 @@ void parse(const std::string &text, Config &config, std::vector<std::string> &pr
+         if (name == "scale") {
+             const std::string v = squash(value);
+             if (v == "1" || v == "2" || v == "3" || v == "4") config.scale = v[0] - '0';
+-            else bad("scale is 1, 2, 3 or 4, ignored");
++            else if (v == "auto") config.scale = kScaleAuto;
++            else bad("scale is 1, 2, 3, 4 or auto, ignored");
+             continue;
+         }
+         if (name == "sharp2d") {
+@@ -299,6 +302,14 @@ void parse(const std::string &text, Config &config, std::vector<std::string> &pr
+             else bad("pace is 30, 20, 15, 60 or off, ignored");
+             continue;
+         }
++        if (name == "integerscale" || name == "lensrain") {
++            char *tail = nullptr;
++            const long v = std::strtol(value.c_str(), &tail, 10);
++            if (tail == value.c_str() || v < 0 || v > 2) bad(name == "lensrain" ? "lens_rain is 0, 1 or 2, ignored" : "integer_scale is 0 or 1, ignored");
++            else if (name == "lensrain") config.lens_rain = static_cast<int>(v);
++            else config.integer_scale = v ? 1 : 0;
++            continue;
++        }
+         if (name == "mastervolume") {
+             char *tail = nullptr;
+             const long v = std::strtol(value.c_str(), &tail, 10);
+@@ -405,7 +416,7 @@ std::string default_file_text() {
+         "look = " + std::string(look_word(kDefaultLook)) + "\n"
+         "\n# The inner resolution: 1, 2, 3 or 4 times the console's (sharper, and more work for the graphics chip). Used when the game\n"
+         "# starts; the quick menu (F1) writes it here. The environment variable PS2_SCALE, when it is set, wins over this line.\n"
+-        "# scale = 1\n"
++        "# scale = 1   (or auto: the one that fits the screen, chosen when the game starts)\n"
+         "\n# Text, icons and menus drawn at the console's own size, when the inner resolution is above 1: soft (plain bilinear, as\n"
+         "# before), sharp (the default: each texel keeps its colour, its edges stay smooth) or sharpest. Used when the game starts;\n"
+         "# the quick menu (F1) writes it here. PS2_SHARP_2D (0, 1, 2), when it is set, wins over this line.\n"
+diff --git a/host/keymap.hpp b/host/keymap.hpp
+index f9254a1..4a71554 100644
+--- a/host/keymap.hpp
++++ b/host/keymap.hpp
+@@ -34,17 +34,20 @@ struct Config {
+     int mouse_invert = 0;      // 0 none, 1 left-right, 2 up-down, 3 both
+     double mouse_deadzone = 0; // 0 to 0.9: how far the stick jumps out as soon as the mouse moves
+     int look = -1;             // the picture look (F2) written in keys.ini, -1 when the file has no 'look' line
+-    int scale = 0;             // the inner resolution (1 to 4 times the console's) used at the next start, 0 when the file has no 'scale' line
++    int scale = 0;             // the inner resolution (1 to 4 times the console's, or kScaleAuto) used at the next start, 0 when the file has no 'scale' line
+     int sharp_2d = -1;         // how upscaled 2D art is filtered (0 soft, 1 sharp, 2 sharpest) at the next start, -1 when the file has no line
+     std::string pace;          // the picture pace ('30', '60', 'off', ...; ps2/pace.hpp) used at the next start, "" when the file has no 'pace' line
+ 
+     int pause_unfocused = 1;   // rawdanger-recomp: the quick menu opens (the game waits) when the window goes to the background
+-    int master_volume = 100;   // rawdanger-recomp: the volume of everything the game plays, 0 to 100 (%)
++    int master_volume = 100;
++    int integer_scale = 0;     // rawdanger-recomp: the picture is enlarged by whole numbers only (every console pixel row the same height)
++    int lens_rain = 0;         // rawdanger-recomp: rain drops on the lens while playing: 0 off, 1 light, 2 heavy   // rawdanger-recomp: the volume of everything the game plays, 0 to 100 (%)
+ };
+ 
+ // The picture looks the F2 key goes through. The number is also the video option bits (ps2/video.hpp): bit 0 smooth edges, bit 1 soft, bit 2 sharp (look 4: cubic enlargement + light sharpening; look 5 = sharp + smooth edges).
+ constexpr int kLookCount = 6;
+-constexpr int kDefaultLook = 5;
++constexpr int kDefaultLook = 0;   // rawdanger-recomp: raw pixels (hard square pixels, only their borders blended when enlarged)
++constexpr int kScaleAuto = 9;     // keys.ini scale = auto: the inner resolution that fits the screen, chosen at the start
+ const char *look_name(int look);           // "Soft + smooth edges", for the title and the key card
+ const char *look_word(int look);           // the word written in keys.ini
+ // keys.ini text with its 'look' line set to `look` (other lines untouched; the line is added at the end when missing)
+@@ -55,7 +58,9 @@ std::string with_scale(const std::string &file_text, int scale);
+ std::string with_sharp_2d(const std::string &file_text, int sharp);
+ const char *sharp_2d_word(int sharp);  // "soft", "sharp", "sharpest"
+ std::string with_pause_unfocused(const std::string &file_text, int on);  // the 'pause_unfocused' line
+-std::string with_master_volume(const std::string &file_text, int percent);  // the 'master_volume' line
++std::string with_master_volume(const std::string &file_text, int percent);
++std::string with_integer_scale(const std::string &file_text, int on);
++std::string with_lens_rain(const std::string &file_text, int level);  // the 'master_volume' line
+ 
+ const char *action_name(int action);  // the word used in keys.ini
+ 
+diff --git a/host/lens_rain.cpp b/host/lens_rain.cpp
+new file mode 100644
+index 0000000..fbe58ef
+--- /dev/null
++++ b/host/lens_rain.cpp
+@@ -0,0 +1,119 @@
++// rawdanger-recomp: rain drops on the lens while playing (keys.ini lens_rain = 0 off, 1 light, 2 heavy; F1 -> Graphics and sound).
++// Drops land at random places, stay a moment, then run down and fade, like rain on a camera; they are drawn over the picture by
++// blit.wgsl (drops_over). Written for this project; the idea is the one of rain-drop mods for PC games, no code is taken from them.
++//
++// When: PS2_LENS_WHEN="ADDRESS=VALUE" (a 32-bit word of the game's memory, e.g. Raw Danger's scene 0x48F488=21 = playing; set by
++// RawDangerPC.exe) lets drops land only while the game says it is playing; without it they land all the time (menus included).
++// Off, or when the game stops playing (a menu, a film), the drops on the lens run off within a second.
++#include "lens_rain.hpp"
++
++#include "ps2/memory.hpp"
++#include "ps2/video.hpp"
++
++#include <algorithm>
++#include <cmath>
++#include <cstdint>
++#include <cstdlib>
++#include <random>
++#include <string>
++#include <vector>
++
++namespace lens_rain {
++namespace {
++
++struct Drop {
++    float x, y, r;      // centre (0 ... 1 of the picture), radius (a share of its height)
++    float age, life;    // seconds
++    float hold;         // seconds it clings before it starts to run
++    float speed;        // picture heights per second once it runs
++    float alpha;
++};
++
++int g_level = 0;
++std::vector<Drop> g_drops;
++std::mt19937 g_random{20061108u};
++bool g_when_set = false;
++std::uint32_t g_when_address = 0, g_when_value = 0;
++bool g_parsed = false;
++
++void parse_when() {
++    g_parsed = true;
++    const char *w = std::getenv("PS2_LENS_WHEN");
++    if (!w || !*w) return;
++    const std::string s(w);
++    const std::size_t eq = s.find('=');
++    if (eq == std::string::npos) return;
++    g_when_address = static_cast<std::uint32_t>(std::strtoul(s.substr(0, eq).c_str(), nullptr, 0)) & 0x01FFFFFCu;
++    g_when_value = static_cast<std::uint32_t>(std::strtoul(s.substr(eq + 1).c_str(), nullptr, 0));
++    g_when_set = true;
++}
++
++bool playing() {
++    if (!g_parsed) parse_when();
++    if (!g_when_set) return true;
++    std::uint32_t v = 0;
++    for (int i = 0; i < 4; ++i) v |= static_cast<std::uint32_t>(ps2::ld8(g_when_address + static_cast<std::uint32_t>(i))) << (8 * i);
++    return v == g_when_value;
++}
++
++float uniform(float a, float b) { return std::uniform_real_distribution<float>(a, b)(g_random); }
++
++}  // namespace
++
++void set_level(int level) { g_level = std::clamp(level, 0, 2); }
++int level() { return g_level; }
++bool knows_when() {
++    if (!g_parsed) parse_when();
++    return g_when_set;
++}
++
++void frame(float seconds) {
++    const bool on = g_level > 0 && playing();
++    // new drops: light about 2 a second (up to 18 on the lens), heavy about 7 a second (up to 48)
++    if (on) {
++        const float rate = g_level == 1 ? 2.0f : 7.0f;
++        const std::size_t most = g_level == 1 ? 18 : 48;
++        float expect = rate * seconds;
++        while (expect > 0.0f && g_drops.size() < most) {
++            if (uniform(0.0f, 1.0f) < expect) {
++                Drop d;
++                d.x = uniform(0.02f, 0.98f);
++                d.y = uniform(0.0f, 0.85f);
++                const float size = uniform(0.0f, 1.0f);
++                d.r = 0.008f + size * size * 0.03f;          // mostly small, now and then a big one
++                d.age = 0.0f;
++                d.life = uniform(2.5f, 7.0f);
++                d.hold = uniform(0.3f, 2.5f);
++                d.speed = 0.05f + d.r * 6.0f;                  // big drops run faster
++                d.alpha = 0.0f;
++                g_drops.push_back(d);
++            }
++            expect -= 1.0f;
++        }
++    }
++    for (Drop &d : g_drops) {
++        d.age += seconds;
++        if (!on) d.life = std::min(d.life, d.age + 0.6f);   // nothing more falls: the lens clears quickly
++        if (d.age > d.hold) {
++            d.y += d.speed * seconds;
++            d.x += uniform(-0.002f, 0.002f);                   // runs down a little crookedly
++            d.r = std::max(0.006f, d.r - 0.004f * seconds);   // leaves water behind and gets smaller
++        }
++        const float in = std::min(1.0f, d.age / 0.12f), out = std::clamp((d.life - d.age) / 0.8f, 0.0f, 1.0f);
++        d.alpha = 0.85f * in * out;
++    }
++    g_drops.erase(std::remove_if(g_drops.begin(), g_drops.end(), [](const Drop &d) { return d.age >= d.life || d.y - d.r > 1.05f; }), g_drops.end());
++    float data[48 * 4];
++    unsigned n = 0;
++    for (const Drop &d : g_drops) {
++        if (n == 48) break;
++        data[n * 4 + 0] = d.x;
++        data[n * 4 + 1] = d.y;
++        data[n * 4 + 2] = d.r;
++        data[n * 4 + 3] = d.alpha;
++        ++n;
++    }
++    ps2::set_lens_drops(data, n);
++}
++
++}  // namespace lens_rain
+diff --git a/host/lens_rain.hpp b/host/lens_rain.hpp
+new file mode 100644
+index 0000000..88d9df3
+--- /dev/null
++++ b/host/lens_rain.hpp
+@@ -0,0 +1,8 @@
++#pragma once
++// rawdanger-recomp: rain drops on the lens while playing (see lens_rain.cpp)
++namespace lens_rain {
++void set_level(int level);   // 0 off, 1 light, 2 heavy
++int level();
++bool knows_when();           // PS2_LENS_WHEN is set: drops only while the game is playing
++void frame(float seconds);   // once per video frame, on the game's thread (reads its memory)
++}
+diff --git a/host/quickmenu.cpp b/host/quickmenu.cpp
+index 043a07b..b7b9abb 100644
+--- a/host/quickmenu.cpp
++++ b/host/quickmenu.cpp
+@@ -114,10 +114,10 @@ constexpr Command kCommands[kEntries] = {Command::resume,   Command::save,
+ // the program's key for the same thing, shown dim at the right end of the entry
+ constexpr const char *kKeys[kEntries] = {"F1", "F5", "F8", "F3", "", "F4", "", "", ""};
+ // the Graphics page
+-constexpr int kGraphicsEntries = 8;
+-constexpr Command kGraphics[kGraphicsEntries] = {Command::look,       Command::scale,         Command::sharp_2d,        Command::fullscreen,
+-                                                 Command::widescreen, Command::master_volume, Command::pause_unfocused, Command::back};
+-constexpr const char *kGraphicsKeys[kGraphicsEntries] = {"F2", "", "", "F11", "", "", "", "Esc"};
++constexpr int kGraphicsEntries = 10;
++constexpr Command kGraphics[kGraphicsEntries] = {Command::scale,     Command::look,          Command::integer_scale, Command::sharp_2d,        Command::fullscreen,
++                                                 Command::widescreen, Command::lens_rain, Command::master_volume, Command::pause_unfocused, Command::back};
++constexpr const char *kGraphicsKeys[kGraphicsEntries] = {"", "F2", "", "", "F11", "", "", "", "", "Esc"};
+ constexpr int kVisibleRows = 11;  // lines of the keys page shown at once; the page scrolls
+ constexpr int kKeysPageChars = 58;
+ 
+@@ -170,11 +170,20 @@ std::string entry_text(Command c, const Values &v, bool quit_armed) {
+     }
+     case Command::back: return "Back";
+     case Command::achievements: return "Achievements";
+-    case Command::look: return "Picture look:  < " + v.look + " >";
++    case Command::look: return "Upscale filter:  < " + v.look + " >";
++    case Command::integer_scale: return std::string("Whole-number scaling:  < ") + (v.integer_scale ? "on" : "off") + " >";
++    case Command::lens_rain: {
++        static const char *const kRain[] = {"off", "light", "heavy"};
++        return std::string("Rain on the lens:  < ") + kRain[std::clamp(v.lens_rain, 0, 2)] + " >" + (v.lens_rain && !v.lens_rain_known ? "  (also on menus)" : "");
++    }
+     case Command::scale: {
+-        const std::string now = std::to_string(v.scale_now) + "x";
+-        if (v.scale_locked) return "Resolution: " + now + " (set by PS2_SCALE)";
+-        return "Resolution:  < " + std::to_string(v.scale_next) + "x >" + (v.scale_next != v.scale_now ? "  at the next start" : "");
++        // the inner resolution: the console's 640 x 448 times 1 to 4, or auto (the one that fits the screen, chosen at the start)
++        const auto name = [](int n) {
++            if (n == 9) return std::string("auto");
++            return std::to_string(640 * n) + " x " + std::to_string(448 * n) + " (" + std::to_string(n) + "x)";
++        };
++        if (v.scale_locked) return "Internal resolution: " + name(v.scale_now) + " (set by PS2_SCALE)";
++        return "Internal resolution:  < " + name(v.scale_next) + " >" + (v.scale_next != v.scale_now ? "  next start" : "");
+     }
+     case Command::sharp_2d: {
+         static const char *const kNames[] = {"soft", "sharp", "sharpest"};
+@@ -303,7 +312,7 @@ Command Menu::side() const {
+     if (page_ != Page::graphics) return Command::none;
+     const Command c = kGraphics[selected_];
+     return c == Command::look || c == Command::scale || c == Command::sharp_2d || c == Command::fullscreen || c == Command::widescreen || c == Command::pause_unfocused ||
+-                   c == Command::master_volume
++                   c == Command::master_volume || c == Command::integer_scale || c == Command::lens_rain
+                ? c : Command::none;
+ }
+ 
+diff --git a/host/quickmenu.hpp b/host/quickmenu.hpp
+index 6689161..330406a 100644
+--- a/host/quickmenu.hpp
++++ b/host/quickmenu.hpp
+@@ -24,6 +24,8 @@ enum class Command {
+     graphics,      // rawdanger-recomp: the main menu's entry that opens the Graphics page
+     widescreen,    // Graphics page: the game's widescreen option (its recomp.ini section with aspect = 16:9)
+     pause_unfocused,  // Graphics page: the game waits (this menu opens) when the window goes to the background
++    integer_scale, // Graphics and sound page: whole-number enlargement only (even pixel rows)
++    lens_rain,     // Graphics and sound page: rain drops on the lens while playing (off / light / heavy)
+     master_volume, // Graphics and sound page: the volume of the game's sound (left / right: 10 % steps)
+     back           // a page's Back line
+ };
+@@ -40,6 +42,9 @@ struct Values {
+     int widescreen = -1;           // the game's widescreen option: -1 the game has none, 0 off, 1 on
+     bool pause_unfocused = true;   // the menu opens when the window goes to the background
+     int master_volume = 100;       // %
++    bool integer_scale = false;
++    int lens_rain = 0;             // 0 off, 1 light, 2 heavy
++    bool lens_rain_known = true;   // the game says when it is playing (PS2_LENS_WHEN); false: the drops would also fall on menus
+     std::string title;             // the game's name for the panel's title ("Raw Danger! Enhanced Edition")
+     // the keys page: one row per button (label and its keys, in the order of keys.ini) and a message line (what the last change did)
+     struct KeyRow {
+diff --git a/host/window.cpp b/host/window.cpp
+index 02f8d27..fca99b9 100644
+--- a/host/window.cpp
++++ b/host/window.cpp
+@@ -5,6 +5,7 @@
+ #include "recomp_options.hpp"
+ #include "achievements.hpp"
+ #include "perf_log.hpp"
++#include "lens_rain.hpp"
+ 
+ #include "ps2/system.hpp"
+ 
+@@ -121,6 +122,8 @@ void window_stage(const char *name) {
+ // gets the focus back after the file changed). The arrow keys are the D-pad only: they used to push the left stick as well, and
+ // a menu that reads both moved two entries for one press.
+ keymap::Config g_keys = keymap::defaults();
++// the picture options for the GPU: the look (bits 0-2) and whole-number scaling (bit 3, rawdanger-recomp)
++std::uint32_t video_bits();
+ std::atomic<int> g_master_volume{100};  // rawdanger-recomp: keys.ini master_volume (%), read by the sound device's thread
+ std::vector<std::size_t> g_recomp_row_section;  // the Game options page's lines -> recomp::sections() (widescreen is on the Graphics page)
+ std::string g_keys_path;
+@@ -134,6 +137,7 @@ int g_last_dx = 0, g_last_dy = -1;  // the last direction the walk keys gave, fo
+ // The picture look (F2): how the picture is enlarged and smoothed for the window (display only, the game and the saved pictures do not
+ // change). The choice sits in keys.ini ('look = ...'); PS2_LOOK=0..5 or a look word overrides it for a run and is not written.
+ int g_look = keymap::kDefaultLook;
++std::uint32_t video_bits() { return static_cast<std::uint32_t>(g_look) | (g_keys.integer_scale ? 8u : 0u); }
+ bool g_look_forced = false;
+ 
+ // The title shows the speed; for a few seconds after F5, F8 or F9 a message is put in front of it.
+@@ -570,9 +574,10 @@ void load_keys() {
+     for (const std::string &p : problems) std::fprintf(stderr, "[keys] %s, %s\n", g_keys_path.c_str(), p.c_str());
+     g_keys = config;
+     g_master_volume = std::clamp(g_keys.master_volume, 0, 100);
++    lens_rain::set_level(g_keys.lens_rain);
+     if (!g_look_forced && config.look >= 0) g_look = config.look;
+     g_keys.look = g_look;
+-    ps2::set_video_options(static_cast<std::uint32_t>(g_look));
++    ps2::set_video_options(video_bits());
+     remember_keys_time();
+     std::fprintf(stderr, "[keys] %s: %s%zu problem%s; mouse stick %s\n", g_keys_path.c_str(), have ? "read, " : "defaults, ", problems.size(),
+                  problems.size() == 1 ? "" : "s", g_keys.mouse_stick == 0 ? "off" : g_keys.mouse_stick == 1 ? "left" : "right");
+@@ -917,7 +922,7 @@ void rewrite_keys_file(const std::function<std::string(const std::string &)> &ch
+ void cycle_look(int step = 1) {
+     g_look = (g_look + step + keymap::kLookCount) % keymap::kLookCount;
+     g_keys.look = g_look;
+-    ps2::set_video_options(static_cast<std::uint32_t>(g_look));
++    ps2::set_video_options(video_bits());
+     g_notice_text = std::string("Picture look (F2): ") + keymap::look_name(g_look);
+     g_notice_until = SDL_GetTicks() + 4000;
+     refresh_title();
+@@ -963,6 +968,9 @@ void menu_paint(bool show_again = true) {
+         v.fullscreen = SDL_GetWindowFlags(g_window) & SDL_WINDOW_FULLSCREEN;
+         v.pause_unfocused = g_keys.pause_unfocused != 0;
+         v.master_volume = g_master_volume;
++        v.integer_scale = g_keys.integer_scale != 0;
++        v.lens_rain = lens_rain::level();
++        v.lens_rain_known = lens_rain::knows_when();
+         v.title = g_game_title.substr(0, g_game_title.find("  -  "));  // "Raw Danger! Enhanced Edition", without the program's name
+         v.widescreen = -1;
+         for (const recomp::Section &sec : recomp::sections())
+@@ -1188,6 +1196,21 @@ void menu_command(quickmenu::Command c, int step) {
+         if (!found) set_notice("This game has no widescreen option");
+         break;
+     }
++    case Command::integer_scale:
++        g_keys.integer_scale = g_keys.integer_scale ? 0 : 1;
++        ps2::set_video_options(video_bits());
++        rewrite_keys_file([](const std::string &t) { return keymap::with_integer_scale(t, g_keys.integer_scale); }, "whole-number scaling");
++        set_notice(std::string("Whole-number scaling: ") + (g_keys.integer_scale ? "on (every console row the same height)" : "off (fills the window)"));
++        break;
++    case Command::lens_rain: {
++        const int level = (lens_rain::level() + step + 3) % 3;
++        lens_rain::set_level(level);
++        g_keys.lens_rain = level;
++        rewrite_keys_file([level](const std::string &t) { return keymap::with_lens_rain(t, level); }, "rain on the lens");
++        static const char *const kRain[] = {"off", "light", "heavy"};
++        set_notice(std::string("Rain on the lens: ") + kRain[level]);
++        break;
++    }
+     case Command::master_volume: {
+         // left / right (and Enter: up): 10 % steps
+         const int v = std::clamp((g_master_volume + 10 * step + (step < 0 ? 9 : 0)) / 10 * 10, 0, 100);
+@@ -1229,10 +1252,17 @@ void menu_command(quickmenu::Command c, int step) {
+             set_notice("The resolution is set by PS2_SCALE; remove it to choose here");
+             break;
+         }
+-        g_scale_next = (g_scale_next - 1 + step + 4) % 4 + 1;
++        {
++            // 1x, 2x, 3x, 4x, auto (the one that fits the screen, chosen at the start), round
++            const int order[5] = {1, 2, 3, 4, keymap::kScaleAuto};
++            int at = 0;
++            for (int i = 0; i < 5; ++i) if (order[i] == g_scale_next) at = i;
++            g_scale_next = order[(at + step + 5) % 5];
++        }
+         g_keys.scale = g_scale_next;
+         rewrite_keys_file([](const std::string &t) { return keymap::with_scale(t, g_scale_next); }, "resolution");
+-        set_notice("Resolution " + std::to_string(g_scale_next) + "x" + (g_scale_next == g_scale_now ? "" : ": used when the game starts the next time"));
++        set_notice(std::string("Internal resolution ") + (g_scale_next == keymap::kScaleAuto ? std::string("auto") : std::to_string(g_scale_next) + "x") +
++                   (g_scale_next == g_scale_now ? "" : ": used when the game starts the next time"));
+         std::fprintf(stderr, "[menu] resolution %dx for the next start (this run: %dx)\n", g_scale_next, g_scale_now);
+         break;
+     case Command::sharp_2d:
+@@ -1622,6 +1652,7 @@ void wait_until(std::uint64_t target) {
+ 
+ void pace() {
+     achievements::frame();  // rawdanger-recomp: once per video frame, with or without a sound device
++    lens_rain::frame(ps2::g_options.pal ? 1.0f / 50.0f : 1.0f / 60.0f);
+     perf::frame();
+     if (no_limit()) return;
+     static bool stuck = false;  // the device took no sound for a second; the clock paces the game until it takes some again
+@@ -2061,7 +2092,15 @@ bool open_window(bool fullscreen) {
+     // The inner resolution: PS2_SCALE when it is set, else the 'scale' line of keys.ini (the quick menu writes it), else 1. It is read
+     // when the graphics start (run_window, after this), so setting it here is in time.
+     g_scale_locked = !ps2::os::env("PS2_SCALE").empty();
+-    if (!g_scale_locked && g_keys.scale >= 1 && g_keys.scale <= 4) {
++    if (!g_scale_locked && g_keys.scale == keymap::kScaleAuto) {
++        // auto: the inner resolution whose picture is at least as tall as the screen (so the window shows it reduced, never
++        // enlarged: no filter is needed), at most 4x
++        SDL_DisplayMode mode;
++        int fit = 2;
++        if (SDL_GetDesktopDisplayMode(0, &mode) == 0 && mode.h > 0) fit = std::clamp((mode.h + 447) / 448, 1, 4);
++        ps2::os::set_env("PS2_SCALE", std::to_string(fit));
++        std::fprintf(stderr, "[video] resolution auto: %dx for a %dx%d screen\n", fit, mode.w, mode.h);
++    } else if (!g_scale_locked && g_keys.scale >= 1 && g_keys.scale <= 4) {
+         ps2::os::set_env("PS2_SCALE", std::to_string(g_keys.scale));
+         std::fprintf(stderr, "[video] resolution %dx from %s (scale = %d)\n", g_keys.scale, g_keys_path.c_str(), g_keys.scale);
+     }
+@@ -2072,6 +2111,7 @@ bool open_window(bool fullscreen) {
+     }
+     g_scale_now = std::clamp(std::atoi(ps2::os::env("PS2_SCALE").c_str()), 1, 4);
+     g_scale_next = g_scale_locked ? g_scale_now : (g_keys.scale >= 1 ? g_keys.scale : g_scale_now);
++    if (!g_scale_locked && g_keys.scale == keymap::kScaleAuto) g_scale_now = keymap::kScaleAuto;  // shown as "auto" while it is the choice
+     // the 2D art filter the same way: PS2_SHARP_2D, else the 'sharp_2d' line of keys.ini, else sharp (gpu.cpp reads it at its start)
+     g_sharp_locked = !ps2::os::env("PS2_SHARP_2D").empty();
+     if (!g_sharp_locked && g_keys.sharp_2d >= 0) ps2::os::set_env("PS2_SHARP_2D", std::to_string(g_keys.sharp_2d));
+diff --git a/runtime/include/ps2/video.hpp b/runtime/include/ps2/video.hpp
+index 1176243..4cea2f4 100644
+--- a/runtime/include/ps2/video.hpp
++++ b/runtime/include/ps2/video.hpp
+@@ -8,4 +8,7 @@ namespace ps2 {
+ // bit 1: soft enlargement (a smooth blend everywhere) instead of the sharp one (hard pixels, only their borders blend).
+ void set_video_options(std::uint32_t options);
+ std::uint32_t video_options();
++// bit 3 (rawdanger-recomp): whole-number scaling, every console row the same height in the window.
++// rawdanger-recomp: rain drops on the lens (count drops of x, y, radius, opacity; up to 48), drawn over the picture
++void set_lens_drops(const float *drops, unsigned count);
+ }
+diff --git a/runtime/src/gs/gpu/blit.wgsl b/runtime/src/gs/gpu/blit.wgsl
+index c64b9e6..8946ee3 100644
+--- a/runtime/src/gs/gpu/blit.wgsl
++++ b/runtime/src/gs/gpu/blit.wgsl
+@@ -17,6 +17,19 @@ struct Blit {
+ @group(0) @binding(0) var<storage, read> pixels: array<u32>;
+ @group(0) @binding(1) var<uniform> blit: Blit;
+ 
++// rawdanger-recomp: rain drops on the lens (host/lens_rain.cpp). Each drop: centre x, y (0 ... 1 over the picture), radius (a share
++// of the picture's height) and opacity. A drop works like a small lens: it shows the picture behind it flipped and enlarged
++// (the view through a water bead), with a darker rim and a light glint, and is see-through at its edge. Written for this project
++// from how a bead of water looks, not from any other effect's code.
++struct Lens {
++    count: u32,
++    pad0: u32,
++    pad1: u32,
++    pad2: u32,
++    drops: array<vec4<f32>, 48>,
++}
++@group(0) @binding(2) var<uniform> lens: Lens;
++
+ struct VertexOut {
+     @builtin(position) position: vec4<f32>,
+     @location(0) uv: vec2<f32>,
+@@ -213,17 +226,44 @@ fn reduced_scene(uv: vec2<f32>) -> vec3<f32> {
+     return sum / f32(n.x * n.y);
+ }
+ 
++fn drops_over(uv: vec2<f32>, picture: vec3<f32>) -> vec3<f32> {
++    var c = picture;
++    let aspect = f32(blit.out_width) / max(f32(blit.out_height), 1.0);
++    let n = min(lens.count, 48u);
++    for (var i = 0u; i < n; i = i + 1u) {
++        let d = lens.drops[i];
++        let q = (uv - d.xy) * vec2<f32>(aspect, 1.0);
++        let r = max(d.z, 0.0001);
++        let dist = length(q) / r;
++        if (dist >= 1.0) { continue; }
++        let normal = q / r;
++        // through the bead: the picture around the drop, mirrored and drawn in (a water bead is a tiny fish-eye lens)
++        let through = d.xy - normal * vec2<f32>(r / aspect, r) * 1.6 * (1.0 - 0.35 * dist * dist);
++        var view = scene(clamp(through, vec2<f32>(0.0), vec2<f32>(1.0)));
++        let rim = smoothstep(0.55, 1.0, dist);
++        view = mix(view * 1.06 + vec3<f32>(0.03), view * 0.5, rim * 0.5);
++        // a glint where the light from above left would catch the bead
++        let glint = pow(max(dot(normal, vec2<f32>(-0.55, -0.62)), 0.0), 6.0) * (1.0 - rim) * 0.55;
++        view = view + vec3<f32>(glint);
++        let alpha = d.w * (1.0 - smoothstep(0.86, 1.0, dist));
++        c = mix(c, view, alpha);
++    }
++    return c;
++}
++
+ @fragment
+ fn fs(in: VertexOut) -> @location(0) vec4<f32> {
+     var c: vec3<f32>;
+     if (blit.width > blit.out_width + blit.out_width / 16u || blit.height > blit.out_height + blit.out_height / 16u) {
+-        return vec4<f32>(clamp(reduced_scene(in.uv), vec3<f32>(0.0), vec3<f32>(1.0)), 1.0);
+-    }
+-    if ((blit.options & 4u) != 0u) {
+-        c = sharp_scene(in.uv);
++        c = reduced_scene(in.uv);
+     } else {
+-        c = scene(in.uv);
++        if ((blit.options & 4u) != 0u) {
++            c = sharp_scene(in.uv);
++        } else {
++            c = scene(in.uv);
++        }
++        if ((blit.options & 1u) != 0u) { c = edge_aa(in.uv, c); }
+     }
+-    if ((blit.options & 1u) != 0u) { c = edge_aa(in.uv, c); }
++    if (lens.count > 0u) { c = drops_over(in.uv, c); }
+     return vec4<f32>(clamp(c, vec3<f32>(0.0), vec3<f32>(1.0)), 1.0);
+ }
+diff --git a/runtime/src/gs/gpu/gpu.cpp b/runtime/src/gs/gpu/gpu.cpp
+index a434303..79f1f36 100644
+--- a/runtime/src/gs/gpu/gpu.cpp
++++ b/runtime/src/gs/gpu/gpu.cpp
+@@ -86,6 +86,14 @@ std::uint32_t g_surface_width = 0, g_surface_height = 0;
+ WGPURenderPipeline g_blit = nullptr;
+ WGPUBindGroup g_blit_group = nullptr;
+ WGPUBuffer g_blit_params = nullptr;
++// rawdanger-recomp: rain drops on the lens (ps2::set_lens_drops, host/lens_rain.cpp), drawn by blit.wgsl over the picture
++WGPUBuffer g_lens_params = nullptr;
++constexpr std::uint32_t kLensDrops = 48, kLensBytes = 16 + kLensDrops * 16;
++std::mutex g_lens_mutex;
++float g_lens[4 + kLensDrops * 4] = {};
++std::uint32_t g_view_rows = 448;  // the console picture's rows (both fields), for whole-number scaling
++
++
+ // The overlay (overlay.hpp): the quick menu's panel, drawn over the game's picture in the present pass with alpha blending. Its pixels
+ // sit in a storage buffer like everything else here (no texture: the same code on every backend and in the browser build).
+ struct Overlay {
+@@ -112,6 +120,27 @@ bool g_query_pending = false, g_query_ready = false;
+ std::uint64_t g_measured_ns = 0, g_measured = 0, g_total_passes = 0;
+ WGPUDevice g_device = nullptr;
+ WGPUQueue g_queue = nullptr;
++
++// The picture's size in the window: as large as fits with the console's shape (4:3 or 16:9); with whole-number scaling on
++// (video option bit 3), as many whole times the console's rows as fit, so every row has the same height (no uneven pixels).
++void picture_view(float sw, float sh, float &vw, float &vh) {
++    const float aspect = g_options.widescreen ? 16.0f / 9.0f : 4.0f / 3.0f;
++    vw = std::min(sw, sh * aspect);
++    vh = vw / aspect;
++    if ((ps2::video_options() & 8u) != 0u && g_view_rows > 0) {
++        const float rows = static_cast<float>(g_view_rows);
++        const float k = std::floor(vh / rows);
++        if (k >= 1.0f) {
++            vh = k * rows;
++            vw = vh * aspect;
++        }
++    }
++}
++
++void write_lens() {
++    std::lock_guard<std::mutex> lock(g_lens_mutex);
++    wgpuQueueWriteBuffer(g_queue, g_lens_params, 0, g_lens, kLensBytes);
++}
+ WGPUBuffer g_vram = nullptr, g_tables = nullptr, g_params = nullptr, g_data = nullptr, g_clut = nullptr, g_scratch = nullptr, g_readback = nullptr, g_decoded = nullptr;
+ std::uint32_t g_decoded_used = 0;
+ bool g_rendered[512] = {};
+@@ -2740,8 +2769,8 @@ void submit(WGPUTextureView present_view = nullptr) {
+         rd.colorAttachments = &color;
+         WGPURenderPassEncoder rp = wgpuCommandEncoderBeginRenderPass(enc, &rd);
+         const float w = static_cast<float>(g_surface_width), h = static_cast<float>(g_surface_height);
+-        const float aspect = g_options.widescreen ? 16.0f / 9.0f : 4.0f / 3.0f;
+-        const float vw = std::min(w, h * aspect), vh = vw / aspect;
++        float vw, vh;
++        picture_view(w, h, vw, vh);
+         wgpuRenderPassEncoderSetViewport(rp, (w - vw) * 0.5f, (h - vh) * 0.5f, vw, vh, 0.0f, 1.0f);
+         wgpuRenderPassEncoderSetPipeline(rp, g_blit);
+         wgpuRenderPassEncoderSetBindGroup(rp, 0, g_blit_group, 0, nullptr);
+@@ -4798,15 +4827,18 @@ bool attach_surface(const SurfaceTarget &target) {
+     WGPUShaderModuleDescriptor md = WGPU_SHADER_MODULE_DESCRIPTOR_INIT;
+     md.nextInChain = &source.chain;
+     WGPUShaderModule module = wgpuDeviceCreateShaderModule(g_device, &md);
+-    WGPUBindGroupLayoutEntry le[2] = {WGPU_BIND_GROUP_LAYOUT_ENTRY_INIT, WGPU_BIND_GROUP_LAYOUT_ENTRY_INIT};
++    WGPUBindGroupLayoutEntry le[3] = {WGPU_BIND_GROUP_LAYOUT_ENTRY_INIT, WGPU_BIND_GROUP_LAYOUT_ENTRY_INIT, WGPU_BIND_GROUP_LAYOUT_ENTRY_INIT};
+     le[0].binding = 0;
+     le[0].visibility = WGPUShaderStage_Fragment;
+     le[0].buffer.type = WGPUBufferBindingType_ReadOnlyStorage;
+     le[1].binding = 1;
+     le[1].visibility = WGPUShaderStage_Fragment;
+     le[1].buffer.type = WGPUBufferBindingType_Uniform;
++    le[2].binding = 2;
++    le[2].visibility = WGPUShaderStage_Fragment;
++    le[2].buffer.type = WGPUBufferBindingType_Uniform;
+     WGPUBindGroupLayoutDescriptor ld = WGPU_BIND_GROUP_LAYOUT_DESCRIPTOR_INIT;
+-    ld.entryCount = 2;
++    ld.entryCount = 3;
+     ld.entries = le;
+     WGPUBindGroupLayout layout = wgpuDeviceCreateBindGroupLayout(g_device, &ld);
+     WGPUPipelineLayoutDescriptor pld = WGPU_PIPELINE_LAYOUT_DESCRIPTOR_INIT;
+@@ -4829,16 +4861,20 @@ bool attach_surface(const SurfaceTarget &target) {
+     wgpuShaderModuleRelease(module);
+     wgpuPipelineLayoutRelease(pipeline_layout);
+     g_blit_params = make_buffer(32, WGPUBufferUsage_Uniform | WGPUBufferUsage_CopyDst);
+-    WGPUBindGroupEntry be[2] = {WGPU_BIND_GROUP_ENTRY_INIT, WGPU_BIND_GROUP_ENTRY_INIT};
++    g_lens_params = make_buffer(kLensBytes, WGPUBufferUsage_Uniform | WGPUBufferUsage_CopyDst);
++    WGPUBindGroupEntry be[3] = {WGPU_BIND_GROUP_ENTRY_INIT, WGPU_BIND_GROUP_ENTRY_INIT, WGPU_BIND_GROUP_ENTRY_INIT};
+     be[0].binding = 0;
+     be[0].buffer = g_scratch;
+     be[0].size = WGPU_WHOLE_SIZE;
+     be[1].binding = 1;
+     be[1].buffer = g_blit_params;
+     be[1].size = 32;
++    be[2].binding = 2;
++    be[2].buffer = g_lens_params;
++    be[2].size = kLensBytes;
+     WGPUBindGroupDescriptor bd = WGPU_BIND_GROUP_DESCRIPTOR_INIT;
+     bd.layout = layout;
+-    bd.entryCount = 2;
++    bd.entryCount = 3;
+     bd.entries = be;
+     g_blit_group = wgpuDeviceCreateBindGroup(g_device, &bd);
+     wgpuBindGroupLayoutRelease(layout);
+@@ -4984,8 +5020,10 @@ bool present(const DisplaySource &src) {
+     const std::uint32_t param = display_params(src, current);
+     push_display(src, current, param);
+     const float sw = static_cast<float>(g_surface_width), sh = static_cast<float>(g_surface_height);
+-    const float aspect = g_options.widescreen ? 16.0f / 9.0f : 4.0f / 3.0f;
+-    const float vw = std::min(sw, sh * aspect), vh = vw / aspect;
++    g_view_rows = src.height * (src.halved ? 2u : 1u);
++    float vw, vh;
++    picture_view(sw, sh, vw, vh);
++    write_lens();
+     const std::uint32_t blit[8] = {src.width * g_scale, src.height * g_scale, current, previous, blend ? 1u : 0u, static_cast<std::uint32_t>(vw), static_cast<std::uint32_t>(vh), ps2::video_options()};
+     post::drain();  // the last picture is presented before this one's acquire
+     std::memcpy(post::g_blit, blit, sizeof blit);  // written by the next submit (its job with the submit thread), before the frame's other writes
+@@ -5179,8 +5217,9 @@ bool present_again() {
+     // the same picture as the last present (its fields are still in the scratch buffer: the game draws nothing while it waits), with the
+     // window's size and the picture look of now
+     const float sw = static_cast<float>(g_surface_width), sh = static_cast<float>(g_surface_height);
+-    const float aspect = g_options.widescreen ? 16.0f / 9.0f : 4.0f / 3.0f;
+-    const float vw = std::min(sw, sh * aspect), vh = vw / aspect;
++    float vw, vh;
++    picture_view(sw, sh, vw, vh);
++    write_lens();
+     const std::uint32_t tail[3] = {static_cast<std::uint32_t>(vw), static_cast<std::uint32_t>(vh), ps2::video_options()};
+     wgpuQueueWriteBuffer(g_queue, g_blit_params, 20, tail, sizeof tail);
+     WGPUSurfaceTexture st = WGPU_SURFACE_TEXTURE_INIT;
+@@ -5290,3 +5329,15 @@ bool display(const DisplaySource &src, std::vector<std::uint32_t> &rgba, std::ui
+ }
+ 
+ }
++
++namespace ps2 {
++// rawdanger-recomp: the drops on the lens for the next pictures: count drops of (x, y, radius, opacity), x and y from the
++// picture's top left (0 ... 1), the radius a share of the picture's height. The next 4 floats after the count: unused.
++void set_lens_drops(const float *drops, unsigned count) {
++    count = std::min<unsigned>(count, ps2::gs::gpu::kLensDrops);
++    std::lock_guard<std::mutex> lock(ps2::gs::gpu::g_lens_mutex);
++    const std::uint32_t n = count;
++    std::memcpy(&ps2::gs::gpu::g_lens[0], &n, 4);
++    if (count) std::memcpy(&ps2::gs::gpu::g_lens[4], drops, count * 16u);
++}
++}

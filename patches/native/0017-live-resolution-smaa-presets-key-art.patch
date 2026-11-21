@@ -1,0 +1,968 @@
+From 5cda7f814b78b5c9861089495eb57d16abbdc9e2 Mon Sep 17 00:00:00 2001
+From: rams95 <rams95@users.noreply.github.com>
+Date: Thu, 19 Nov 2026 18:32:31 +0000
+Subject: [PATCH] 0017-live-resolution-smaa-presets-key-art.patch
+
+Inner resolution 1x-6x and 8x, changed while the game runs: the GPU memory is read back, the scale-sized buffers and the
+programs (SCALE is a program constant) are made again and the memory goes back at the new scale (ps2::set_internal_scale).
+The 2D art filter changes at once too (programs made again, decode cache reset). SMAA presets low / medium / high / ultra
+(threshold and search lengths of the reference presets; ps2::set_smaa_quality; keys.ini smaa = off..ultra).
+Key caps in the game's own style: the square symbol's thin rounded outline and the key's name in the game's letters, on a
+2x font override when there is one.
+Mouse look: open loop, one push per game step from the mouse movement of that step, no feedback (no overshoot);
+modern direction by default, left/right and up/down invert switches, its own speed (keys.ini look_speed, 2.0).
+Lens rain: drops and trails slant with the camera's turning (PS2_LENS_YAW); fast turns shake drops loose.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01QNLFPekqhcU2dj7B3Utmea
+---
+ host/keymap.cpp               |  27 +++-
+ host/keymap.hpp               |   3 +-
+ host/lens_rain.cpp            |  46 ++++++-
+ host/quickmenu.cpp            |  19 +--
+ host/quickmenu.hpp            |   3 +-
+ host/window.cpp               | 120 ++++++++++-------
+ runtime/include/ps2/video.hpp |   7 +
+ runtime/src/gs/gpu/blit.wgsl  |   3 +-
+ runtime/src/gs/gpu/gpu.cpp    | 237 ++++++++++++++++++++++++++--------
+ runtime/src/gs/gpu/smaa.wgsl  |  17 +--
+ 10 files changed, 355 insertions(+), 127 deletions(-)
+
+diff --git a/host/keymap.cpp b/host/keymap.cpp
+index 8e10761..e5ddec0 100644
+--- a/host/keymap.cpp
++++ b/host/keymap.cpp
+@@ -163,8 +163,8 @@ std::string with_scale(const std::string &file_text, int scale) { return with_li
+ std::string with_mouse_look(const std::string &file_text, int on) { return with_line(file_text, "mouselook", std::string("mouse_look = ") + (on ? "on" : "off")); }
+ std::string with_mouse_speed(const std::string &file_text, double speed) {
+     char text[48];
+-    std::snprintf(text, sizeof text, "mouse_speed = %.2g", speed);
+-    return with_line(file_text, "mousespeed", text);
++    std::snprintf(text, sizeof text, "look_speed = %.2g", speed);
++    return with_line(file_text, "lookspeed", text);
+ }
+ std::string with_mouse_invert(const std::string &file_text, int invert) {
+     static const char *const kNames[4] = {"off", "x", "y", "both"};
+@@ -215,7 +215,10 @@ std::string with_window_size(const std::string &file_text, int w, int h) {
+ std::string with_menu_skin(const std::string &file_text, int skin) { return with_line(file_text, "menuskin", std::string("menu_skin = ") + (skin == 2 ? "game" : skin == 1 ? "japanese" : "hazard")); }
+ std::string with_integer_scale(const std::string &file_text, int on) { return with_line(file_text, "integerscale", "integer_scale = " + std::to_string(on ? 1 : 0)); }
+ std::string with_lens_rain(const std::string &file_text, int level) { return with_line(file_text, "lensrain", "lens_rain = " + std::to_string(level)); }
+-std::string with_smaa(const std::string &file_text, int on) { return with_line(file_text, "smaa", "smaa = " + std::to_string(on ? 1 : 0)); }
++std::string with_smaa(const std::string &file_text, int on) {
++    static const char *const kNames[5] = {"off", "low", "medium", "high", "ultra"};
++    return with_line(file_text, "smaa", std::string("smaa = ") + kNames[std::clamp(on, 0, 4)]);
++}
+ 
+ const char *sharp_2d_word(int sharp) {
+     static const char *const kWords[] = {"soft", "sharp", "sharpest"};
+@@ -337,9 +340,9 @@ void parse(const std::string &text, Config &config, std::vector<std::string> &pr
+         }
+         if (name == "scale") {
+             const std::string v = squash(value);
+-            if (v == "1" || v == "2" || v == "3" || v == "4") config.scale = v[0] - '0';
++            if (v.size() == 1 && v[0] >= '1' && v[0] <= '8' && v[0] != '7') config.scale = v[0] - '0';
+             else if (v == "auto") config.scale = kScaleAuto;
+-            else bad("scale is 1, 2, 3, 4 or auto, ignored");
++            else bad("scale is 1, 2, 3, 4, 5, 6, 8 or auto, ignored");
+             continue;
+         }
+         if (name == "sharp2d") {
+@@ -358,9 +361,19 @@ void parse(const std::string &text, Config &config, std::vector<std::string> &pr
+         }
+         if (name == "smaa") {
+             const std::string v = squash(value);
+-            if (v == "1" || v == "on") config.smaa = 1;
++            if (v == "1" || v == "on" || v == "high") config.smaa = 3;
+             else if (v == "0" || v == "off") config.smaa = 0;
+-            else bad("smaa is on or off, ignored");
++            else if (v == "low") config.smaa = 1;
++            else if (v == "medium") config.smaa = 2;
++            else if (v == "ultra") config.smaa = 4;
++            else bad("smaa is off, low, medium, high or ultra, ignored");
++            continue;
++        }
++        if (name == "lookspeed") {
++            char *end = nullptr;
++            const double v = std::strtod(value.c_str(), &end);
++            if (end != value.c_str() && v >= 0.1 && v <= 10) config.look_speed = v;
++            else bad("look_speed is a number from 0.1 to 10, ignored");
+             continue;
+         }
+         if (name == "mouselook") {
+diff --git a/host/keymap.hpp b/host/keymap.hpp
+index fac2324..838b8b9 100644
+--- a/host/keymap.hpp
++++ b/host/keymap.hpp
+@@ -44,7 +44,8 @@ struct Config {
+                                // launcher's Japanese skin); -1 = from the game's language (PS2_LANGUAGE / PS2_MENU_SKIN)
+     int reverb = 1;            // rawdanger-recomp: the sound chip's reverb (0 off)
+     int key_prompts = 1;
+-    int mouse_look = 1;        // rawdanger-recomp: the mouse turns the camera while playing (PS2_MOUSE_LOOK_* from the launcher); 0 off       // rawdanger-recomp: the game's texts show the keys instead of the PlayStation symbols (0: the symbols)
++    int mouse_look = 1;
++    double look_speed = 2.0;   // rawdanger-recomp: how far the mouse look turns (0.2 to 4)        // rawdanger-recomp: the mouse turns the camera while playing (PS2_MOUSE_LOOK_* from the launcher); 0 off       // rawdanger-recomp: the game's texts show the keys instead of the PlayStation symbols (0: the symbols)
+     int window_w = 0, window_h = 0;  // rawdanger-recomp: the window's size from the menu's presets (0: the default)
+     int integer_scale = 0;     // rawdanger-recomp: the picture is enlarged by whole numbers only (every console pixel row the same height)
+     int lens_rain = 0;         // rawdanger-recomp: rain drops on the lens while playing: 0 off, 1 light, 2 heavy
+diff --git a/host/lens_rain.cpp b/host/lens_rain.cpp
+index 8adcb9b..03afeb5 100644
+--- a/host/lens_rain.cpp
++++ b/host/lens_rain.cpp
+@@ -21,6 +21,7 @@
+ #include <cstdint>
+ #include <cstdio>
+ #include <cstdlib>
++#include <cstring>
+ #include <random>
+ #include <string>
+ #include <vector>
+@@ -38,6 +39,7 @@ struct Drop {
+     float alpha;
+     float trail;        // length of the wet trail above it (picture heights)
+     float stretch;      // 1 round, more: pulled long while it runs
++    float slant = 0.0f; // its path across while it runs (picture widths per height): the trail lies that way
+     float seed;         // per-drop variety for the shader (0 ... 1)
+     float wobble;       // the sideways drift it has picked
+ };
+@@ -125,8 +127,46 @@ bool knows_when() {
+     return g_when_set;
+ }
+ 
++// rawdanger-recomp: where the drops run. Water on a lens runs down, and sideways when the camera turns (the drops lag behind the
++// turn) or the wind of the run pushes them: the camera's angle (PS2_LENS_YAW, radians, Raw Danger 0x5FDBAC) is read each frame
++// and its turning, smoothed, slants the running drops and their trails; a fast turn also shakes the still ones loose.
++std::uint32_t g_yaw_address = 0;
++bool g_yaw_set = false, g_yaw_have = false;
++float g_yaw_prev = 0.0f, g_drift = 0.0f;
++
++void read_drift(float seconds) {
++    static bool parsed = false;
++    if (!parsed) {
++        parsed = true;
++        if (const char *y = std::getenv("PS2_LENS_YAW"); y && *y) {
++            g_yaw_address = static_cast<std::uint32_t>(std::strtoul(y, nullptr, 16));
++            g_yaw_set = true;
++        }
++    }
++    float goal = 0.0f;
++    if (g_yaw_set && seconds > 0.0f && playing()) {
++        const std::uint32_t w = ps2::ld32(g_yaw_address);
++        float yaw;
++        std::memcpy(&yaw, &w, 4);
++        if (std::isfinite(yaw)) {
++            if (g_yaw_have) {
++                float turn = yaw - g_yaw_prev;
++                if (turn > 3.14159265f) turn -= 6.2831853f;
++                if (turn < -3.14159265f) turn += 6.2831853f;
++                goal = std::clamp(turn / seconds * 0.22f, -0.9f, 0.9f);   // a turn of 1 rad/s slants them about 1 in 5
++            }
++            g_yaw_prev = yaw;
++            g_yaw_have = true;
++        }
++    } else {
++        g_yaw_have = false;
++    }
++    g_drift += (goal - g_drift) * std::min(1.0f, seconds * 4.0f);
++}
++
+ void frame(float seconds) {
+     g_clock += seconds;
++    read_drift(seconds);
+     const float strength = g_level > 0 && playing() ? rain() : 0.0f;
+     const bool on = strength > 0.0f;
+     // new drops: light about 2.5 a second at full rain (up to 24 on the lens), heavy about 8 (up to 64)
+@@ -148,12 +188,14 @@ void frame(float seconds) {
+         if (d.age > d.hold) {
+             const float step = d.speed * seconds;
+             d.y += step;
+-            d.x += d.wobble * seconds + uniform(-0.0015f, 0.0015f);   // runs down a little crookedly
++            d.x += d.wobble * seconds + uniform(-0.0015f, 0.0015f) + g_drift * step;   // a little crookedly, and sideways in a turn
++            d.slant += (g_drift - d.slant) * std::min(1.0f, seconds * 3.0f);
+             d.trail = std::min(0.28f, d.trail + step);
+             d.r = std::max(0.005f, d.r - 0.003f * seconds);           // leaves water behind and gets smaller
+             d.stretch = std::min(1.6f, d.stretch + seconds * 2.0f);
+         } else {
+             d.trail = std::max(0.0f, d.trail - seconds * 0.05f);
++            if (std::fabs(g_drift) > 0.45f && d.r > 0.012f) d.hold = std::min(d.hold, d.age + 0.1f);   // a fast turn shakes it loose
+         }
+         const float in = std::min(1.0f, d.age / 0.15f), out = std::clamp((d.life - d.age) / 1.0f, 0.0f, 1.0f);
+         d.alpha = 0.9f * in * out;
+@@ -185,7 +227,7 @@ void frame(float seconds) {
+         p[4] = d.trail;
+         p[5] = d.stretch;
+         p[6] = d.seed;
+-        p[7] = 0.0f;
++        p[7] = d.slant;
+         ++n;
+     }
+     ps2::set_lens_drops(data, n, g_mist, g_clock);
+diff --git a/host/quickmenu.cpp b/host/quickmenu.cpp
+index 388eacf..cc0d08f 100644
+--- a/host/quickmenu.cpp
++++ b/host/quickmenu.cpp
+@@ -122,10 +122,10 @@ constexpr Command kPicture[] = {Command::look, Command::antialias, Command::shar
+ constexpr const char *kPictureKeys[] = {"F2", "", "", "", "", "Esc"};
+ constexpr Command kSound[] = {Command::master_volume, Command::reverb, Command::back};
+ constexpr const char *kSoundKeys[] = {"", "", "Esc"};
+-constexpr Command kControls[] = {Command::change_keys, Command::mouse_look, Command::mouse_speed, Command::mouse_invert, Command::key_prompts, Command::keys, Command::back};
+-constexpr const char *kControlsKeys[] = {"", "", "", "", "", "", "Esc"};
++constexpr Command kControls[] = {Command::change_keys, Command::mouse_look, Command::mouse_speed, Command::mouse_invert_x, Command::mouse_invert, Command::key_prompts, Command::keys, Command::back};
++constexpr const char *kControlsKeys[] = {"", "", "", "", "", "", "", "Esc"};
+ struct TabList { const Command *commands; const char *const *keys; int n; };
+-constexpr TabList kTabLists[Menu::kTabs - 1] = {{kDisplay, kDisplayKeys, 8}, {kPicture, kPictureKeys, 6}, {kSound, kSoundKeys, 3}, {kControls, kControlsKeys, 7}};
++constexpr TabList kTabLists[Menu::kTabs - 1] = {{kDisplay, kDisplayKeys, 8}, {kPicture, kPictureKeys, 6}, {kSound, kSoundKeys, 3}, {kControls, kControlsKeys, 8}};
+ constexpr int kVisibleRows = 11;  // lines of the keys page shown at once; the page scrolls
+ constexpr int kKeysPageChars = 58;
+ 
+@@ -354,6 +354,7 @@ std::string entry_text(Command c, const Values &v, bool quit_armed) {
+         std::snprintf(text, sizeof text, "Mouse speed:  < %.1f >", v.mouse_speed);
+         return text;
+     }
++    case Command::mouse_invert_x: return std::string("Mouse left and right:  < ") + (v.mouse_invert_x ? "inverted" : "normal") + " >";
+     case Command::mouse_invert: return std::string("Mouse up and down:  < ") + (v.mouse_invert_y ? "inverted" : "normal") + " >";
+     case Command::key_prompts:
+         if (v.key_prompts < 0) return "Buttons in the game's texts: PlayStation (no key pictures here)";
+@@ -370,8 +371,8 @@ std::string entry_text(Command c, const Values &v, bool quit_armed) {
+     case Command::achievements: return "Achievements";
+     case Command::look: return "Upscale filter:  < " + (v.filter.empty() ? v.look : v.filter) + " >";
+     case Command::antialias: {
+-        static const char *const kAa[] = {"off", "smooth edges", "SMAA 1x"};
+-        return std::string("Anti-aliasing:  < ") + kAa[std::clamp(v.antialias, 0, 2)] + " >";
++        static const char *const kAa[] = {"off", "smooth edges", "SMAA low", "SMAA medium", "SMAA high", "SMAA ultra"};
++        return std::string("Anti-aliasing:  < ") + kAa[std::clamp(v.antialias, 0, 5)] + " >";
+     }
+     case Command::integer_scale: return std::string("Whole-number scaling:  < ") + (v.integer_scale ? "on" : "off") + " >";
+     case Command::menu_skin: return std::string("Menu look:  < ") + (v.menu_skin == 2 ? "the game's Options screen" : v.menu_skin == 1 ? "Japanese (blue on white)" : "hazard (yellow on black)") + " >";
+@@ -380,19 +381,19 @@ std::string entry_text(Command c, const Values &v, bool quit_armed) {
+         return std::string("Rain on the lens:  < ") + kRain[std::clamp(v.lens_rain, 0, 2)] + " >" + (v.lens_rain && !v.lens_rain_known ? "  (also on menus)" : "");
+     }
+     case Command::scale: {
+-        // the inner resolution: the console's 640 x 448 times 1 to 4, or auto (the one that fits the screen, chosen at the start)
++        // the inner resolution: the console's 640 x 448 times 1 to 8, or auto (the one at least as tall as the screen)
+         const auto name = [](int n) {
+             if (n == 9) return std::string("auto");
+             return std::to_string(640 * n) + " x " + std::to_string(448 * n) + " (" + std::to_string(n) + "x)";
+         };
+         if (v.scale_locked) return "Internal resolution: " + name(v.scale_now) + " (set by PS2_SCALE)";
+-        return "Internal resolution:  < " + name(v.scale_next) + " >" + (v.scale_next != v.scale_now ? "  next start" : "");
++        return "Internal resolution:  < " + name(v.scale_next) + " >";
+     }
+     case Command::sharp_2d: {
+         static const char *const kNames[] = {"soft", "sharp", "sharpest"};
+         const auto name = [](int n) { return kNames[n >= 0 && n <= 2 ? n : 1]; };
+         if (v.sharp_locked) return std::string("Text and menus: ") + name(v.sharp_now) + " (set by PS2_SHARP_2D)";
+-        return std::string("Text and menus:  < ") + name(v.sharp_next) + " >" + (v.sharp_next != v.sharp_now ? "  at the next start" : "");
++        return std::string("Text and menus:  < ") + name(v.sharp_next) + " >";
+     }
+     case Command::fullscreen: return std::string("Full screen:  < ") + (v.fullscreen ? "on" : "off") + " >";
+     case Command::keys: return "Key card (all keys at a glance)";
+@@ -583,7 +584,7 @@ Command Menu::side() const {
+     return c == Command::look || c == Command::scale || c == Command::sharp_2d || c == Command::fullscreen || c == Command::widescreen || c == Command::pause_unfocused ||
+                    c == Command::master_volume || c == Command::integer_scale || c == Command::lens_rain || c == Command::antialias || c == Command::menu_skin ||
+                    c == Command::window_size || c == Command::game_blur || c == Command::reverb || c == Command::key_prompts || c == Command::mouse_look ||
+-                   c == Command::mouse_speed || c == Command::mouse_invert
++                   c == Command::mouse_speed || c == Command::mouse_invert || c == Command::mouse_invert_x
+                ? c : Command::none;
+ }
+ 
+diff --git a/host/quickmenu.hpp b/host/quickmenu.hpp
+index 25d4985..b5da241 100644
+--- a/host/quickmenu.hpp
++++ b/host/quickmenu.hpp
+@@ -45,6 +45,7 @@ enum class Command {
+     mouse_look,    // Settings > Controls: the mouse turns the camera while playing
+     mouse_speed,   // Settings > Controls: how far the camera turns for a move of the mouse
+     mouse_invert,  // Settings > Controls: the mouse's up and down the other way round
++    mouse_invert_x, // Settings > Controls: the mouse's left and right the other way round
+     language,      // rawdanger-recomp: restart the game in its other language (the launcher's other build; asked once, like Quit)
+     back           // a page's Back line
+ };
+@@ -75,7 +76,7 @@ struct Values {
+     int key_prompts = -1;
+     int mouse_look = -1;           // -1: this game has no mouse look (PS2_MOUSE_LOOK_YAW), 0 off, 1 on
+     double mouse_speed = 1.0;
+-    bool mouse_invert_y = false;          // -1: this game has no prompt font (PS2_PROMPT_FONT_KEY), 0 symbols, 1 keys
++    bool mouse_invert_y = false, mouse_invert_x = false;          // -1: this game has no prompt font (PS2_PROMPT_FONT_KEY), 0 symbols, 1 keys
+     // the keys page: one row per button (label and its keys, in the order of keys.ini) and a message line (what the last change did)
+     struct KeyRow {
+         std::string label, keys;
+diff --git a/host/window.cpp b/host/window.cpp
+index fe560e0..f7434a7 100644
+--- a/host/window.cpp
++++ b/host/window.cpp
+@@ -164,12 +164,14 @@ struct LookAxis {
+     bool angle = false, set = false, have_prev = false;
+     float prev = 0;
+     double pending = 0;   // still to turn, in the direction a push of the stick to 255 turns
++    std::uint8_t held = 0x80;   // the push of the game's current step
+     int sign = 1;         // +1: a push to 255 makes the word bigger; -1: smaller
+ };
+ LookAxis g_look_yaw, g_look_pitch;
+ std::uint32_t g_look_when_address = 0, g_look_when_value = 0;
+ bool g_look_parsed = false, g_look_when_set = false;
+-double g_look_dx = 0, g_look_dy = 0;   // mouse counts since the last frame (relative mode)  // mouse counts since the last sample (only while the mouse pushes a stick)
++double g_look_dx = 0, g_look_dy = 0;
++int g_look_step = 3;   // frames of one game step (PS2_MOUSE_LOOK_STEP; Raw Danger: 3, its 20 steps a second)   // mouse counts since the last frame (relative mode)  // mouse counts since the last sample (only while the mouse pushes a stick)
+ Uint32 g_mouse_sample = 0;
+ double g_mouse_vx = 0.0, g_mouse_vy = 0.0;  // counts per millisecond, smoothed
+ Uint32 g_wheel_up_until = 0, g_wheel_down_until = 0;
+@@ -641,6 +643,7 @@ void load_keys() {
+                 std::fprintf(stderr, "[menu] the game's font for the Options look: %s\n", quickmenu::load_game_font(font) ? font : "not readable, the menu's own letters");
+         }
+         ps2::set_reverb(g_keys.reverb != 0);
++        if (g_keys.smaa) ps2::set_smaa_quality(static_cast<unsigned>(g_keys.smaa));
+         send_key_prompts();
+     }
+     g_master_volume = std::clamp(g_keys.master_volume, 0, 100);
+@@ -824,6 +827,7 @@ void parse_mouse_look() {
+             g_look_pitch.set = true;
+         }
+     }
++    if (const char *st = std::getenv("PS2_MOUSE_LOOK_STEP"); st && *st) g_look_step = std::clamp(std::atoi(st), 1, 6);
+     if (const char *w = std::getenv("PS2_MOUSE_LOOK_WHEN"); w && *w) {
+         unsigned long a = 0, v = 0;
+         if (std::sscanf(w, "%lx=%lu", &a, &v) == 2) {
+@@ -850,35 +854,38 @@ float ram_float(std::uint32_t address) {
+     return f;
+ }
+ 
+-// one axis of the mouse look: `counts` of mouse movement in, the stick's value out (0x80 when nothing is left to turn)
+-std::uint8_t look_axis(LookAxis &a, double counts, double per_count) {
++// one axis of the mouse look: `counts` of mouse movement in, the stick's value out (0x80: no turn). Open loop, measured once: the
++// game turns `rate` for each unit the stick is pushed past its dead zone, at each of its steps (3 frames: Raw Danger runs at 20
++// steps a second). The mouse's movement of one step becomes one push held for exactly one step, so the game sees it once whatever
++// the frame it reads the pad at, and turns exactly that far; only what is past the game's top speed waits for the next step.
++// No smoothing and no acceleration of our own: the same movement always turns the same angle.
++std::uint8_t look_axis(LookAxis &a, double counts, double per_count, int frame_in_step, int step_frames) {
+     if (!a.set) return 0x80;
+-    const float now = ram_float(a.address);
+-    if (!std::isfinite(now)) return 0x80;
+-    if (a.have_prev) {
+-        double moved = now - a.prev;
+-        if (a.angle) {
+-            while (moved > 3.14159265) moved -= 6.28318531;
+-            while (moved < -3.14159265) moved += 6.28318531;
+-        }
+-        a.pending -= a.sign * moved;
+-    }
+-    a.prev = now;
+-    a.have_prev = true;
+     a.pending += counts * per_count;
+-    const double most = a.rate * (127.0 - a.dead);   // the most the game turns in one of its steps
+-    a.pending = std::clamp(a.pending, -most * 8.0, most * 8.0);   // a fast flick is caught up within about half a second
++    if (frame_in_step != 0) return a.held;   // the push of this step stays for all its frames
++    const double most = a.rate * (127.0 - a.dead);
++    double want = a.pending;
+     if (!a.angle) {
+-        if ((now >= a.hi - 1e-3f && a.sign * a.pending > 0) || (now <= a.lo + 1e-3f && a.sign * a.pending < 0)) a.pending = 0;   // at the end of its travel
++        // the height has ends: nothing is kept toward an end it is at
++        const float now = ram_float(a.address);
++        if (std::isfinite(now) && ((now >= a.hi - 1e-3f && a.sign * want > 0) || (now <= a.lo + 1e-3f && a.sign * want < 0))) want = a.pending = 0;
+     }
+-    if (std::fabs(a.pending) < a.rate * 0.6) return 0x80;
+-    const double push = a.dead + std::min(std::fabs(a.pending), most) / a.rate;
+-    return static_cast<std::uint8_t>(std::clamp(128.0 + std::copysign(push, a.pending), 0.0, 255.0));
++    if (std::fabs(want) < a.rate * 0.5) {   // less than the smallest turn the game makes: kept for the next step
++        a.held = 0x80;
++        return a.held;
++    }
++    const double turn = std::clamp(want, -most, most);
++    a.pending = std::clamp(want - turn, -most * 2.0, most * 2.0);   // past the top speed: at most two more steps, then dropped
++    const double push = a.dead + std::fabs(turn) / a.rate;
++    a.held = static_cast<std::uint8_t>(std::clamp(128.0 + std::copysign(std::round(push), turn), 0.0, 255.0));
++    (void)step_frames;
++    return a.held;
+ }
+ 
+ void mouse_look_reset() {
+     g_look_yaw.pending = g_look_pitch.pending = 0;
+     g_look_yaw.have_prev = g_look_pitch.have_prev = false;
++    g_look_yaw.held = g_look_pitch.held = 0x80;
+     g_look_dx = g_look_dy = 0;
+ }
+ 
+@@ -966,10 +973,15 @@ void read_keyboard(std::uint16_t &pressed, std::uint8_t &lx, std::uint8_t &ly, s
+             apply_mouse_mode();
+         }
+         if (on) {
+-            const double speed = g_keys.mouse_speed;
+-            const double dx = (g_keys.mouse_invert & 1) ? -g_look_dx : g_look_dx, dy = (g_keys.mouse_invert & 2) ? -g_look_dy : g_look_dy;
++            // the modern way round by default: the mouse to the right turns the view right, the mouse up looks up (the game's own
++            // stick is the other way on both); mouse_invert x / y turns either back
++            const double speed = g_keys.look_speed;
++            const double dx = (g_keys.mouse_invert & 1) ? g_look_dx : -g_look_dx, dy = (g_keys.mouse_invert & 2) ? g_look_dy : -g_look_dy;
+             g_look_dx = g_look_dy = 0;
+-            const std::uint8_t sx = look_axis(g_look_yaw, dx, 0.0028 * speed), sy = look_axis(g_look_pitch, dy, 0.012 * speed);
++            static int frame_in_step = 0;
++            const int step = g_look_step;
++            const std::uint8_t sx = look_axis(g_look_yaw, dx, 0.0022 * speed, frame_in_step, step), sy = look_axis(g_look_pitch, dy, 0.008 * speed, frame_in_step, step);
++            frame_in_step = (frame_in_step + 1) % std::max(1, step);
+             if (rx == 0x80) rx = sx;
+             if (ry == 0x80) ry = sy;
+         }
+@@ -1143,7 +1155,7 @@ void menu_paint(bool show_again) {
+         v.master_volume = g_master_volume;
+         v.integer_scale = g_keys.integer_scale != 0;
+         v.menu_skin = quickmenu::skin();
+-        v.antialias = g_keys.smaa ? 2 : (g_look & 1) ? 1 : 0;
++        v.antialias = g_keys.smaa ? 1 + g_keys.smaa : (g_look & 1) ? 1 : 0;
+         {
+             static const char *const kFilters[] = {"Raw pixels", "Soft (TV)", "Sharp", "FSR 1"};
+             v.filter = kFilters[std::clamp(g_look / 2, 0, 3)];
+@@ -1171,8 +1183,9 @@ void menu_paint(bool show_again) {
+         v.key_prompts = std::getenv("PS2_PROMPT_FONT_KEY") ? g_keys.key_prompts : -1;
+         parse_mouse_look();
+         v.mouse_look = g_look_yaw.set ? g_keys.mouse_look : -1;
+-        v.mouse_speed = g_keys.mouse_speed;
++        v.mouse_speed = g_keys.look_speed;
+         v.mouse_invert_y = (g_keys.mouse_invert & 2) != 0;
++        v.mouse_invert_x = (g_keys.mouse_invert & 1) != 0;
+         if (g_menu.on_keys_page()) {
+             for (int a = 0; a < keymap::kChangeableCount; ++a) v.key_rows.push_back({keymap::action_label(a), keymap::keys_text(g_keys, a)});
+             v.key_note = g_key_note;
+@@ -1413,16 +1426,17 @@ void menu_command(quickmenu::Command c, int step) {
+         break;
+     }
+     case Command::antialias: {
+-        // off -> smooth edges (the edge blend of the looks) -> SMAA 1x (on the console picture) -> off
+-        int aa = g_keys.smaa ? 2 : (g_look & 1) ? 1 : 0;
+-        aa = (aa + step + 3) % 3;
++        // off -> smooth edges (the edge blend of the looks) -> SMAA low, medium, high, ultra (on the picture) -> off; at once
++        int aa = g_keys.smaa ? 1 + g_keys.smaa : (g_look & 1) ? 1 : 0;
++        aa = (aa + step + 6) % 6;
+         g_look = (g_look & ~1) | (aa == 1 ? 1 : 0);
+         g_keys.look = g_look;
+-        g_keys.smaa = aa == 2 ? 1 : 0;
++        g_keys.smaa = aa >= 2 ? aa - 1 : 0;
++        if (g_keys.smaa) ps2::set_smaa_quality(static_cast<unsigned>(g_keys.smaa));
+         ps2::set_video_options(video_bits());
+         if (!g_look_forced) rewrite_keys_file([](const std::string &t) { return keymap::with_look(t, g_look); }, "look");
+         rewrite_keys_file([](const std::string &t) { return keymap::with_smaa(t, g_keys.smaa); }, "smaa");
+-        static const char *const kAa[] = {"off", "smooth edges", "SMAA 1x"};
++        static const char *const kAa[] = {"off", "smooth edges", "SMAA low", "SMAA medium", "SMAA high", "SMAA ultra"};
+         set_notice(std::string("Anti-aliasing: ") + kAa[aa]);
+         break;
+     }
+@@ -1473,13 +1487,17 @@ void menu_command(quickmenu::Command c, int step) {
+         break;
+     case Command::mouse_speed: {
+         // 0.2 to 4 in steps of 0.2 (Left / Right), round at the ends
+-        double v = std::round(g_keys.mouse_speed * 5.0) / 5.0 + (step < 0 ? -0.2 : 0.2);
++        double v = std::round(g_keys.look_speed * 5.0) / 5.0 + (step < 0 ? -0.2 : 0.2);
+         if (v > 4.01) v = 0.2;
+         if (v < 0.19) v = 4.0;
+-        g_keys.mouse_speed = v;
+-        rewrite_keys_file([](const std::string &t) { return keymap::with_mouse_speed(t, g_keys.mouse_speed); }, "mouse speed");
++        g_keys.look_speed = v;
++        rewrite_keys_file([](const std::string &t) { return keymap::with_mouse_speed(t, g_keys.look_speed); }, "mouse look speed");
+         break;
+     }
++    case Command::mouse_invert_x:
++        g_keys.mouse_invert ^= 1;
++        rewrite_keys_file([](const std::string &t) { return keymap::with_mouse_invert(t, g_keys.mouse_invert); }, "mouse left and right");
++        break;
+     case Command::mouse_invert:
+         g_keys.mouse_invert ^= 2;
+         rewrite_keys_file([](const std::string &t) { return keymap::with_mouse_invert(t, g_keys.mouse_invert); }, "mouse up and down");
+@@ -1562,17 +1580,25 @@ void menu_command(quickmenu::Command c, int step) {
+             break;
+         }
+         {
+-            // 1x, 2x, 3x, 4x, auto (the one that fits the screen, chosen at the start), round
+-            const int order[5] = {1, 2, 3, 4, keymap::kScaleAuto};
++            // 1x to 6x, 8x, auto (the one at least as tall as the screen), round; it changes at once (ps2::set_internal_scale)
++            const int order[8] = {1, 2, 3, 4, 5, 6, 8, keymap::kScaleAuto};
+             int at = 0;
+-            for (int i = 0; i < 5; ++i) if (order[i] == g_scale_next) at = i;
+-            g_scale_next = order[(at + step + 5) % 5];
++            for (int i = 0; i < 8; ++i) if (order[i] == g_scale_next) at = i;
++            g_scale_next = order[(at + step + 8) % 8];
+         }
+         g_keys.scale = g_scale_next;
+         rewrite_keys_file([](const std::string &t) { return keymap::with_scale(t, g_scale_next); }, "resolution");
+-        set_notice(std::string("Internal resolution ") + (g_scale_next == keymap::kScaleAuto ? std::string("auto") : std::to_string(g_scale_next) + "x") +
+-                   (g_scale_next == g_scale_now ? "" : ": used when the game starts the next time"));
+-        std::fprintf(stderr, "[menu] resolution %dx for the next start (this run: %dx)\n", g_scale_next, g_scale_now);
++        {
++            int use = g_scale_next;
++            if (use == keymap::kScaleAuto) {
++                SDL_DisplayMode mode;
++                use = SDL_GetDesktopDisplayMode(0, &mode) == 0 && mode.h > 0 ? std::clamp((mode.h + 447) / 448, 1, 6) : 2;
++            }
++            ps2::set_internal_scale(static_cast<unsigned>(use));
++            g_scale_now = g_scale_next;
++            set_notice("Internal resolution " + std::to_string(640 * use) + " x " + std::to_string(448 * use) + (g_scale_next == keymap::kScaleAuto ? " (auto)" : ""));
++            std::fprintf(stderr, "[menu] resolution %dx, now\n", use);
++        }
+         break;
+     case Command::sharp_2d:
+         if (g_sharp_locked) {
+@@ -1582,8 +1608,10 @@ void menu_command(quickmenu::Command c, int step) {
+         g_sharp_next = (g_sharp_next + step + 3) % 3;
+         g_keys.sharp_2d = g_sharp_next;
+         rewrite_keys_file([](const std::string &t) { return keymap::with_sharp_2d(t, g_sharp_next); }, "2D art filter");
+-        set_notice(std::string("Text and menus: ") + keymap::sharp_2d_word(g_sharp_next) + (g_sharp_next == g_sharp_now ? "" : ", used when the game starts the next time"));
+-        std::fprintf(stderr, "[menu] 2D art %s for the next start (this run: %s)\n", keymap::sharp_2d_word(g_sharp_next), keymap::sharp_2d_word(g_sharp_now));
++        ps2::set_sharp_2d(static_cast<unsigned>(g_sharp_next));   // at once (the programs are made again)
++        g_sharp_now = g_sharp_next;
++        set_notice(std::string("Text and menus: ") + keymap::sharp_2d_word(g_sharp_next));
++        std::fprintf(stderr, "[menu] 2D art %s, now\n", keymap::sharp_2d_word(g_sharp_next));
+         break;
+     case Command::fullscreen: toggle_fullscreen(); break;
+     case Command::change_keys: g_key_note.clear(); break;  // (the menu has switched to its keys page)
+@@ -2457,10 +2485,10 @@ bool open_window(bool fullscreen) {
+         // enlarged: no filter is needed), at most 4x
+         SDL_DisplayMode mode;
+         int fit = 2;
+-        if (SDL_GetDesktopDisplayMode(0, &mode) == 0 && mode.h > 0) fit = std::clamp((mode.h + 447) / 448, 1, 4);
++        if (SDL_GetDesktopDisplayMode(0, &mode) == 0 && mode.h > 0) fit = std::clamp((mode.h + 447) / 448, 1, 6);
+         ps2::os::set_env("PS2_SCALE", std::to_string(fit));
+         std::fprintf(stderr, "[video] resolution auto: %dx for a %dx%d screen\n", fit, mode.w, mode.h);
+-    } else if (!g_scale_locked && g_keys.scale >= 1 && g_keys.scale <= 4) {
++    } else if (!g_scale_locked && g_keys.scale >= 1 && g_keys.scale <= 8) {
+         ps2::os::set_env("PS2_SCALE", std::to_string(g_keys.scale));
+         std::fprintf(stderr, "[video] resolution %dx from %s (scale = %d)\n", g_keys.scale, g_keys_path.c_str(), g_keys.scale);
+     }
+@@ -2469,7 +2497,7 @@ bool open_window(bool fullscreen) {
+         ps2::os::set_env("PS2_PACE", g_keys.pace);
+         ps2::os::set_env("PS2_PACE_FROM", g_keys_path);
+     }
+-    g_scale_now = std::clamp(std::atoi(ps2::os::env("PS2_SCALE").c_str()), 1, 4);
++    g_scale_now = std::clamp(std::atoi(ps2::os::env("PS2_SCALE").c_str()), 1, 8);
+     g_scale_next = g_scale_locked ? g_scale_now : (g_keys.scale >= 1 ? g_keys.scale : g_scale_now);
+     if (!g_scale_locked && g_keys.scale == keymap::kScaleAuto) g_scale_now = keymap::kScaleAuto;  // shown as "auto" while it is the choice
+     // the 2D art filter the same way: PS2_SHARP_2D, else the 'sharp_2d' line of keys.ini, else sharp (gpu.cpp reads it at its start)
+diff --git a/runtime/include/ps2/video.hpp b/runtime/include/ps2/video.hpp
+index 826c4a5..42e54bc 100644
+--- a/runtime/include/ps2/video.hpp
++++ b/runtime/include/ps2/video.hpp
+@@ -16,6 +16,13 @@ std::uint32_t video_options();
+ void set_lens_drops(const float *drops, unsigned count, float mist, float clock);
+ // rawdanger-recomp: the sound chip's reverb (the game's echo of rooms and tunnels), on unless the player switches it off
+ void set_reverb(bool on);
++// rawdanger-recomp: the inner resolution while the game runs (1 to 8 times the console's), at the next picture; no restart
++void set_internal_scale(unsigned scale);
++unsigned internal_scale();
++// rawdanger-recomp: the SMAA preset when SMAA is on: 1 low, 2 medium, 3 high, 4 ultra
++void set_smaa_quality(unsigned quality);
++// rawdanger-recomp: the filter of upscaled 2D art (0 soft, 1 sharp, 2 sharpest), at the next picture
++void set_sharp_2d(unsigned sharp);
+ // rawdanger-recomp: the keys shown instead of the PlayStation symbols in the game's font (cross, circle, square, triangle; short
+ // names of 1 to 3 letters, "" keeps the symbol); see gpu.cpp, draw_prompt_caps
+ void set_button_prompts(const std::string labels[4]);
+diff --git a/runtime/src/gs/gpu/blit.wgsl b/runtime/src/gs/gpu/blit.wgsl
+index 3ca16a9..9463051 100644
+--- a/runtime/src/gs/gpu/blit.wgsl
++++ b/runtime/src/gs/gpu/blit.wgsl
+@@ -355,7 +355,8 @@ fn drops_over(uv: vec2<f32>, picture: vec3<f32>) -> vec3<f32> {
+         // the trail: a thin streak above the drop, wavering a little, fading towards its top
+         if (e.x > 0.002 && rel.y < 0.0 && -rel.y < e.x) {
+             let t = -rel.y / e.x;
+-            let wave = sin(rel.y * 90.0 + e.z * 40.0) * r * 0.18;
++            // e.w: the slant of the drop's path (picture widths across per height down): a trail lies along the way it came
++            let wave = sin(rel.y * 90.0 + e.z * 40.0) * r * 0.18 + rel.y * e.w * aspect;
+             let half_w = r * (0.38 - 0.2 * t);
+             let dx = abs(rel.x - wave) / max(half_w, 0.0001);
+             if (dx < 1.0) {
+diff --git a/runtime/src/gs/gpu/gpu.cpp b/runtime/src/gs/gpu/gpu.cpp
+index e167fec..6afaf60 100644
+--- a/runtime/src/gs/gpu/gpu.cpp
++++ b/runtime/src/gs/gpu/gpu.cpp
+@@ -20,6 +20,7 @@
+ #include <chrono>
+ #include <condition_variable>
+ #include <cmath>
++#include <functional>
+ #include <cstdio>
+ #include <cstdlib>
+ #include <cstring>
+@@ -105,6 +106,7 @@ WGPUComputePipeline g_smaa_edges = nullptr, g_smaa_weights = nullptr, g_smaa_ble
+ WGPUBindGroupLayout g_smaa_layout = nullptr;
+ WGPUBuffer g_smaa_work = nullptr, g_smaa_lut = nullptr, g_smaa_params = nullptr;
+ WGPUBindGroup g_smaa_group = nullptr;
++std::atomic<std::uint32_t> g_smaa_quality{3};   // rawdanger-recomp: SMAA preset, 1 low .. 4 ultra (ps2::set_smaa_quality)
+ std::uint64_t g_smaa_words = 0;
+ struct SmaaJob { bool on = false; std::uint32_t base = 0, width = 0, height = 0; } g_smaa_job;
+ 
+@@ -165,6 +167,7 @@ WGPUBindGroupLayout g_layout = nullptr;
+ WGPUPipelineLayout g_pipeline_layout = nullptr;
+ WGPUBindGroup g_group = nullptr;
+ WGPUComputePipeline g_pipelines[kPipelines] = {};
++std::function<WGPUComputePipeline(int, bool, int)> g_make_pipeline_at;   // rawdanger-recomp: programs at another inner resolution
+ // The draw program with mipmap levels (HAS_MIP = true in gs.wgsl) takes as long to translate as all the others together on FXC, so it is built
+ // in the background after the plain programs; a batch that needs it waits for it (pipeline_of), every other batch never does.
+ WGPUComputePipeline g_raster_mip = nullptr;
+@@ -1394,65 +1397,85 @@ void parse_prompt_env() {
+     g_prompt_cells_set = n == 4;
+ }
+ 
+-// a 3 x 5 pixel font for the caps (digits, capitals, a few signs), one row per string, '#' set
+-const char *prompt_glyph(char c) {
+-    static const char *const digits[10] = {"####.##.##.####", ".#.##..#..#.###", "##...#.#.#..###", "##...#.#...###.", "#.##.####..#..#", "####..##...###.", ".###..####.####", "###..#.#..#..#.", "####.#####.####", "####.####..###."};
+-    static const char *const letters[26] = {".#.#.#####.##.#", "##.#.###.#.###.", ".###..#..#...##", "##.#.##.##.###.", "####..##.#..###", "####..##.#..#..", ".###..#.##.#.##", "#.##.#####.##.#", "###.#..#..#.###", "..#..#..##.#.#.", "#.##.###.#.##.#", "#..#..#..#..###", "#.########.##.#", "##.#.##.##.##.#", ".#.#.##.##.#.#.", "##.#.###.#..#..", ".#.#.##.###..##", "##.#.###.#.##.#", ".###...#...###.", "###.#..#..#..#.", "#.##.##.##.####", "#.##.##.##.#.#.", "#.##.########.#", "#.##.#.#.#.##.#", "#.##.#.#..#..#.", "###..#.#.#..###"};
+-    if (c >= '0' && c <= '9') return digits[c - '0'];
+-    if (c >= 'A' && c <= 'Z') return letters[c - 'A'];
+-    switch (c) {
+-    case '^': return ".#.###.#..#..#.";   // up arrow
+-    case 'v': return ".#..#..#.###.#.";   // down arrow
+-    case '<': return "..#.#.#...#...#";
+-    case '>': return "#...#...#.#.#..";
+-    case '+': return "....#.###.#....";
+-    case '-': return "......###......";
+-    default: return "...............";
+-    }
+-}
+-
+-void draw_prompt_caps(std::vector<std::uint32_t> &words, std::uint32_t w, std::uint32_t h) {
++// The caps look like the game's own symbols: the square button's thin pale outline, rounded, and the key's name in the game's own
++// letters (taken from the same picture: the font's cells, 24 x 24, ASCII from the third row), made smaller to fit. `sc` is the
++// picture's scale (1, or 2 for the 2x font rd_prompts.py writes, where the caps have twice the detail).
++void draw_prompt_caps(std::vector<std::uint32_t> &words, std::uint32_t w, std::uint32_t h, int sc) {
+     std::string labels[4];
+     {
+         std::lock_guard<std::mutex> lock(g_prompt_mutex);
+         for (int i = 0; i < 4; ++i) labels[i] = g_prompt_labels[i];
+     }
+-    const auto put = [&](int x, int y, std::uint32_t c) {
+-        if (x >= 0 && y >= 0 && x < static_cast<int>(w) && y < static_cast<int>(h)) words[static_cast<std::size_t>(y) * w + x] = c;
++    const auto at = [&](int x, int y) -> std::uint32_t & { return words[static_cast<std::size_t>(y) * w + x]; };
++    const auto inside = [&](int x, int y) { return x >= 0 && y >= 0 && x < static_cast<int>(w) && y < static_cast<int>(h); };
++    const auto alpha = [&](int x, int y) { return inside(x, y) ? static_cast<int>(at(x, y) >> 24) : 0; };
++    // the font's own colour (white-grey) at a coverage 0..1 over what is there (the picture's alpha is 0..0x80)
++    const auto blend = [&](int x, int y, float cov, int grey) {
++        if (!inside(x, y) || cov <= 0.f) return;
++        std::uint32_t &d = at(x, y);
++        const int a0 = static_cast<int>(d >> 24), a = std::max(a0, static_cast<int>(cov * 128.f + 0.5f));
++        d = static_cast<std::uint32_t>(grey) | static_cast<std::uint32_t>(grey) << 8 | static_cast<std::uint32_t>(grey) << 16 | static_cast<std::uint32_t>(std::min(a, 128)) << 24;
+     };
+-    const std::uint32_t face = 0x80E8E8E8u, rim = 0x80FFFFFFu, shade = 0x80909090u, ink = 0x80202020u, clear = 0u;
+     for (int i = 0; i < 4; ++i) {
+         if (labels[i].empty()) continue;
+         const int x0 = g_prompt_cells[i][0], x1 = g_prompt_cells[i][1], y0 = g_prompt_cells[i][2], y1 = g_prompt_cells[i][3];
+-        // the symbol's box, a pixel bigger all round, becomes the cap, widened (about the symbol's middle, within its 24-pixel
+-        // cell of the font) when the key's name needs more room
+-        std::string t = labels[i];
+-        // (never outside that cell: the game draws a character's whole cell, so a pixel in the next one shows beside that letter)
+-        const int cell0 = (x0 / 24) * 24, cell1 = cell0 + 23, row0 = (y0 / 24) * 24, row1 = row0 + 23;
+-        int bx0 = std::max(x0 - 1, cell0), bx1 = std::min(x1 + 1, cell1);
+-        const int need = static_cast<int>(t.size()) * 4 - 1 + 4;
+-        while (bx1 - bx0 + 1 < need && (bx0 > cell0 || bx1 < cell1)) {
+-            if (bx0 > cell0) --bx0;
+-            if (bx1 - bx0 + 1 < need && bx1 < cell1) ++bx1;
++        const int cell0 = (x0 / 24) * 24, row0 = (y0 / 24) * 24;
++        // the symbol goes: its whole box in its cell is cleared (the game draws the whole cell, so nothing outside it)
++        for (int y = (row0 + 1) * sc; y < (row0 + 23) * sc; ++y)
++            for (int x = cell0 * sc; x < (cell0 + 24) * sc; ++x)
++                if (inside(x, y)) at(x, y) = 0;
++        // the letters: each one's ink box in its font cell, made smaller to `lh` pixels (1x) for the capitals
++        const std::string &t = labels[i];
++        const float lh = t.size() > 1 ? 7.5f : 9.0f;   // a single letter a little bigger
++        const float k = lh / 15.0f;                      // the font's capitals are 15 pixels tall
++        struct G { int sx, sy, sw, sh; };
++        std::vector<G> glyphs;
++        float text_w = 0;
++        for (char ch : t) {
++            const int c = (static_cast<unsigned char>(ch) >= 32 && static_cast<unsigned char>(ch) <= 126 ? ch : '?') - 32;
++            const int cx = (c % 16) * 24, cy = (2 + c / 16) * 24;
++            int lo = 24, hi = -1;
++            for (int y = 0; y < 24; ++y)
++                for (int x = 0; x < 24; ++x)
++                    if (alpha((cx + x) * sc, (cy + y) * sc) > 40) lo = std::min(lo, x), hi = std::max(hi, x);
++            if (hi < lo) lo = 0, hi = 5;
++            glyphs.push_back({cx + lo, cy + 4, hi - lo + 1, 15});
++            text_w += (hi - lo + 1) * k + 1.0f;
+         }
+-        const int by0 = std::max(std::min(y0, (y0 + y1) / 2 - 6), row0 + 1), by1 = std::min(std::max(y1, (y0 + y1) / 2 + 6), row1 - 1);
+-        for (int y = by0 - 1; y <= by1 + 1; ++y)
+-            for (int x = bx0; x <= bx1; ++x) put(x, y, clear);
+-        for (int y = by0; y <= by1; ++y)
+-            for (int x = bx0; x <= bx1; ++x) {
+-                const bool corner = (x == bx0 || x == bx1) && (y == by0 || y == by1);
+-                if (corner) continue;
+-                put(x, y, (x == bx0 || x == bx1 || y == by0) ? rim : y == by1 ? shade : face);
++        text_w -= 1.0f;
++        // the cap: about as tall as the square symbol, as wide as the name needs, inside the cell
++        const float mid_x = (x0 + x1 + 1) * 0.5f, mid_y = (y0 + y1 + 1) * 0.5f;
++        const float cap_h = 13.0f, cap_w = std::clamp(std::max(cap_h, text_w + 5.0f), cap_h, 23.0f);
++        const float bx0 = std::clamp(mid_x - cap_w * 0.5f, static_cast<float>(cell0), static_cast<float>(cell0 + 24) - cap_w), by0 = mid_y - cap_h * 0.5f;
++        const float r = 2.5f, line = 1.1f;   // corner radius and line width, 1x pixels
++        for (int y = static_cast<int>(by0 * sc) - 1; y <= static_cast<int>((by0 + cap_h) * sc) + 1; ++y)
++            for (int x = static_cast<int>(bx0 * sc) - 1; x <= static_cast<int>((bx0 + cap_w) * sc) + 1; ++x) {
++                // distance of the pixel's middle to the rounded rectangle's edge, in 1x pixels
++                const float px = (x + 0.5f) / sc, py = (y + 0.5f) / sc;
++                const float qx = std::fabs(px - (bx0 + cap_w * 0.5f)) - (cap_w * 0.5f - r), qy = std::fabs(py - (by0 + cap_h * 0.5f)) - (cap_h * 0.5f - r);
++                const float outside = std::hypot(std::max(qx, 0.f), std::max(qy, 0.f)) + std::min(std::max(qx, qy), 0.f) - r;
++                const float cov = std::clamp(line * 0.5f + 0.5f / sc - std::fabs(outside + line * 0.5f), 0.f, 1.f) * sc;
++                blend(x, y, std::min(cov, 1.f), 210);
+             }
+-        // the label, centred: up to as many 3-pixel letters as fit
+-        const int room = bx1 - bx0 - 1;
+-        while (!t.empty() && static_cast<int>(t.size()) * 4 - 1 > room) t.pop_back();
+-        const int tw = static_cast<int>(t.size()) * 4 - 1, tx = bx0 + 1 + (room - tw) / 2, ty = (by0 + by1) / 2 - 2;
+-        for (std::size_t k = 0; k < t.size(); ++k) {
+-            const char *g = prompt_glyph(t[k]);
+-            for (int r = 0; r < 5; ++r)
+-                for (int col = 0; col < 3; ++col)
+-                    if (g[r * 3 + col] == '#') put(tx + static_cast<int>(k) * 4 + col, ty + r, ink);
++        // the name, centred, each pixel the average of the font pixels under it
++        float pen = bx0 + (cap_w - text_w) * 0.5f;
++        const float top = mid_y - lh * 0.5f;
++        for (const G &g : glyphs) {
++            const int tw = static_cast<int>(std::ceil(g.sw * k * sc)), th = static_cast<int>(std::ceil(g.sh * k * sc));
++            const int ox = static_cast<int>(std::lround(pen * sc)), oy = static_cast<int>(std::lround(top * sc));
++            for (int ty = 0; ty < th; ++ty)
++                for (int tx = 0; tx < tw; ++tx) {
++                    const float sx0 = tx / (k * sc), sx1 = (tx + 1) / (k * sc), sy0 = ty / (k * sc), sy1 = (ty + 1) / (k * sc);
++                    float sum = 0, area = 0;
++                    for (int sy = static_cast<int>(sy0 * sc); sy < static_cast<int>(std::ceil(sy1 * sc)); ++sy)
++                        for (int sx = static_cast<int>(sx0 * sc); sx < static_cast<int>(std::ceil(sx1 * sc)); ++sx) {
++                            if (sx >= g.sw * sc || sy >= g.sh * sc) continue;
++                            sum += alpha(g.sx * sc + sx, g.sy * sc + sy);
++                            area += 1;
++                        }
++                    if (area > 0) blend(ox + tx, oy + ty, std::min(1.f, sum / area / 128.f * 1.2f), 240);
++                }
++            pen += g.sw * k + 1.0f;
+         }
+     }
+ }
+@@ -1924,9 +1947,9 @@ std::uint32_t resolve_tex_override(const std::uint32_t *w, std::uint32_t base_w,
+         return 0xFFFFFFFFu;
+     }
+ 
+-    if (prompts && png_w == base_w && png_h == base_h) {
++    if (prompts && (png_w == base_w || png_w == base_w * 2) && png_h * base_w == base_h * png_w) {
+         e.prompt_gen = g_prompt_gen.load();
+-        draw_prompt_caps(words, png_w, png_h);
++        draw_prompt_caps(words, png_w, png_h, static_cast<int>(png_w / base_w));
+     }
+     std::uint32_t hd_shift = 0;
+     if (png_w == base_w * 2 && png_h == base_h * 2) hd_shift = 1;
+@@ -2769,7 +2792,7 @@ void encode_smaa(WGPUCommandEncoder enc) {
+         bd.entries = be;
+         g_smaa_group = wgpuDeviceCreateBindGroup(g_device, &bd);
+     }
+-    const std::uint32_t p[4] = {job.width, job.height, job.base, 0};
++    const std::uint32_t p[4] = {job.width, job.height, job.base, std::clamp<std::uint32_t>(g_smaa_quality.load(), 1u, 4u)};
+     wgpuQueueWriteBuffer(g_queue, g_smaa_params, 0, p, sizeof p);
+     WGPUComputePassDescriptor cd = WGPU_COMPUTE_PASS_DESCRIPTOR_INIT;
+     WGPUComputePassEncoder pass = wgpuCommandEncoderBeginComputePass(enc, &cd);
+@@ -4098,7 +4121,7 @@ bool init(Mode m) {
+             g_bench.reps = std::clamp<unsigned long long>(reps, 1, 500);
+         }
+     }
+-    if (const char *scale = std::getenv("PS2_SCALE")) g_scale = std::clamp<std::uint32_t>(static_cast<std::uint32_t>(std::atoi(scale)), 1u, 4u);
++    if (const char *scale = std::getenv("PS2_SCALE")) g_scale = std::clamp<std::uint32_t>(static_cast<std::uint32_t>(std::atoi(scale)), 1u, 8u);
+     // PS2_SHARP_2D: how upscaled 2D art (text, icons, menus) is filtered, see SHARP in gs.wgsl: 0 plain bilinear, 1 sharp (the
+     // default), 2 sharpest
+     if (const char *sharp = std::getenv("PS2_SHARP_2D")) g_sharp_2d = std::clamp<std::uint32_t>(static_cast<std::uint32_t>(std::atoi(sharp)), 0u, 2u);
+@@ -4244,6 +4267,32 @@ bool init(Mode m) {
+         cd.compute.constants = constants;
+         return wgpuDeviceCreateComputePipeline(g_device, &cd);
+     };
++    // rawdanger-recomp: the same programs at another inner resolution (SCALE is a constant of the program), for a change of it while
++    // the game runs (apply_scale_request); the module is kept for that
++    wgpuShaderModuleAddRef(module);
++    g_make_pipeline_at = [=](int entry, bool mip, int at_scale) {
++        WGPUComputePipelineDescriptor cd = WGPU_COMPUTE_PIPELINE_DESCRIPTOR_INIT;
++        cd.layout = g_pipeline_layout;
++        cd.compute.module = module;
++        cd.compute.entryPoint = view(kEntryPoints[entry]);
++        WGPUConstantEntry constants[5];
++        std::size_t count = 0;
++        const auto set = [&](bool declared, const char *key, double value) {
++            if (!declared) return;
++            constants[count] = WGPU_CONSTANT_ENTRY_INIT;
++            constants[count].key = view(key);
++            constants[count].value = value;
++            ++count;
++        };
++        set(true, "SCALE", static_cast<double>(at_scale));
++        set(has_tile, "TILE", static_cast<double>(tile));
++        set(has_fma, "EXPLICIT_FMA", explicit_fma ? 1.0 : 0.0);
++        set(has_sharp, "SHARP", static_cast<double>(g_sharp_2d));
++        set(has_mip, "HAS_MIP", mip ? 1.0 : 0.0);
++        cd.compute.constantCount = count;
++        cd.compute.constants = constants;
++        return wgpuDeviceCreateComputePipeline(g_device, &cd);
++    };
+     // The mipmap variant of the draw program: most games never use it, and on FXC it would double the start. Built in a thread beside the
+     // plain programs and the game's own start (the browser build has none and does it after them); a batch with a mipmap table waits for
+     // it (pipeline_of).
+@@ -4908,6 +4957,83 @@ void write_state(const std::vector<std::uint32_t> &vram, std::uint32_t scale, co
+     wait_idle();
+ }
+ 
++// rawdanger-recomp: the inner resolution changed while the game runs (Settings > Display), at once: what the card holds is read back
++// as a save state does, the scale-sized buffers are made again, and the memory goes back at the new scale (each texel's samples
++// from its first one), as when a state of another scale is loaded. Done by the GS thread between two pictures.
++// the programs again, with the current SCALE and SHARP (a moment, or a few seconds the first time on some drivers; the game waits)
++void remake_programs() {
++    const auto compile_start = std::chrono::steady_clock::now();
++    if (g_raster_mip_thread) {
++        if (g_raster_mip_thread->joinable()) g_raster_mip_thread->join();
++        delete g_raster_mip_thread;
++        g_raster_mip_thread = nullptr;
++    }
++    for (int i = 0; i < kPipelines; ++i) {
++        WGPUComputePipeline made = g_make_pipeline_at(i, false, static_cast<int>(g_scale));
++        if (!made) continue;
++        if (g_pipelines[i]) wgpuComputePipelineRelease(g_pipelines[i]);
++        g_pipelines[i] = made;
++    }
++    if (g_raster_mip) {
++        WGPUComputePipeline made = g_make_pipeline_at(kRaster, true, static_cast<int>(g_scale));
++        if (made) wgpuComputePipelineRelease(g_raster_mip), g_raster_mip = made;
++    }
++    std::fprintf(stderr, "[gpu] programs for %ux made in %.0f ms\n", g_scale, std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - compile_start).count());
++}
++
++std::atomic<std::uint32_t> g_scale_request{0};
++std::atomic<int> g_sharp_request{-1};
++void apply_scale_request() {
++    if (const int sharp = g_sharp_request.exchange(-1); sharp >= 0 && g_make_pipeline_at && static_cast<std::uint32_t>(sharp) != g_sharp_2d) {
++        // the filter of upscaled 2D art is a constant of the programs too: they are made again, the memory stays
++        flush_all();
++        submit();
++        wait_idle();
++        g_sharp_2d = static_cast<std::uint32_t>(sharp);
++        remake_programs();
++        dec_reset();   // what was decoded with the old programs is decoded again
++    }
++    const std::uint32_t want = g_scale_request.exchange(0);
++    if (want == 0 || want == g_scale || !g_vram) return;
++    std::vector<std::uint32_t> vram, clut;
++    std::uint32_t old = 1;
++    read_state(vram, old, clut);
++    wait_idle();
++    if (!g_make_pipeline_at) return;
++    g_scale = std::clamp<std::uint32_t>(want, 1u, 8u);
++    remake_programs();
++    g_copy_words = (1u << 20) * g_scale * g_scale;
++    g_field_words = (1u << 19) * g_scale * g_scale;
++    tiles::configure(static_cast<int>(g_scale), g_tile);
++    wgpuBufferRelease(g_vram);
++    g_vram = make_buffer(static_cast<std::uint64_t>(kMemorySize) * g_scale * g_scale, WGPUBufferUsage_Storage | WGPUBufferUsage_CopySrc | WGPUBufferUsage_CopyDst);
++    wgpuBufferRelease(g_scratch);
++    g_scratch = make_buffer((static_cast<std::uint64_t>(g_copy_words) + 2ull * g_field_words) * 4, WGPUBufferUsage_Storage | WGPUBufferUsage_CopySrc | WGPUBufferUsage_CopyDst);
++    if (g_readback) wgpuBufferRelease(g_readback);
++    g_readback = make_buffer(static_cast<std::uint64_t>(g_copy_words) * 4, WGPUBufferUsage_MapRead | WGPUBufferUsage_CopyDst);
++    if (g_group) wgpuBindGroupRelease(g_group);
++    g_group = nullptr;   // made again at the next batch, with the new buffers
++    if (g_smaa_group) wgpuBindGroupRelease(g_smaa_group);   // SMAA reads the scratch buffer too: made again at its next picture
++    g_smaa_group = nullptr;
++    if (g_blit && g_blit_group) {
++        // the picture shown on the screen is read from the scratch buffer: its group, with the new one
++        WGPUBindGroupLayout layout = wgpuRenderPipelineGetBindGroupLayout(g_blit, 0);
++        WGPUBindGroupEntry be[3] = {WGPU_BIND_GROUP_ENTRY_INIT, WGPU_BIND_GROUP_ENTRY_INIT, WGPU_BIND_GROUP_ENTRY_INIT};
++        be[0].binding = 0; be[0].buffer = g_scratch; be[0].size = WGPU_WHOLE_SIZE;
++        be[1].binding = 1; be[1].buffer = g_blit_params; be[1].size = 32;
++        be[2].binding = 2; be[2].buffer = g_lens_params; be[2].size = kLensBytes;
++        WGPUBindGroupDescriptor bd = WGPU_BIND_GROUP_DESCRIPTOR_INIT;
++        bd.layout = layout;
++        bd.entryCount = 3;
++        bd.entries = be;
++        wgpuBindGroupRelease(g_blit_group);
++        g_blit_group = wgpuDeviceCreateBindGroup(g_device, &bd);
++        wgpuBindGroupLayoutRelease(layout);
++    }
++    write_state(vram, old, clut);
++    std::fprintf(stderr, "[gpu] inner resolution now %ux (was %ux), without a restart\n", g_scale, old);
++}
++
+ void stats() {
+     if (g_mode == Mode::off) return;
+     if (g_live) hw::live_stats();
+@@ -5216,6 +5342,7 @@ std::uint32_t display_params(const DisplaySource &src, std::uint32_t scratch_at)
+ }
+ 
+ bool present(const DisplaySource &src) {
++    apply_scale_request();
+     if (!g_surface) return false;
+     static PresentLog log;
+     const double flush0 = log.flush, acquire0 = log.acquire, submit0 = log.submit, present0 = log.present;
+@@ -5463,6 +5590,7 @@ Copy g_copies[3];
+ std::uint64_t g_copy_order = 0;
+ 
+ bool display_async(const DisplaySource &src, std::vector<std::uint32_t> &rgba, std::uint32_t &width, std::uint32_t &height) {
++    apply_scale_request();
+     post::drain();
+ #ifdef __EMSCRIPTEN__
+     wgpuInstanceProcessEvents(g_instance);
+@@ -5542,6 +5670,11 @@ bool display(const DisplaySource &src, std::vector<std::uint32_t> &rgba, std::ui
+ namespace ps2 {
+ // rawdanger-recomp: the drops on the lens for the next pictures: count drops of (x, y, radius, opacity), x and y from the
+ // picture's top left (0 ... 1), the radius a share of the picture's height. The next 4 floats after the count: unused.
++void set_smaa_quality(unsigned quality) { ps2::gs::gpu::g_smaa_quality = std::clamp(quality, 1u, 4u); }
++void set_sharp_2d(unsigned sharp) { ps2::gs::gpu::g_sharp_request = static_cast<int>(std::min(sharp, 2u)); }
++void set_internal_scale(unsigned scale) { ps2::gs::gpu::g_scale_request = std::clamp(scale, 1u, 8u); }
++unsigned internal_scale() { return ps2::gs::gpu::g_scale; }
++
+ void set_button_prompts(const std::string labels[4]) {
+     {
+         std::lock_guard<std::mutex> lock(ps2::gs::gpu::g_prompt_mutex);
+diff --git a/runtime/src/gs/gpu/smaa.wgsl b/runtime/src/gs/gpu/smaa.wgsl
+index d16f3c5..f5019e5 100644
+--- a/runtime/src/gs/gpu/smaa.wgsl
++++ b/runtime/src/gs/gpu/smaa.wgsl
+@@ -13,7 +13,7 @@ struct Params {
+     width: u32,
+     height: u32,
+     base: u32,
+-    pad: u32,
++    quality: u32,   // rawdanger-recomp: 1 low, 2 medium, 3 high (the reference preset), 4 ultra
+ }
+ 
+ @group(0) @binding(0) var<storage, read> picture: array<u32>;
+@@ -21,9 +21,10 @@ struct Params {
+ @group(0) @binding(2) var<storage, read> lut: array<u32>;   // AreaTex (160 x 560, rg8) then SearchTex (64 x 16, r8)
+ @group(0) @binding(3) var<uniform> params: Params;
+ 
+-const THRESHOLD: f32 = 0.1;
+-const MAX_SEARCH_STEPS: f32 = 16.0;
+-const MAX_SEARCH_STEPS_DIAG: f32 = 8.0;
++// the presets of the SMAA reference (SMAA_PRESET_LOW .. ULTRA): the edge threshold and how far the searches go
++fn threshold_q() -> f32 { return select(select(select(0.05, 0.1, params.quality == 3u), 0.1, params.quality == 2u), 0.15, params.quality == 1u); }
++fn search_q() -> f32 { return select(select(select(32.0, 16.0, params.quality == 3u), 8.0, params.quality == 2u), 4.0, params.quality == 1u); }
++fn search_diag_q() -> f32 { return select(select(16.0, 8.0, params.quality == 3u), 0.0, params.quality <= 2u); }
+ const CORNER_ROUNDING_NORM: f32 = 0.25;
+ const LOCAL_CONTRAST_FACTOR: f32 = 2.0;
+ const AREATEX_MAX_DISTANCE: f32 = 16.0;
+@@ -124,7 +125,7 @@ fn edges(@builtin(global_invocation_id) id: vec3<u32>) {
+     let l_left = luma(x - 1, y);
+     let l_top = luma(x, y - 1);
+     var delta = vec4<f32>(abs(l - vec2<f32>(l_left, l_top)), 0.0, 0.0);
+-    var e = step(vec2<f32>(THRESHOLD), delta.xy);
++    var e = step(vec2<f32>(threshold_q()), delta.xy);
+     if (dot(e, vec2<f32>(1.0)) == 0.0) {
+         work[id.y * params.width + id.x] = 0u;
+         return;
+@@ -163,7 +164,7 @@ fn search_diag1(uv: vec2<f32>, dir: vec2<f32>) -> DiagResult {
+     let t = vec3<f32>(rt(), 1.0);
+     var e = vec2<f32>(0.0);
+     loop {
+-        if (!(coord.z < MAX_SEARCH_STEPS_DIAG - 1.0 && coord.w > 0.9)) { break; }
++        if (!(coord.z < search_diag_q() - 1.0 && coord.w > 0.9)) { break; }
+         let xyz = t * vec3<f32>(dir, 1.0) + coord.xyz;
+         coord = vec4<f32>(xyz, coord.w);
+         e = sample_edges(coord.xy);
+@@ -178,7 +179,7 @@ fn search_diag2(uv: vec2<f32>, dir: vec2<f32>) -> DiagResult {
+     let t = vec3<f32>(rt(), 1.0);
+     var e = vec2<f32>(0.0);
+     loop {
+-        if (!(coord.z < MAX_SEARCH_STEPS_DIAG - 1.0 && coord.w > 0.9)) { break; }
++        if (!(coord.z < search_diag_q() - 1.0 && coord.w > 0.9)) { break; }
+         let xyz = t * vec3<f32>(dir, 1.0) + coord.xyz;
+         coord = vec4<f32>(xyz, coord.w);
+         e = decode_diag(sample_edges(coord.xy));
+@@ -345,7 +346,7 @@ fn weights(@builtin(global_invocation_id) id: vec3<u32>) {
+     let pix = uv * size();
+     let off0 = r.xyxy * vec4<f32>(-0.25, -0.125, 1.25, -0.125) + uv.xyxy;
+     let off1 = r.xyxy * vec4<f32>(-0.125, -0.25, -0.125, 1.25) + uv.xyxy;
+-    let off2 = r.xxyy * vec4<f32>(-2.0, 2.0, -2.0, 2.0) * MAX_SEARCH_STEPS + vec4<f32>(off0.xz, off1.yw);
++    let off2 = r.xxyy * vec4<f32>(-2.0, 2.0, -2.0, 2.0) * search_q() + vec4<f32>(off0.xz, off1.yw);
+     var w = vec4<f32>(0.0);
+     var e = edge_texel(i32(id.x), i32(id.y));
+     if (e.y > 0.0) {  // an edge above
+-- 
+2.43.0
+

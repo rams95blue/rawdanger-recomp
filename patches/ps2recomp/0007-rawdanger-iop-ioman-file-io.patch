@@ -1,0 +1,513 @@
+ps2xIOP: implement ioman open/close/read/write/lseek (read-only, over the
+IopHost file API) so IOP drivers can stream from cdrom0:, and rate-limit the
+"unhandled import" warning. Raw Danger's IREMSND2 loads its sound banks this way.
+
+diff --git a/ps2xIOP/src/emulator/imports/iop_ioman.cpp b/ps2xIOP/src/emulator/imports/iop_ioman.cpp
+index 3eb4119..87a9390 100644
+--- a/ps2xIOP/src/emulator/imports/iop_ioman.cpp
++++ b/ps2xIOP/src/emulator/imports/iop_ioman.cpp
+@@ -3,19 +3,170 @@
+ #include "../core/iop_cpu.h"
+ #include "../core/iop_memory.h"
+ #include "../services/iop_rpc.h"
++#include "ps2x/iop/iop_host.h"
+ 
+ #include <algorithm>
++#include <sstream>
+ 
+ namespace ps2x::iop::detail
+ {
+-    IopIoman::IopIoman(IopMemory &memory) noexcept
+-        : m_memory(memory)
++    namespace
+     {
++        // IOP-side errno values returned (negated) by ioman.
++        constexpr int32_t kENOENT = 2;
++        constexpr int32_t kEIO = 5;
++        constexpr int32_t kEBADF = 9;
++        constexpr int32_t kEACCES = 13;
++        constexpr int32_t kEINVAL = 22;
++        constexpr int32_t kEMFILE = 24;
++        constexpr uint32_t kOpenAccessMask = 3u; // O_RDONLY=1, O_WRONLY=2, O_RDWR=3
++        constexpr uint32_t kOpenReadOnly = 1u;
++        constexpr size_t kMaxFiles = 32u;
++        constexpr uint32_t kReadChunk = 64u * 1024u;
++    }
++
++    IopIoman::IopIoman(IopHost &host, IopMemory &memory) noexcept
++        : m_host(host), m_memory(memory)
++    {
++    }
++
++    IopIoman::~IopIoman()
++    {
++        closeAll();
++    }
++
++    void IopIoman::closeAll()
++    {
++        for (auto &[fd, file] : m_files)
++        {
++            (void)fd;
++            if (file.handle != 0u)
++                m_host.closeHostFile(file.handle);
++        }
++        m_files.clear();
++        m_nextFd = 3;
+     }
+ 
+     void IopIoman::reset()
+     {
+         m_devices.clear();
++        closeAll();
++    }
++
++    int32_t IopIoman::open(uint32_t pathAddress, uint32_t flags)
++    {
++        const std::string guestPath = m_memory.readString(pathAddress, 256u);
++        if (guestPath.empty())
++            return -kEINVAL;
++        if ((flags & kOpenAccessMask) != kOpenReadOnly)
++        {
++            m_host.log(LogLevel::Warning, "[IOP ioman] open(\"" + guestPath + "\") for writing is not supported");
++            return -kEACCES;
++        }
++        if (m_files.size() >= kMaxFiles)
++            return -kEMFILE;
++
++        const std::string hostPath = m_host.translateGuestPath(guestPath);
++        const uint64_t handle = hostPath.empty() ? 0u : m_host.openHostFile(hostPath);
++        if (handle == 0u)
++        {
++            m_host.log(LogLevel::Warning, "[IOP ioman] open(\"" + guestPath + "\") failed" +
++                                              (hostPath.empty() ? std::string(" (no host path)") : " (" + hostPath + ")"));
++            return -kENOENT;
++        }
++        uint64_t size = 0u;
++        (void)m_host.hostFileSize(handle, size);
++
++        int32_t fd = m_nextFd;
++        while (m_files.count(fd) != 0u)
++            fd = fd >= 0x7FFF ? 3 : fd + 1;
++        m_nextFd = fd >= 0x7FFF ? 3 : fd + 1;
++        m_files[fd] = File{handle, size, 0u, guestPath};
++
++        std::ostringstream out;
++        out << "[IOP ioman] open(\"" << guestPath << "\") -> fd " << fd << " (" << size << " bytes)";
++        m_host.log(LogLevel::Debug, out.str());
++        return fd;
++    }
++
++    int32_t IopIoman::close(int32_t fd)
++    {
++        const auto it = m_files.find(fd);
++        if (it == m_files.end())
++            return -kEBADF;
++        if (it->second.handle != 0u)
++            m_host.closeHostFile(it->second.handle);
++        m_files.erase(it);
++        return 0;
++    }
++
++    int32_t IopIoman::read(int32_t fd, uint32_t buffer, uint32_t size)
++    {
++        const auto it = m_files.find(fd);
++        if (it == m_files.end())
++            return -kEBADF;
++        File &file = it->second;
++        if (static_cast<int32_t>(size) < 0)
++            return -kEINVAL;
++        const uint64_t available = file.position < file.size ? file.size - file.position : 0u;
++        uint32_t remaining = static_cast<uint32_t>(std::min<uint64_t>(size, available));
++
++        std::vector<uint8_t> chunk;
++        uint32_t done = 0u;
++        while (remaining != 0u)
++        {
++            const uint32_t wanted = std::min(remaining, kReadChunk);
++            chunk.resize(wanted);
++            size_t got = 0u;
++            if (!m_host.readHostFile(file.handle, file.position, chunk.data(), wanted, got))
++                return done != 0u ? static_cast<int32_t>(done) : -kEIO;
++            if (got == 0u)
++                break;
++            if (!m_memory.writeRam(buffer + done, chunk.data(), got))
++                return done != 0u ? static_cast<int32_t>(done) : -kEINVAL;
++            file.position += got;
++            done += static_cast<uint32_t>(got);
++            remaining -= static_cast<uint32_t>(got);
++            if (got < wanted)
++                break;
++        }
++        return static_cast<int32_t>(done);
++    }
++
++    int32_t IopIoman::write(int32_t fd, uint32_t buffer, uint32_t size)
++    {
++        if (fd == 1 || fd == 2)
++        {
++            std::string text(std::min<uint32_t>(size, 4096u), '\0');
++            if (!m_memory.readRam(buffer, text.data(), text.size()))
++                return -kEINVAL;
++            while (!text.empty() && (text.back() == '\n' || text.back() == '\0'))
++                text.pop_back();
++            m_host.log(LogLevel::Info, "[IOP stdout] " + text);
++            return static_cast<int32_t>(size);
++        }
++        return m_files.count(fd) != 0u ? -kEACCES : -kEBADF;
++    }
++
++    int32_t IopIoman::lseek(int32_t fd, int32_t offset, uint32_t whence)
++    {
++        const auto it = m_files.find(fd);
++        if (it == m_files.end())
++            return -kEBADF;
++        File &file = it->second;
++        int64_t base = 0;
++        switch (whence)
++        {
++        case 0: base = 0; break;                                       // SEEK_SET
++        case 1: base = static_cast<int64_t>(file.position); break;     // SEEK_CUR
++        case 2: base = static_cast<int64_t>(file.size); break;         // SEEK_END
++        default: return -kEINVAL;
++        }
++        const int64_t target = base + offset;
++        if (target < 0 || target > 0x7FFFFFFFLL)
++            return -kEINVAL;
++        file.position = static_cast<uint64_t>(target);
++        return static_cast<int32_t>(target);
+     }
+ 
+     bool IopIoman::dispatchImport(uint16_t ordinal, IopCpuState &cpu, IopGuestExecutor &executor)
+@@ -29,6 +180,21 @@ namespace ps2x::iop::detail
+ 
+         switch (ordinal)
+         {
++        case 4: // open(name, flags, mode)
++            setV0(static_cast<uint32_t>(open(a0, cpu.gpr[5])));
++            return true;
++        case 5: // close(fd)
++            setV0(static_cast<uint32_t>(close(static_cast<int32_t>(a0))));
++            return true;
++        case 6: // read(fd, buf, size)
++            setV0(static_cast<uint32_t>(read(static_cast<int32_t>(a0), cpu.gpr[5], cpu.gpr[6])));
++            return true;
++        case 7: // write(fd, buf, size)
++            setV0(static_cast<uint32_t>(write(static_cast<int32_t>(a0), cpu.gpr[5], cpu.gpr[6])));
++            return true;
++        case 8: // lseek(fd, offset, whence)
++            setV0(static_cast<uint32_t>(lseek(static_cast<int32_t>(a0), static_cast<int32_t>(cpu.gpr[5]), cpu.gpr[6])));
++            return true;
+         case 20: // AddDrv
+         {
+             if (a0 == 0u || m_devices.size() >= kMaxDevices)
+diff --git a/ps2xIOP/src/emulator/imports/iop_ioman.h b/ps2xIOP/src/emulator/imports/iop_ioman.h
+index 182f786..11c5403 100644
+--- a/ps2xIOP/src/emulator/imports/iop_ioman.h
++++ b/ps2xIOP/src/emulator/imports/iop_ioman.h
+@@ -1,9 +1,15 @@
+ #pragma once
+ 
+ #include <cstdint>
++#include <map>
+ #include <string>
+ #include <vector>
+ 
++namespace ps2x::iop
++{
++    class IopHost;
++}
++
+ namespace ps2x::iop::detail
+ {
+     struct IopCpuState;
+@@ -13,7 +19,8 @@ namespace ps2x::iop::detail
+     class IopIoman
+     {
+     public:
+-        explicit IopIoman(IopMemory &memory) noexcept;
++        IopIoman(IopHost &host, IopMemory &memory) noexcept;
++        ~IopIoman();
+ 
+         void reset();
+         [[nodiscard]] bool dispatchImport(uint16_t ordinal, IopCpuState &cpu, IopGuestExecutor &executor);
+@@ -26,7 +33,28 @@ namespace ps2x::iop::detail
+             std::string name;
+         };
+ 
++        // Read-only files opened through ioman open() (cdrom0:, host0: ...),
++        // served by the host's file API. Descriptors start at 3 (0-2 are
++        // the console streams).
++        struct File
++        {
++            uint64_t handle = 0u;
++            uint64_t size = 0u;
++            uint64_t position = 0u;
++            std::string path;
++        };
++
++        int32_t open(uint32_t pathAddress, uint32_t flags);
++        int32_t close(int32_t fd);
++        int32_t read(int32_t fd, uint32_t buffer, uint32_t size);
++        int32_t write(int32_t fd, uint32_t buffer, uint32_t size);
++        int32_t lseek(int32_t fd, int32_t offset, uint32_t whence);
++        void closeAll();
++
++        IopHost &m_host;
+         IopMemory &m_memory;
+         std::vector<Device> m_devices;
++        std::map<int32_t, File> m_files;
++        int32_t m_nextFd = 3;
+     };
+ }
+diff --git a/ps2xIOP/src/emulator/iop_emulator.cpp b/ps2xIOP/src/emulator/iop_emulator.cpp
+index 2ae0862..0b5c810 100644
+--- a/ps2xIOP/src/emulator/iop_emulator.cpp
++++ b/ps2xIOP/src/emulator/iop_emulator.cpp
+@@ -23,6 +23,7 @@
+ #include <optional>
+ #include <span>
+ #include <sstream>
++#include <unordered_map>
+ #include <utility>
+ 
+ namespace ps2x::iop::detail
+@@ -105,7 +106,7 @@ namespace ps2x::iop::detail
+               heaplib(memory),
+               intrman(memory),
+               timrman(),
+-              ioman(memory),
++              ioman(host, memory),
+               cpuCore(memory),
+               imports(memory),
+               loadcore(memory, imports)
+@@ -124,6 +125,7 @@ namespace ps2x::iop::detail
+             intrman.reset();
+             timrman.reset();
+             ioman.reset();
++            unhandledImportCounts.clear();
+             pendingDmaInterrupts.clear();
+             pendingGuestCallbacks.clear();
+             nextModuleId = 1;
+@@ -350,10 +352,18 @@ namespace ps2x::iop::detail
+                 return ImportDisposition::JumpToGuest;
+             }
+ 
+-            std::ostringstream out;
+-            out << "[IOP] unhandled import " << call.library << ':' << call.ordinal
+-                << " version=0x" << std::hex << call.version << " pc=0x" << cpu.pc;
+-            log(LogLevel::Warning, out.str());
++            // Rate-limited: a driver polling a missing import would otherwise
++            // flood the log (first 8 per import, then every 100000th).
++            const uint64_t count = ++unhandledImportCounts[call.library + ':' + std::to_string(call.ordinal)];
++            if (count <= 8u || count % 100000u == 0u)
++            {
++                std::ostringstream out;
++                out << "[IOP] unhandled import " << call.library << ':' << call.ordinal
++                    << " version=0x" << std::hex << call.version << " pc=0x" << cpu.pc;
++                if (count > 8u)
++                    out << std::dec << " (x" << count << ")";
++                log(LogLevel::Warning, out.str());
++            }
+             setV0(0);
+             return ImportDisposition::Missing;
+         }
+@@ -752,6 +762,7 @@ namespace ps2x::iop::detail
+         IopIntrman intrman;
+         IopTimrman timrman;
+         IopIoman ioman;
++        std::unordered_map<std::string, uint64_t> unhandledImportCounts;
+         IopCpuCore cpuCore;
+         IopImportRegistry imports;
+         IopLoadcore loadcore;
+diff --git a/ps2xIOP/tests/iop_import_tests.cpp b/ps2xIOP/tests/iop_import_tests.cpp
+index 3035618..a976d98 100644
+--- a/ps2xIOP/tests/iop_import_tests.cpp
++++ b/ps2xIOP/tests/iop_import_tests.cpp
+@@ -3,6 +3,7 @@
+ #include "emulator/core/iop_memory.h"
+ #include "emulator/imports/iop_cdvd.h"
+ #include "emulator/imports/iop_imports.h"
++#include "emulator/imports/iop_ioman.h"
+ #include "emulator/imports/iop_loadcore.h"
+ #include "emulator/imports/iop_timrman.h"
+ #include "emulator/services/iop_rpc.h"
+@@ -14,6 +15,8 @@
+ #include <iostream>
+ #include <fstream>
+ #include <filesystem>
++#include <cstdio>
++#include <map>
+ #include <string>
+ #include <string_view>
+ 
+@@ -66,6 +69,76 @@ namespace
+         std::filesystem::path root;
+     };
+ 
++    // Serves "cdrom0:\\NAME;1" from a host directory with real files.
++    class FileHost final : public NullHost
++    {
++    public:
++        explicit FileHost(std::filesystem::path rootPath) : root(std::move(rootPath)) {}
++        ~FileHost() override
++        {
++            for (auto &[h, f] : files)
++                std::fclose(f);
++        }
++        std::string translateGuestPath(std::string_view path) const override
++        {
++            std::string p(path);
++            const auto colon = p.find(':');
++            if (colon == std::string::npos || p.compare(0, colon, "cdrom0") != 0)
++                return {};
++            p = p.substr(colon + 1);
++            if (const auto semi = p.find(';'); semi != std::string::npos)
++                p.resize(semi);
++            while (!p.empty() && (p[0] == '\\' || p[0] == '/'))
++                p.erase(0, 1);
++            for (char &c : p)
++                if (c == '\\')
++                    c = '/';
++            return (root / p).string();
++        }
++        uint64_t openHostFile(std::string_view path) override
++        {
++            std::FILE *f = std::fopen(std::string(path).c_str(), "rb");
++            if (!f)
++                return 0u;
++            files[++next] = f;
++            ++opened;
++            return next;
++        }
++        bool hostFileSize(uint64_t h, uint64_t &size) const override
++        {
++            const auto it = files.find(h);
++            if (it == files.end())
++                return false;
++            const long cur = std::ftell(it->second);
++            std::fseek(it->second, 0, SEEK_END);
++            size = static_cast<uint64_t>(std::ftell(it->second));
++            std::fseek(it->second, cur, SEEK_SET);
++            return true;
++        }
++        bool readHostFile(uint64_t h, uint64_t offset, void *dst, size_t size, size_t &got) override
++        {
++            got = 0u;
++            const auto it = files.find(h);
++            if (it == files.end() || std::fseek(it->second, static_cast<long>(offset), SEEK_SET) != 0)
++                return false;
++            got = std::fread(dst, 1, size, it->second);
++            return true;
++        }
++        void closeHostFile(uint64_t h) override
++        {
++            const auto it = files.find(h);
++            if (it != files.end())
++            {
++                std::fclose(it->second);
++                files.erase(it);
++            }
++        }
++        std::filesystem::path root;
++        std::map<uint64_t, std::FILE *> files;
++        uint64_t next = 0u;
++        int opened = 0;
++    };
++
+     class RecordingExecutor final : public IopGuestExecutor
+     {
+     public:
+@@ -328,8 +401,92 @@ namespace
+     }
+ }
+ 
++namespace
++{
++    // The open / lseek / read-in-chunks / close sequence IREMSND2 (Raw Danger's
++    // sound driver) uses to stream sound banks from cdrom0:.
++    bool testIomanFileIo()
++    {
++        const auto suffix = std::to_string(
++            static_cast<unsigned long long>(std::chrono::steady_clock::now().time_since_epoch().count()));
++        const std::filesystem::path root = std::filesystem::temp_directory_path() / ("ps2x-iop-ioman-" + suffix);
++        std::error_code error;
++        std::filesystem::create_directories(root / "SE", error);
++        std::vector<uint8_t> data(300000u);
++        for (size_t i = 0; i < data.size(); ++i)
++            data[i] = static_cast<uint8_t>(i * 7u + (i >> 9));
++        {
++            std::ofstream f(root / "SE" / "COMMON.BD", std::ios::binary);
++            f.write(reinterpret_cast<const char *>(data.data()), static_cast<std::streamsize>(data.size()));
++        }
++
++        bool ok = true;
++        {
++            FileHost host(root);
++            IopMemory memory;
++            RecordingExecutor executor;
++            IopIoman ioman(host, memory);
++            ioman.reset();
++            const auto call = [&](uint16_t ordinal, uint32_t a0, uint32_t a1, uint32_t a2)
++            {
++                IopCpuState cpu{};
++                cpu.gpr[4] = a0;
++                cpu.gpr[5] = a1;
++                cpu.gpr[6] = a2;
++                ok = expect(ioman.dispatchImport(ordinal, cpu, executor), "ioman import not handled") && ok;
++                return static_cast<int32_t>(cpu.gpr[2]);
++            };
++            constexpr uint32_t pathAddress = 0x2000u;
++            constexpr uint32_t buffer = 0x40000u;
++            const char path[] = "cdrom0:\\SE\\COMMON.BD;1";
++            (void)memory.writeRam(pathAddress, path, sizeof(path));
++
++            const int32_t fd = call(4, pathAddress, 1u, 0x1FFu);
++            ok = expect(fd >= 3, "open did not return a descriptor") && ok;
++            ok = expect(call(8, static_cast<uint32_t>(fd), 0x1000u, 0u) == 0x1000, "lseek SEEK_SET") && ok;
++            // read in 0x8000-byte chunks like IREMSND2's loop, past the end of the file
++            uint32_t total = 0u;
++            for (int guard = 0; guard < 64; ++guard)
++            {
++                const int32_t got = call(6, static_cast<uint32_t>(fd), buffer + total, 0x8000u);
++                ok = expect(got >= 0, "read failed") && ok;
++                if (got <= 0)
++                    break;
++                total += static_cast<uint32_t>(got);
++            }
++            ok = expect(total == data.size() - 0x1000u, "read did not stop at end of file") && ok;
++            std::vector<uint8_t> back(total);
++            ok = expect(memory.readRam(buffer, back.data(), back.size()), "IOP RAM readback") && ok;
++            ok = expect(std::memcmp(back.data(), data.data() + 0x1000, total) == 0, "read returned the wrong bytes") && ok;
++            ok = expect(call(8, static_cast<uint32_t>(fd), 0u, 2u) == static_cast<int32_t>(data.size()), "lseek SEEK_END") && ok;
++            ok = expect(call(8, static_cast<uint32_t>(fd), static_cast<uint32_t>(-16), 1u) ==
++                            static_cast<int32_t>(data.size()) - 16, "lseek SEEK_CUR") && ok;
++            ok = expect(call(5, static_cast<uint32_t>(fd), 0u, 0u) == 0, "close") && ok;
++            ok = expect(call(5, static_cast<uint32_t>(fd), 0u, 0u) == -9, "double close must be EBADF") && ok;
++            ok = expect(call(6, static_cast<uint32_t>(fd), buffer, 16u) == -9, "read after close must be EBADF") && ok;
++
++            const char missing[] = "cdrom0:\\SE\\NOPE.BD;1";
++            (void)memory.writeRam(pathAddress, missing, sizeof(missing));
++            ok = expect(call(4, pathAddress, 1u, 0x1FFu) == -2, "missing file must be ENOENT") && ok;
++            (void)memory.writeRam(pathAddress, path, sizeof(path));
++            ok = expect(call(4, pathAddress, 0x202u, 0x1FFu) == -13, "write open must be refused") && ok;
++            ok = expect(host.files.empty(), "host handles leaked") && ok;
++
++            // reset() closes anything still open
++            const int32_t fd2 = call(4, pathAddress, 1u, 0u);
++            ok = expect(fd2 >= 3 && host.files.size() == 1u, "reopen") && ok;
++            ioman.reset();
++            ok = expect(host.files.empty(), "reset did not close open files") && ok;
++        }
++        std::filesystem::remove_all(root, error);
++        return ok;
++    }
++}
++
+ int main()
+ {
++    if (!testIomanFileIo())
++        return 1;
+     if (!testLoadcoreRebootLibraryMode() || !testCdvdSpecialControl() || !testCdvdSearchFile() ||
+         !testTimrmanPeriodicCallback())
+         return 1;

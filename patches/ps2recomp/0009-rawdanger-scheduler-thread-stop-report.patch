@@ -1,0 +1,92 @@
+ps2xRuntime EE scheduler: when a guest thread stops (its context returns to pc 0
+with no interrupt invocation pending, or ExitThread/ExitDeleteThread), log the
+thread, its pc/ra/sp/v0 and the last 24 PCs the scheduler dispatched for it.
+Diagnostic only; no behaviour change.
+
+diff --git a/ps2xRuntime/src/lib/Kernel/EeScheduler.cpp b/ps2xRuntime/src/lib/Kernel/EeScheduler.cpp
+index c5e31c4..3d58a8c 100644
+--- a/ps2xRuntime/src/lib/Kernel/EeScheduler.cpp
++++ b/ps2xRuntime/src/lib/Kernel/EeScheduler.cpp
+@@ -8,6 +8,55 @@
+ #include <cstring>
+ #include <limits>
+ #include <stdexcept>
++#include <cstdio>
++#include <unordered_map>
++
++namespace
++{
++    // Last guest PCs the scheduler dispatched per thread, printed when a thread
++    // stops so "the game just went quiet" has a cause (patch 0009).
++    struct DispatchHistory
++    {
++        static constexpr unsigned kSize = 24u;
++        uint32_t pc[kSize]{};
++        uint32_t ra[kSize]{};
++        unsigned next = 0u;
++        unsigned count = 0u;
++        void push(uint32_t p, uint32_t r)
++        {
++            pc[next] = p;
++            ra[next] = r;
++            next = (next + 1u) % kSize;
++            if (count < kSize)
++                ++count;
++        }
++    };
++
++    std::unordered_map<int, DispatchHistory> &dispatchHistory()
++    {
++        static std::unordered_map<int, DispatchHistory> history;
++        return history;
++    }
++
++    void reportThreadStop(int id, const char *why, const R5900Context &ctx)
++    {
++        std::fprintf(stderr, "[ee-scheduler] thread %d stopped: %s (pc=0x%x ra=0x%x sp=0x%x v0=0x%x)\n", id, why,
++                     ctx.pc, getRegU32(&ctx, 31), getRegU32(&ctx, 29), getRegU32(&ctx, 2));
++        auto it = dispatchHistory().find(id);
++        if (it != dispatchHistory().end() && it->second.count)
++        {
++            const DispatchHistory &h = it->second;
++            std::fprintf(stderr, "[ee-scheduler]   last dispatches (oldest first):");
++            for (unsigned k = 0; k < h.count; ++k)
++            {
++                const unsigned i = (h.next + DispatchHistory::kSize - h.count + k) % DispatchHistory::kSize;
++                std::fprintf(stderr, " 0x%x(ra=0x%x)", h.pc[i], h.ra[i]);
++            }
++            std::fprintf(stderr, "\n");
++        }
++        std::fflush(stderr);
++    }
++}
+ 
+ namespace
+ {
+@@ -246,6 +295,8 @@ void EeScheduler::run()
+                 }
+                 continue;
+             }
++            if (running->id > 0)
++                reportThreadStop(running->id, "returned to pc 0", context);
+             makeDormant(*running);
+             m_currentThreadId = 0;
+             copyMainContextToRuntime();
+@@ -295,6 +346,8 @@ void EeScheduler::run()
+         try
+         {
+             m_insideInterrupt = !running->invocations.empty() && running->invocations.back().kind == GuestInvocationKind::Interrupt;
++            if (running->id > 0 && running->invocations.empty())
++                dispatchHistory()[running->id].push(context.pc, getRegU32(&context, 31));
+             m_guestExecuting.store(true, std::memory_order_release);
+             function(m_rdram, &context, &m_runtime);
+             m_guestExecuting.store(false, std::memory_order_release);
+@@ -515,6 +568,8 @@ int EeScheduler::startThread(int id, uint32_t arg, const R5900Context &caller, b
+     assert(exiting != nullptr);
+     const int id = exiting->id;
+     const uint32_t ownedStack = deleteThreadRecord && exiting->ownsStack ? exiting->stack : 0u;
++    if (id > 0)
++        reportThreadStop(id, deleteThreadRecord ? "ExitDeleteThread" : "ExitThread", exiting->activeContext());
+     makeDormant(*exiting);
+     m_currentThreadId = 0;
+     if (deleteThreadRecord && id != kMainThreadId)

@@ -1,0 +1,485 @@
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+index 3ffedbd..bfde299 100644
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -543,7 +543,7 @@ if(PS2_GENERATED)
+     endif()
+     find_package(SDL2 QUIET)
+     if(SDL2_FOUND AND NOT EMSCRIPTEN)
+-        target_sources(ps2run PRIVATE host/window.cpp host/keymap.cpp host/quickmenu.cpp host/stretch.cpp)
++        target_sources(ps2run PRIVATE host/window.cpp host/keymap.cpp host/quickmenu.cpp host/stretch.cpp host/recomp_options.cpp)
+         target_compile_definitions(ps2run PRIVATE PS2_WINDOW)
+         if(WIN32 AND PS2_WIN_STATIC AND TARGET SDL2::SDL2-static)
+             target_link_libraries(ps2run PRIVATE SDL2::SDL2-static)
+@@ -567,7 +567,7 @@ if(PS2_GENERATED)
+             set_target_properties(ps2run PROPERTIES WIN32_EXECUTABLE ON)
+         endif()
+         # the game controller path tested with SDL's virtual controllers, no game needed: ninja -C build/native-<game> ps2padtest
+-        add_executable(ps2padtest EXCLUDE_FROM_ALL host/pad_test.cpp host/window.cpp host/keymap.cpp host/quickmenu.cpp host/stretch.cpp)
++        add_executable(ps2padtest EXCLUDE_FROM_ALL host/pad_test.cpp host/window.cpp host/keymap.cpp host/quickmenu.cpp host/stretch.cpp host/recomp_options.cpp)
+         target_include_directories(ps2padtest PRIVATE runtime/src)
+         target_link_libraries(ps2padtest PRIVATE ps2runtime SDL2::SDL2)
+     endif()
+diff --git a/host/quickmenu.cpp b/host/quickmenu.cpp
+index 2857114..d0c120a 100644
+--- a/host/quickmenu.cpp
++++ b/host/quickmenu.cpp
+@@ -107,11 +107,11 @@ constexpr const char *kFont[95] = {
+     "..... ..... .#... #.#.# ...#. ..... ..... .....",  // ~
+ };
+ 
+-constexpr int kEntries = 10;
+-constexpr Command kCommands[kEntries] = {Command::resume,   Command::save,       Command::load, Command::look,        Command::scale,
++constexpr int kEntries = 11;
++constexpr Command kCommands[kEntries] = {Command::resume,   Command::save,       Command::load, Command::recomp, Command::look,        Command::scale,
+                                          Command::sharp_2d, Command::fullscreen, Command::keys, Command::change_keys, Command::quit};
+ // the program's key for the same thing, shown dim at the right end of the entry
+-constexpr const char *kKeys[kEntries] = {"F1", "F5", "F8", "F2", "", "", "F11", "", "", ""};
++constexpr const char *kKeys[kEntries] = {"F1", "F5", "F8", "F3", "F2", "", "", "F11", "", "", ""};
+ constexpr int kVisibleRows = 11;  // lines of the keys page shown at once; the page scrolls
+ constexpr int kKeysPageChars = 58;
+ 
+@@ -145,6 +145,7 @@ std::string entry_text(int i, const Values &v, bool quit_armed) {
+     case Command::resume: return "Resume";
+     case Command::save: return "Quick save";
+     case Command::load: return "Quick load";
++    case Command::recomp: return "Recomp options";
+     case Command::look: return "Picture look:  < " + v.look + " >";
+     case Command::scale: {
+         const std::string now = std::to_string(v.scale_now) + "x";
+@@ -167,7 +168,7 @@ std::string entry_text(int i, const Values &v, bool quit_armed) {
+ 
+ }  // namespace
+ 
+-int Menu::count() const { return page_ == Page::keys ? key_rows_ + 2 : kEntries; }
++int Menu::count() const { return page_ == Page::keys ? key_rows_ + 2 : page_ == Page::recomp ? recomp_rows_ + 1 : kEntries; }
+ 
+ void Menu::fit() {
+     const int shown = std::min(key_rows_, kVisibleRows);
+@@ -179,7 +180,7 @@ void Menu::fit() {
+ }
+ 
+ bool Menu::back() {
+-    if (page_ != Page::keys) return false;
++    if (page_ == Page::main) return false;
+     page_ = Page::main;
+     selected_ = main_selected_;
+     capturing_ = false;
+@@ -206,6 +207,11 @@ void Menu::move(int delta) {
+ }
+ 
+ Command Menu::choose() {
++    if (page_ == Page::recomp) {
++        if (selected_ < recomp_rows_) return Command::recomp_toggle;
++        back();
++        return Command::none;
++    }
+     if (page_ == Page::keys) {
+         if (selected_ < key_rows_) {
+             capturing_ = true;
+@@ -223,6 +229,12 @@ Command Menu::choose() {
+         return Command::none;
+     }
+     const Command c = kCommands[selected_];
++    if (c == Command::recomp) {
++        main_selected_ = selected_;
++        page_ = Page::recomp;
++        selected_ = 0;
++        return c;
++    }
+     if (c == Command::change_keys) {
+         main_selected_ = selected_;
+         page_ = Page::keys;
+@@ -239,12 +251,17 @@ Command Menu::choose() {
+ }
+ 
+ Command Menu::side() const {
+-    if (page_ == Page::keys) return Command::none;
++    if (page_ != Page::main) return Command::none;
+     const Command c = kCommands[selected_];
+     return c == Command::look || c == Command::scale || c == Command::sharp_2d || c == Command::fullscreen ? c : Command::none;
+ }
+ 
+ bool Menu::select_at(int x, int y) {
++    if (page_ == Page::recomp) {
++        if (entry_h_ <= 0 || x < entry_x_ || x >= entry_x_ + entry_w_ || y < rows_y_ || y >= rows_y_ + (recomp_rows_ + 1) * entry_h_) return false;
++        selected_ = (y - rows_y_) / entry_h_;
++        return true;
++    }
+     if (page_ == Page::keys) {
+         if (capturing_ || entry_h_ <= 0 || x < entry_x_ || x >= entry_x_ + entry_w_) return false;
+         int now = -1;
+@@ -327,7 +344,67 @@ void Menu::draw_keys(int window_width, int window_height, const Values &values,
+     c.text(text_x, y, s, kFixed, kDim);
+ }
+ 
++// The Recomp options page: the game's patches, the live ones switchable here (and in RawDangerPC.exe, same file).
++void Menu::draw_recomp(int window_width, int window_height, const Values &values, Picture &out) {
++    static const std::string kTitleText = "Recomp options - rawdanger-recomp", kHint = "Enter / Cross: switch     Esc / Circle: back",
++                             kBuilt = "Built in: chosen in RawDangerPC.exe, changed by building again";
++    recomp_rows_ = static_cast<int>(values.recomp_rows.size());
++    const int n = recomp_rows_;
++    const int pad = 8, bar_h = 12, bar_pad = 5, chars = 62;
++    const int units_w = 2 * pad + 2 * bar_pad + chars * 6;
++    const int units_h = pad + 8 + 12 + (n + 1) * bar_h + 3 + 11 + 12 + 12 + 12 + 8 + pad;
++    const int s = std::clamp(std::min(window_height * 4 / 5 / units_h, window_width * 23 / 25 / units_w), 1, 6);
++    out.width = units_w * s;
++    out.height = units_h * s;
++    out.x = std::max(0, (window_width - out.width) / 2);
++    out.y = std::max(0, (window_height - out.height) / 2);
++    out.rgba.assign(static_cast<std::size_t>(out.width) * out.height, kPanel);
++    Canvas c{out};
++    const int frame = std::max(1, s / 2);
++    c.fill(0, 0, out.width, frame, kFrame);
++    c.fill(0, out.height - frame, out.width, frame, kFrame);
++    c.fill(0, 0, frame, out.height, kFrame);
++    c.fill(out.width - frame, 0, frame, out.height, kFrame);
++    const int text_x = (pad + bar_pad) * s, inner_w = out.width - 2 * pad * s;
++    int y = pad * s;
++    c.text(text_x, y, s, kTitleText, kTitle);
++    y += 8 * s + 6 * s;
++    c.fill(pad * s, y, inner_w, std::max(1, s / 2), kFrame);
++    y += 6 * s;
++    entry_x_ = out.x + pad * s;
++    entry_w_ = inner_w;
++    entry_h_ = bar_h * s;
++    rows_y_ = out.y + y;
++    const auto line = [&](int index, const std::string &left, const std::string &right, bool dim) {
++        const bool lit = index == selected_;
++        if (lit) c.fill(pad * s, y, inner_w, bar_h * s, kBar);
++        const std::uint32_t color = lit ? kBarText : dim ? kDim : kText;
++        c.text(text_x, y + 2 * s, s, left.size() > 40 ? left.substr(0, 37) + "..." : left, color);
++        if (!right.empty()) c.text(out.width - text_x - static_cast<int>(right.size()) * 6 * s + s, y + 2 * s, s, right, lit ? kBarDim : color);
++        y += bar_h * s;
++    };
++    if (n == 0) c.text(text_x, y + 2 * s, s, "No options file (the game was not built by RawDangerPC.exe)", kDim);
++    for (int r = 0; r < n; ++r) {
++        const Values::RecompRow &row = values.recomp_rows[r];
++        line(r, row.label, row.state, !row.live);
++    }
++    if (n == 0) y += bar_h * s;
++    line(n, "Back", "", false);
++    y += 3 * s;
++    c.fill(pad * s, y, inner_w, std::max(1, s / 2), kFrame);
++    y += 6 * s;
++    c.text(text_x, y, s, values.recomp_note.size() > 62 ? values.recomp_note.substr(0, 59) + "..." : values.recomp_note, kTitle);
++    y += 12 * s;
++    c.text(text_x, y, s, kHint, kDim);
++    y += 12 * s;
++    c.text(text_x, y, s, kBuilt, kDim);
++}
++
+ void Menu::draw(int window_width, int window_height, const Values &values, Picture &out) {
++    if (page_ == Page::recomp) {
++        draw_recomp(window_width, window_height, values, out);
++        return;
++    }
+     if (page_ == Page::keys) {
+         draw_keys(window_width, window_height, values, out);
+         return;
+diff --git a/host/quickmenu.hpp b/host/quickmenu.hpp
+index 0d7f486..7f2773b 100644
+--- a/host/quickmenu.hpp
++++ b/host/quickmenu.hpp
+@@ -16,7 +16,9 @@ enum class Command {
+     none, resume, save, load, look, scale, sharp_2d, fullscreen, keys, quit,
+     change_keys,   // the main menu's entry that opens the keys page (the menu switches page by itself)
+     key_edit,      // keys page: the highlighted line waits for a key (capturing() is true from now on)
+-    key_defaults   // keys page: put back the default keys (asked once, like Quit)
++    key_defaults,  // keys page: put back the default keys (asked once, like Quit)
++    recomp,        // rawdanger-recomp: the main menu's entry that opens the Recomp options page
++    recomp_toggle  // Recomp options page: switch the highlighted option (recomp_row())
+ };
+ 
+ // What the entries show; the window fills it in before each drawing.
+@@ -34,6 +36,13 @@ struct Values {
+     };
+     std::vector<KeyRow> key_rows;
+     std::string key_note;
++    // the Recomp options page (rawdanger-recomp): one row per patch of the game
++    struct RecompRow {
++        std::string label, state;  // "Widescreen 16:9", "on" / "off" / "built in"
++        bool live = false;
++    };
++    std::vector<RecompRow> recomp_rows;
++    std::string recomp_note;
+ };
+ 
+ // The panel: straight (not premultiplied) RGBA, one std::uint32_t per pixel with red in the low byte, placed at x, y in window pixels.
+@@ -54,6 +63,10 @@ public:
+     bool select_at(int x, int y);
+     // --- the keys page (Change keys): the same panel, one line per button ---
+     bool on_keys_page() const { return page_ == Page::keys; }
++    bool on_recomp_page() const { return page_ == Page::recomp; }
++    void set_recomp_rows(int count) { recomp_rows_ = count; }
++    int recomp_row() const { return selected_; }
++    void show_recomp() { main_selected_ = 3; page_ = Page::recomp; selected_ = 0; }  // F3: straight to the Recomp options page
+     void set_key_rows(int count) { key_rows_ = count; }  // how many lines the page has (the window knows)
+     bool capturing() const { return capturing_; }        // a line waits for the next key or mouse button
+     int key_row() const { return selected_; }            // the highlighted line (a button of the controller, in the order of keys.ini)
+@@ -67,7 +80,9 @@ private:
+     bool open_ = false;
+     int selected_ = 0;
+     bool quit_armed_ = false;  // Quit was chosen once; the next Enter ends the game, anything else takes it back
+-    enum class Page { main, keys } page_ = Page::main;
++    enum class Page { main, keys, recomp } page_ = Page::main;
++    int recomp_rows_ = 0;
++    void draw_recomp(int window_width, int window_height, const Values &values, Picture &out);
+     int main_selected_ = 0;    // the main page's highlight while the keys page is shown
+     int key_rows_ = 0, top_ = 0;  // keys page: number of lines, first line shown
+     int keys_shown_ = 0;       // lines the last drawing showed
+diff --git a/host/recomp_options.cpp b/host/recomp_options.cpp
+new file mode 100644
+index 0000000..24b83d4
+--- /dev/null
++++ b/host/recomp_options.cpp
+@@ -0,0 +1,131 @@
++#include "recomp_options.hpp"
++
++#include "ps2/memory.hpp"
++#include "ps2/system.hpp"
++
++#include <cstdio>
++#include <cstdlib>
++#include <fstream>
++#include <sstream>
++
++namespace recomp {
++namespace {
++
++std::vector<Section> g_sections;
++std::string g_path;
++bool g_loaded = false;
++
++std::string trim(const std::string &s) {
++    const auto a = s.find_first_not_of(" \t\r\n"), b = s.find_last_not_of(" \t\r\n");
++    return a == std::string::npos ? std::string() : s.substr(a, b - a + 1);
++}
++
++// Puts the section's words in (or back to the original values) in memory now, and in the patch list the game thread
++// writes every frame (patch=1 lines are written again at each frame, so the list has to say the same thing).
++void set_words(const Section &s, bool on) {
++    for (const Word &w : s.words) {
++        const std::uint32_t value = on ? w.patched : w.original;
++        for (ps2::Patch &p : ps2::g_options.patches)
++            if (p.address == w.address && p.bytes == 4) p.value = value;
++        ps2::st32(w.address, value);
++    }
++}
++
++void save() {
++    if (g_path.empty()) return;
++    // only the on= lines change: the rest of the file is the launcher's, so it is copied as it is
++    std::ifstream in(g_path);
++    if (!in) return;
++    std::stringstream out;
++    std::string line, section;
++    while (std::getline(in, line)) {
++        const std::string t = trim(line);
++        if (t.size() > 2 && t.front() == '[' && t.back() == ']') section = t.substr(1, t.size() - 2);
++        else if (t.rfind("on", 0) == 0 && t.find('=') != std::string::npos && trim(t.substr(0, t.find('='))) == "on") {
++            for (const Section &s : g_sections)
++                if (s.name == section) { line = std::string("on = ") + (s.on ? "1" : "0"); break; }
++        }
++        out << line << "\n";
++    }
++    in.close();
++    std::ofstream w(g_path, std::ios::trunc);
++    w << out.str();
++}
++
++}  // namespace
++
++bool loaded() { return g_loaded; }
++std::vector<Section> &sections() { return g_sections; }
++
++bool load(const char *path) {
++    g_sections.clear();
++    g_loaded = false;
++    if (!path || !*path) return false;
++    std::ifstream in(path);
++    if (!in) {
++        std::fprintf(stderr, "[recomp] no options file %s\n", path);
++        return false;
++    }
++    g_path = path;
++    std::string line;
++    Section *cur = nullptr;
++    while (std::getline(in, line)) {
++        const std::string t = trim(line);
++        if (t.empty() || t[0] == '#' || t[0] == ';') continue;
++        if (t.front() == '[' && t.back() == ']') {
++            g_sections.push_back(Section());
++            cur = &g_sections.back();
++            cur->name = cur->label = t.substr(1, t.size() - 2);
++            continue;
++        }
++        const auto eq = t.find('=');
++        if (!cur || eq == std::string::npos) continue;
++        const std::string k = trim(t.substr(0, eq)), v = trim(t.substr(eq + 1));
++        if (k == "label") cur->label = v;
++        else if (k == "live") cur->live = v == "1";
++        else if (k == "on") cur->on = v != "0";
++        else if (k == "aspect") cur->aspect169 = v == "16:9";
++        else if (k == "word") {
++            Word w;
++            unsigned a = 0, p = 0, o = 0;
++            if (std::sscanf(v.c_str(), "%x %x %x", &a, &p, &o) == 3) {
++                w.address = a; w.patched = p; w.original = o;
++                cur->words.push_back(w);
++            }
++        }
++    }
++    g_loaded = true;
++    std::fprintf(stderr, "[recomp] %zu options from %s\n", g_sections.size(), path);
++    return true;
++}
++
++void apply_startup() {
++    for (Section &s : g_sections) {
++        if (!s.live) continue;
++        // the patch list was read from patches.txt (everything the build turned on); a live section switched off keeps its
++        // original values instead, from the first frame on
++        for (const Word &w : s.words)
++            for (ps2::Patch &p : ps2::g_options.patches)
++                if (p.address == w.address && p.bytes == 4) p.value = s.on ? w.patched : w.original;
++        if (s.aspect169) ps2::g_options.widescreen = s.on;
++        std::fprintf(stderr, "[recomp] %s: %s\n", s.label.c_str(), s.on ? "on" : "off");
++    }
++}
++
++bool toggle(std::size_t index, std::string &note) {
++    if (index >= g_sections.size()) return false;
++    Section &s = g_sections[index];
++    if (!s.live) {
++        note = s.label + " is built into the game: change it in RawDangerPC.exe and build again";
++        return false;
++    }
++    s.on = !s.on;
++    set_words(s, s.on);
++    if (s.aspect169) ps2::g_options.widescreen = s.on;
++    save();
++    note = s.label + (s.on ? ": on" : ": off");
++    std::fprintf(stderr, "[recomp] %s switched %s in the game\n", s.label.c_str(), s.on ? "on" : "off");
++    return true;
++}
++
++}  // namespace recomp
+diff --git a/host/recomp_options.hpp b/host/recomp_options.hpp
+new file mode 100644
+index 0000000..0966444
+--- /dev/null
++++ b/host/recomp_options.hpp
+@@ -0,0 +1,38 @@
++#pragma once
++
++// rawdanger-recomp: the game's patches as options (the "Recomp options" page of the F1 menu). RawDangerPC.exe writes
++// games\<name>\recomp.ini when it builds a game and passes its path in PS2_RECOMP_OPTIONS; this side reads it, applies the
++// choices at the start, lets the player switch the live ones in the game, and writes the choices back, so the launcher
++// and the menu always show the same thing.
++//
++// recomp.ini, one [section] per patch section of the game's .pnach:
++//   label = Widescreen 16:9        what the menu shows
++//   live  = 1                      the patch only writes data: it can be switched while the game runs
++//   on    = 1                      the player's choice (live sections); built-in ones are always as built
++//   aspect = 16:9                  the section also sets the picture's shape
++//   word  = 003A83E0 43E00000 43A00000    address, patched value, original value (live sections)
++// Code patches (live = 0) are compiled into the game: the menu lists them as built in.
++
++#include <string>
++#include <vector>
++#include <cstdint>
++
++namespace recomp {
++
++struct Word {
++    std::uint32_t address = 0, patched = 0, original = 0;
++};
++
++struct Section {
++    std::string name, label;
++    bool live = false, on = true, aspect169 = false;
++    std::vector<Word> words;
++};
++
++bool load(const char *path);                // false when there is no file (then the menu page says so)
++void apply_startup();                       // the choices of the file, before the game starts
++std::vector<Section> &sections();
++bool toggle(std::size_t index, std::string &note);  // live sections: on <-> off now, written back to the file
++bool loaded();
++
++}  // namespace recomp
+diff --git a/host/window.cpp b/host/window.cpp
+index a7a9f20..395c74c 100644
+--- a/host/window.cpp
++++ b/host/window.cpp
+@@ -2,6 +2,8 @@
+ #include "big_stack_thread.hpp"
+ #include "stick_map.hpp"
+ 
++#include "recomp_options.hpp"
++
+ #include "ps2/system.hpp"
+ 
+ #ifdef _WIN32
+@@ -145,6 +147,7 @@ bool g_beep_on = true;
+ quickmenu::Menu g_menu;
+ std::atomic<bool> g_menu_hold{false};
+ std::string g_key_note;  // the keys page's message line: what the last change did
++std::string g_recomp_note;  // the Recomp options page's message line
+ bool g_menu_redraw = false;  // show the picture again: the panel changed while the game sends none
+ quickmenu::Picture g_menu_picture;
+ SDL_Texture *g_menu_texture = nullptr;  // the panel for the SDL renderer (PS2_SDL_RENDERER=1)
+@@ -912,6 +915,17 @@ void menu_paint(bool show_again = true) {
+             for (int a = 0; a < keymap::kChangeableCount; ++a) v.key_rows.push_back({keymap::action_label(a), keymap::keys_text(g_keys, a)});
+             v.key_note = g_key_note;
+         }
++        if (g_menu.on_recomp_page()) {
++            for (const recomp::Section &sec : recomp::sections()) {
++                quickmenu::Values::RecompRow row;
++                row.label = sec.label;
++                row.live = sec.live;
++                row.state = !sec.live ? "built in" : sec.on ? "on" : "off";
++                v.recomp_rows.push_back(row);
++            }
++            g_menu.set_recomp_rows(static_cast<int>(v.recomp_rows.size()));
++            v.recomp_note = g_recomp_note;
++        }
+         g_menu.draw(w, h, v, g_menu_picture);
+     } else {
+         quickmenu::Menu::draw_note(w, h, g_note_text, g_menu_picture);
+@@ -1070,6 +1084,13 @@ bool capture_event(const SDL_Event &e) {
+ void menu_command(quickmenu::Command c, int step) {
+     using quickmenu::Command;
+     switch (c) {
++    case Command::recomp: g_recomp_note = recomp::loaded() ? "" : "Built without RawDangerPC.exe: nothing to switch"; break;
++    case Command::recomp_toggle: {
++        const bool wide = ps2::g_options.widescreen;
++        recomp::toggle(static_cast<std::size_t>(g_menu.recomp_row()), g_recomp_note);
++        if (wide != ps2::g_options.widescreen) g_tex_w = 0;  // the SDL picture takes the new shape at the next frame
++        break;
++    }
+     case Command::none: menu_paint(); return;  // (Quit asked once: the entry shows the question)
+     case Command::resume: close_menu("Resume"); return;
+     case Command::save:
+@@ -1325,6 +1346,11 @@ void poll() {
+             if (is_help_key(e.key.keysym.scancode))
+                 show_key_card((std::string("key ") + SDL_GetScancodeName(e.key.keysym.scancode) + " went down").c_str());
+             if (e.key.keysym.scancode == SDL_SCANCODE_F2) cycle_look();
++            if (e.key.keysym.scancode == SDL_SCANCODE_F3) {  // rawdanger-recomp: the Recomp options page at once
++                open_menu("F3");
++                g_menu.show_recomp();
++                menu_command(quickmenu::Command::recomp, 1);
++            }
+             if (e.key.keysym.scancode == SDL_SCANCODE_F5) ps2::quick_request(ps2::QuickKey::save);
+             else if (e.key.keysym.scancode == SDL_SCANCODE_F8) ps2::quick_request(ps2::QuickKey::load);
+             else if (e.key.keysym.scancode == SDL_SCANCODE_F9) ps2::quick_request(ps2::QuickKey::report);
+@@ -2035,6 +2061,8 @@ void watchdog() {
+ #endif
+ 
+ int run_window(const std::function<int()> &emulate) {
++    // rawdanger-recomp: the game's patch options (games\\<name>\\recomp.ini, from RawDangerPC.exe), applied before the game starts
++    if (recomp::load(std::getenv("PS2_RECOMP_OPTIONS"))) recomp::apply_startup();
+     ps2::init_graphics();
+     g_gpu_present = attach_gpu();
+     std::fprintf(stderr, "[window] %s\n", g_gpu_present ? "presenting through WebGPU" : "presenting through SDL");

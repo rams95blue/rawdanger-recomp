@@ -1,0 +1,376 @@
+From 03b170e71937781adb82c770eb5ad3d9796f7b53 Mon Sep 17 00:00:00 2001
+From: rams95 <rams95@users.noreply.github.com>
+Date: Thu, 19 Nov 2026 23:58:57 +0000
+Subject: [PATCH] 0021-native-option-rows-host-calls.patch
+
+PC settings as real rows of the game's own Options list (title and in-game menu): Resolution, Anti-aliasing, Cutscene
+bars, Lens rain, Mouse look, between Sound and Screen color/brightness ('Adjust screen position' left out). The game's
+list engine draws them, moves its cursor over them, handles Left/Right and shows their help line: the host builds a new
+row table in memory the game does not use (0x80000), points the list at it, and the rows' get/set functions are host
+functions the game calls (ps2::register_host_call: guest addresses 0x0FF00000+ run host code). Their words are pictures
+in the game's own label sheet (texture override from tools/rd_options.py, sprites reached through the RAM mirror).
+PS2_NATIVE_OPTIONS=1, PS2_NATIVE_OPTIONS_ART=options_art.txt.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01QNLFPekqhcU2dj7B3Utmea
+---
+ host/window.cpp                   | 273 ++++++++++++++++++++++++++++++
+ runtime/include/ps2/generated.hpp |   8 +
+ runtime/src/dispatch.cpp          |  13 ++
+ 3 files changed, 294 insertions(+)
+
+diff --git a/host/window.cpp b/host/window.cpp
+index 198d4f3..27e6b86 100644
+--- a/host/window.cpp
++++ b/host/window.cpp
+@@ -55,6 +55,8 @@
+ #include "keymap.hpp"
+ #include "quickmenu.hpp"
+ #include "ps2/crash.hpp"
++#include "ps2/cpu.hpp"
++#include "ps2/generated.hpp"
+ #include "ps2/memory.hpp"
+ #include "ps2/hitch.hpp"
+ #include "ps2/os.hpp"
+@@ -1512,6 +1514,224 @@ void open_debug_scene(bool map_select) {
+     ps2::st32(d.address, g_scene_request);
+ }
+ 
++// ---------------------------------------------------------------------------------------------------------------------------------
++// rawdanger-recomp: PC rows inside the game's own Options list. The game's list (OPTION.BIN, the Options screen of the title and of
++// the in-game menu) draws its rows from a table of records (0x73C8A0, 0x11C bytes each): a value row has a get and a set function,
++// how many values it has, its help line, and the pictures it draws (label, the cursor's bar, each value white, and the picked
++// one dark on a glow). The game handles the cursor, Left / Right, the sounds and the help line itself. Here a new table is built in
++// memory the game does not use (0x80000-0xFFFFF), with its rows plus ours, and the list's table pointer and row count point to it:
++//   Vibration, Sound, [Resolution, Anti-aliasing, Cutscene bars, Lens rain, Mouse look], Screen color/brightness, Configuration,
++//   Default Setting, EXIT   ("Adjust screen position" is left out: a PC screen needs none)
++// Our rows' get and set functions are host functions the game calls (ps2::register_host_call); their words are pictures painted
++// into the game's own label sheet (tools/rd_options.py: a texture override of the sheet, rows 276-511 of its 512 x 512 upload),
++// placed by PS2_NATIVE_OPTIONS_ART. The rows are 30 pixels apart (50 in the game) to fit; each row carries its bar (the page's
++// seven fixed bars are moved off the screen). PS2_NATIVE_OPTIONS=1 turns it on (the launcher: US program and Enhanced Edition).
++namespace nopt {
++constexpr std::uint32_t kWorkPtr = 0x48F504u, kTable = 0x73C8A0u, kRows = 7, kStride = 0x11Cu, kBars = 0x73D3CCu, kSprites = 0x73C260u;
++constexpr std::uint32_t kFree = 0x80000u, kSpriteArea = kFree + 0x2000u, kHelpArea = kFree + 0x3000u, kTextArea = kFree + 0x3800u;
++constexpr std::uint32_t kGlow = 0x19, kBar = 0x29, kCursor = 0x34, kOnWhite = 0x11, kOffWhite = 0x12, kOnDark = 0x15, kOffDark = 0x16;
++constexpr int kTop = 72, kSpacing = 30;
++struct Art { int x = 0, y = 0, w = 0, h = 0; };
++struct Value { std::string art; std::uint32_t game_white = 0xFFFFFFFFu, game_dark = 0xFFFFFFFFu; };
++struct Row {
++    std::string label, help;
++    std::vector<Value> values;
++    std::function<int()> get;
++    std::function<void(int)> set;
++};
++std::map<std::string, Art> g_art;
++std::vector<Row> g_rows;
++std::atomic<int> g_pending[16];
++bool g_on = false;
++std::uint32_t g_table_built = 0;   // the count of rows of the table last built (0: none)
++std::vector<int> g_map_from_game;  // the game's row -> ours
++
++int row_value(int i) {
++    const int p = g_pending[i].load();
++    if (p >= 0) return p;
++    return g_rows[static_cast<std::size_t>(i)].get ? g_rows[static_cast<std::size_t>(i)].get() : 0;
++}
++template <int I> void host_get(ps2::Cpu &c) { c.r[2].sd[0] = I < static_cast<int>(g_rows.size()) ? row_value(I) : 0; }
++template <int I> void host_set(ps2::Cpu &c) {
++    if (I < static_cast<int>(g_rows.size())) g_pending[I] = static_cast<int>(c.r[4].w[0]);
++    c.r[2].sd[0] = 0;
++}
++template <int... I> void register_all(std::integer_sequence<int, I...>) {
++    (ps2::register_host_call(static_cast<std::uint32_t>(2 * I), &host_get<I>), ...);
++    (ps2::register_host_call(static_cast<std::uint32_t>(2 * I + 1), &host_set<I>), ...);
++}
++
++void load_art() {
++    const char *path = std::getenv("PS2_NATIVE_OPTIONS_ART");
++    if (!path || !*path) return;
++    std::FILE *f = std::fopen(path, "rb");
++    if (!f) return;
++    char line[256];
++    while (std::fgets(line, sizeof line, f)) {
++        char name[128];
++        Art a;
++        if (std::sscanf(line, "%127[^\t]\t%d\t%d\t%d\t%d", name, &a.x, &a.y, &a.w, &a.h) == 5) g_art[name] = a;
++    }
++    std::fclose(f);
++}
++
++void put(std::uint32_t at, std::uint32_t sprite, int x, int y) {
++    ps2::st32(at, sprite);
++    ps2::st32(at + 4, (static_cast<std::uint32_t>(y & 0xFFFF) << 16) | static_cast<std::uint32_t>(x & 0xFFFF));
++    ps2::st32(at + 8, 0x80808080u);
++}
++
++// a sprite of the sheet for one of our words: its entry in memory the game does not use, reached through the RAM's mirror at
++// 32 MB (the game adds index * 16 to its sprite table with 32-bit sums and skips negative indexes)
++std::uint32_t g_next_sprite = 0;
++std::map<std::string, std::uint32_t> g_sprite_of;
++std::uint32_t sprite_for(const std::string &name, int &w) {
++    const auto art = g_art.find(name);
++    if (art == g_art.end()) { w = 0; return 0xFFFFFFFFu; }
++    w = art->second.w;
++    if (const auto it = g_sprite_of.find(name); it != g_sprite_of.end()) return it->second;
++    const std::uint32_t at = kSpriteArea + 16u * g_next_sprite++;
++    const std::uint32_t tex = ps2::ld32(kSprites) & 0xFFFFu;   // the label sheet (sprite 0, "Vibration", is on it)
++    const Art &a = art->second;
++    ps2::st32(at, (static_cast<std::uint32_t>(a.w) << 16) | tex);
++    ps2::st32(at + 4, static_cast<std::uint32_t>(a.h));
++    ps2::st32(at + 8, (static_cast<std::uint32_t>(a.y) << 16) | static_cast<std::uint32_t>(a.x));
++    ps2::st32(at + 12, (static_cast<std::uint32_t>(a.y + a.h) << 16) | static_cast<std::uint32_t>(a.x + a.w));
++    const std::uint32_t index = (0x02000000u + at - kSprites) / 16u;
++    g_sprite_of[name] = index;
++    return index;
++}
++
++void copy_record(std::uint32_t from, std::uint32_t to) {
++    for (std::uint32_t k = 0; k < kStride; k += 4) ps2::st32(to + k, ps2::ld32(from + k));
++}
++// moves every picture of a record by dy (the label's place: + 0x3C, the y in its high half)
++void move_record(std::uint32_t at, int dy) {
++    for (std::uint32_t k = 0x20; k + 12 <= kStride; k += 12) {
++        const std::uint32_t sprite = ps2::ld32(at + k), pos = ps2::ld32(at + k + 4), colour = ps2::ld32(at + k + 8);
++        if (colour != 0x80808080u || sprite == 0xFFFFFFFFu) continue;
++        const int y = static_cast<int>(pos >> 16) + dy;
++        ps2::st32(at + k + 4, (static_cast<std::uint32_t>(y & 0xFFFF) << 16) | (pos & 0xFFFFu));
++    }
++}
++
++std::uint32_t write_help(int i, const std::string &text) {
++    const std::uint32_t s = kTextArea + 32u * static_cast<std::uint32_t>(i);
++    for (std::size_t k = 0; k < 31; ++k) ps2::st8(s + static_cast<std::uint32_t>(k), k < text.size() ? static_cast<std::uint8_t>(text[k]) : 0);
++    ps2::st8(s + 31, 0);
++    const std::uint32_t h = kHelpArea + 32u * static_cast<std::uint32_t>(i);
++    const std::uint32_t words[8] = {0x0100FFFFu, s, 0, 0, 0xFFFFFFFFu, 0, 0, 0};
++    for (int k = 0; k < 8; ++k) ps2::st32(h + 4u * static_cast<std::uint32_t>(k), words[k]);
++    return h;
++}
++
++void build_table() {
++    // the game's rows that stay, in order, and where ours go (after Sound)
++    struct Out { int game; int ours; };
++    std::vector<Out> order;
++    order.push_back({0, -1});
++    order.push_back({1, -1});
++    for (int i = 0; i < static_cast<int>(g_rows.size()); ++i) order.push_back({-1, i});
++    for (int g = 3; g < static_cast<int>(kRows); ++g) order.push_back({g, -1});
++    g_map_from_game.assign(kRows, 0);
++    for (std::size_t n = 0; n < order.size(); ++n) {
++        const std::uint32_t at = kFree + static_cast<std::uint32_t>(n) * kStride;
++        const int y = kTop + kSpacing * static_cast<int>(n);
++        if (order[n].game >= 0) {
++            const std::uint32_t from = kTable + static_cast<std::uint32_t>(order[n].game) * kStride;
++            copy_record(from, at);
++            const int label_y = static_cast<int>(ps2::ld32(from + 0x3C) >> 16);
++            move_record(at, y - label_y);
++            g_map_from_game[static_cast<std::size_t>(order[n].game)] = static_cast<int>(n);
++        } else {
++            const Row &r = g_rows[static_cast<std::size_t>(order[n].ours)];
++            const int i = order[n].ours;
++            copy_record(kTable, at);   // Vibration's record: a value row
++            ps2::st32(at + 0x00, 0);
++            ps2::st32(at + 0x04, ps2::kHostCallBase + 4u * static_cast<std::uint32_t>(2 * i));
++            ps2::st32(at + 0x08, ps2::kHostCallBase + 4u * static_cast<std::uint32_t>(2 * i + 1));
++            ps2::st32(at + 0x10, static_cast<std::uint32_t>(r.values.size()));
++            ps2::st32(at + 0x1C, write_help(i, r.help));
++            for (std::uint32_t k = 0x20; k + 12 <= kStride; k += 12) put(at + k, 0xFFFFFFFFu, 0, 0);
++            int lw = 0;
++            const std::uint32_t label = sprite_for("L:" + r.label, lw);
++            put(at + 0x38, label, 78, y);
++            put(at + 0x44, kCursor, 68, y - 11);
++            put(at + 0x50, label, 78, y);
++            // the values: centred in the right part of the bar, two to four of them
++            const int nv = static_cast<int>(r.values.size());
++            const int left = 250, right = 530;
++            for (int v = 0; v < nv && v < 4; ++v) {
++                const int cx = nv == 2 ? (v == 0 ? 321 : 463) : left + (right - left) * (2 * v + 1) / (2 * nv);
++                int ww = 0, dw = 0;
++                std::uint32_t white = r.values[static_cast<std::size_t>(v)].game_white, dark = r.values[static_cast<std::size_t>(v)].game_dark;
++                if (white == 0xFFFFFFFFu) white = sprite_for("W:" + r.values[static_cast<std::size_t>(v)].art, ww);
++                else ww = static_cast<int>(ps2::ld32(kSprites + 16u * white) >> 16);
++                if (dark == 0xFFFFFFFFu) dark = sprite_for("D:" + r.values[static_cast<std::size_t>(v)].art, dw);
++                else dw = static_cast<int>(ps2::ld32(kSprites + 16u * dark) >> 16);
++                const std::uint32_t k = 12u * static_cast<std::uint32_t>(v);
++                put(at + 0x8C + k, white, cx - ww / 2, y - 1);
++                put(at + 0xBC + k, kGlow, cx - 41, y - 1);
++                put(at + 0xEC + k, dark, cx - dw / 2, y - 1);
++            }
++        }
++        // the row's own bar
++        put(at + 0x2C, kBar, 78, y - 1);
++    }
++    g_table_built = static_cast<std::uint32_t>(order.size());
++}
++
++void setup() {
++    static bool done = false;
++    if (done) return;
++    done = true;
++    const char *v = std::getenv("PS2_NATIVE_OPTIONS");
++    if (!v || *v != '1') return;
++    load_art();
++    if (g_art.empty()) {
++        std::fprintf(stderr, "[options] PS2_NATIVE_OPTIONS_ART has no pictures: the PC rows are left out\n");
++        return;
++    }
++    for (auto &p : g_pending) p = -1;
++    register_all(std::make_integer_sequence<int, 16>{});
++    g_on = true;
++}
++
++// each frame of the window: on the Options screen, point its list at the table with our rows (built again each time the game
++// sets its own table, which it does whenever it enters the list: from the title, the in-game menu, or back from a sub-page)
++void frame() {
++    setup();
++    if (!g_on || g_rows.empty()) return;
++    for (std::size_t i = 0; i < g_rows.size(); ++i) {   // the values the game set: applied here, on the window's thread
++        const int p = g_pending[i].exchange(-1);
++        if (p >= 0 && g_rows[i].set) g_rows[i].set(p);
++    }
++    if (ps2::ld32(0x48F488u) != 16u) return;   // the game's Options screen (scene SETTING), from the title or the in-game menu
++    {   // the Options overlay (US) is in
++        static const char kHelp[] = "Adjust Screen Position";
++        for (std::uint32_t k = 0; k < sizeof kHelp - 1; ++k)
++            if (ps2::ld8(0x73D6D0u + k) != static_cast<std::uint8_t>(kHelp[k])) return;
++    }
++    const std::uint32_t work = ps2::ld32(kWorkPtr);
++    if (work < 0x100000u || work >= 0x2000000u - 0x1000u) return;
++    for (std::uint32_t off = 0; off < 0x1000u; off += 4) {
++        if (ps2::ld32(work + off) != kTable || ps2::ld32(work + off + 4) != kRows) continue;
++        build_table();
++        const std::uint32_t cursor = ps2::ld32(work + off + 8);
++        ps2::st32(work + off, kFree);
++        ps2::st32(work + off + 4, g_table_built);
++        if (cursor < kRows) ps2::st32(work + off + 8, static_cast<std::uint32_t>(g_map_from_game[cursor]));
++        // the page's seven fixed bars: off the screen (each row draws its own)
++        for (std::uint32_t n = 0; n < kRows; ++n) {
++            const std::uint32_t sprite = ps2::ld32(kBars + 12u * n);
++            if (sprite == kBar || sprite == 0x33u) ps2::st32(kBars + 12u * n + 4, (1000u << 16) | 78u);
++        }
++        std::fprintf(stderr, "[options] the Options list has the PC rows (%u rows)\n", g_table_built);
++        break;
++    }
++}
++}  // namespace nopt
++
+ void keep_scene_request() {
+     if (!g_scene_request) return;
+     const DebugScenes &d = debug_scenes();
+@@ -1606,6 +1826,57 @@ bool capture_event(const SDL_Event &e) {
+ }
+ 
+ // what an entry does; step is -1 or 1 for left and right (Enter and a click go forward)
++void menu_command(quickmenu::Command c, int step);
++// the PC rows of the game's Options list (nopt above): each value, read and set through the same steps as the F1 menu
++void native_option_rows() {
++    using quickmenu::Command;
++    if (!nopt::g_rows.empty()) return;
++    nopt::Row r;
++    // Resolution: AUTO, 2x, 4x, 8x (the F1 menu has every step)
++    r.label = "Resolution"; r.help = "Internal resolution";
++    r.values = {{"AUTO"}, {"2x"}, {"4x"}, {"8x"}};
++    r.get = [] { const int s = g_scale_next; return s == keymap::kScaleAuto ? 0 : s <= 2 ? 1 : s <= 4 ? 2 : 3; };
++    r.set = [](int v) {
++        const int want[4] = {keymap::kScaleAuto, 2, 4, 8};
++        for (int k = 0; k < 8 && g_scale_next != want[std::clamp(v, 0, 3)]; ++k) menu_command(Command::scale, 1);
++    };
++    nopt::g_rows.push_back(r);
++    r = {};
++    r.label = "Anti-aliasing"; r.help = "Smooth edges: SMAA";
++    r.values = {{"OFF", 0x12, 0x16}, {"SMAA"}};
++    r.get = [] { return g_keys.smaa ? 1 : 0; };
++    r.set = [](int v) {   // OFF: no edge smoothing at all; SMAA: high (the F1 menu has the other steps)
++        for (int k = 0; k < 6; ++k) {
++            const bool there = v == 0 ? (g_keys.smaa == 0 && !(g_look & 1)) : g_keys.smaa == 3;
++            if (there) break;
++            menu_command(Command::antialias, 1);
++        }
++    };
++    nopt::g_rows.push_back(r);
++    r = {};
++    r.label = "Cutscene bars"; r.help = "Black bars in cutscenes";
++    r.values = {{"ON", 0x11, 0x15}, {"OFF", 0x12, 0x16}};
++    r.get = [] { return g_keys.black_bars >= 50 ? 0 : 1; };
++    r.set = [](int v) {
++        g_keys.black_bars = v == 0 ? 100 : 0;
++        ps2::set_bar_opacity(static_cast<unsigned>(g_keys.black_bars));
++        rewrite_keys_file([](const std::string &t) { return keymap::with_black_bars(t, g_keys.black_bars); }, "cutscene bars");
++    };
++    nopt::g_rows.push_back(r);
++    r = {};
++    r.label = "Lens rain"; r.help = "Rain drops on the camera";
++    r.values = {{"OFF", 0x12, 0x16}, {"LIGHT"}, {"HEAVY"}};
++    r.get = [] { return lens_rain::level(); };
++    r.set = [](int v) { for (int k = 0; k < 3 && lens_rain::level() != v; ++k) menu_command(Command::lens_rain, 1); };
++    nopt::g_rows.push_back(r);
++    r = {};
++    r.label = "Mouse look"; r.help = "The mouse turns the camera";
++    r.values = {{"ON", 0x11, 0x15}, {"OFF", 0x12, 0x16}};
++    r.get = [] { return g_keys.mouse_look ? 0 : 1; };
++    r.set = [](int v) { if ((g_keys.mouse_look ? 0 : 1) != v) menu_command(Command::mouse_look, 1); };
++    nopt::g_rows.push_back(r);
++}
++
+ void menu_command(quickmenu::Command c, int step) {
+     using quickmenu::Command;
+     switch (c) {
+@@ -2108,6 +2379,8 @@ void poll() {
+     ps2::quick_watchdog();
+     take_key_card_answer();
+     keep_scene_request();
++    native_option_rows();
++    nopt::frame();
+     // (black for a second more after it: the game's picture still holds its last screen until the next scene draws over it)
+     static Uint32 skipped_until = 0;
+     if (in_skipped_scene()) skipped_until = SDL_GetTicks() + 1000;
+diff --git a/runtime/include/ps2/generated.hpp b/runtime/include/ps2/generated.hpp
+index ff0489b..1f33b6f 100644
+--- a/runtime/include/ps2/generated.hpp
++++ b/runtime/include/ps2/generated.hpp
+@@ -44,6 +44,14 @@ bool window_module_in_place(std::uint32_t pc);
+ 
+ void dispatch(Cpu &c, std::uint32_t entry, std::uint32_t depth);
+ void call(Cpu &c, std::uint32_t target, std::uint32_t depth);
++// rawdanger-recomp: host functions the game can call. A guest address in [kHostCallBase, kHostCallBase + 4 * kHostCalls) runs
++// the host function registered for it (with the game's registers: arguments in a0-a3, the result goes in v0), then returns
++// to the caller as a guest function would. The range lies outside the console's memory, so no game code is ever there; data
++// the game reads (a menu's row records, a function pointer in a table) can point to it.
++constexpr std::uint32_t kHostCallBase = 0x0FF00000u;
++constexpr std::uint32_t kHostCalls = 256;
++using HostCall = void (*)(Cpu &c);
++void register_host_call(std::uint32_t index, HostCall fn);
+ void bad_entry(Cpu &c, std::uint32_t unit_base);
+ bool preempt(Cpu &c);
+ 
+diff --git a/runtime/src/dispatch.cpp b/runtime/src/dispatch.cpp
+index 14f495f..0c842e8 100644
+--- a/runtime/src/dispatch.cpp
++++ b/runtime/src/dispatch.cpp
+@@ -251,10 +251,23 @@ bool has_code(std::uint32_t pc) {
+     return instance_for(pc, true) != nullptr;
+ }
+ 
++HostCall g_host_calls[kHostCalls] = {};
++
++void register_host_call(std::uint32_t index, HostCall fn) {
++    if (index < kHostCalls) g_host_calls[index] = fn;
++}
++
+ void dispatch(Cpu &c, std::uint32_t, std::uint32_t depth) {
+     const std::uint32_t pc = c.pc;
+     if (pc & kUnwind) return;
+     if (pc == kHandlerReturn || pc == kIdle) return;
++    if (pc - kHostCallBase < kHostCalls * 4u) [[unlikely]] {
++        if (const HostCall fn = g_host_calls[(pc - kHostCallBase) >> 2]) {
++            fn(c);
++            c.pc = c.r[31].w[0];   // back to the caller, as a guest function's jr ra
++            return;
++        }
++    }
+     const UnitInfo *u = unit_for(pc);
+     const std::uint16_t id = u ? u->entries[(pc - u->base) >> 2] : 0;
+     if (!id) {
+-- 
+2.43.0
+

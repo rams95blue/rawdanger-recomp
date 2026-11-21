@@ -1,0 +1,164 @@
+diff --git a/ps2xRuntime/include/ps2x_hooks.h b/ps2xRuntime/include/ps2x_hooks.h
+index 84f3c75..f48e1a8 100644
+--- a/ps2xRuntime/include/ps2x_hooks.h
++++ b/ps2xRuntime/include/ps2x_hooks.h
+@@ -28,6 +28,19 @@ namespace ps2x_hooks
+         // Host display aspect ratio for the presented frame (e.g. 4/3 or 16/9).
+         // 0 keeps the runtime default (square-pixel scaling of the framebuffer).
+         float presentAspect = 0.0f;
++
++        // ---- guest memory layout (0 = upstream defaults) -------------------
++        // Upstream keeps runtime-owned guest memory in the top 1 MB of RAM
++        // (RPC/TLS/boot pools at 0x01F00000, interrupt-callback stacks carved
++        // down from 0x02000000) and caps the guest heap at 0x01F00000. Games
++        // that size their own heap to "all RAM below my stack" (Raw Danger:
++        // stack 0x01FE8000-0x02000000, heap ~24.4 MB in one memalign) collide
++        // with that. These let a game module move runtime memory into the EE
++        // kernel area (0x00000000-0x00080000), which the HLE kernel leaves free.
++        uint32_t guestHeapHardLimit = 0u; // heap end, exclusive (default 0x01F00000)
++        uint32_t runtimePoolBase = 0u;    // RPC packet/server, TLS, boot pools: 0x31000 bytes (default 0x01F00000)
++        uint32_t asyncStackTop = 0u;      // interrupt-callback stacks grow down from here...
++        uint32_t asyncStackFloor = 0u;    // ...to here (default: from 0x02000000 down to the heap limit)
+     };
+ 
+     inline Hooks &hooks()
+@@ -47,6 +60,15 @@ namespace ps2x_hooks
+         hooks().presentAspect = aspect;
+     }
+ 
++    inline void setGuestMemoryLayout(uint32_t heapHardLimit, uint32_t poolBase,
++                                     uint32_t asyncTop, uint32_t asyncFloor)
++    {
++        hooks().guestHeapHardLimit = heapHardLimit;
++        hooks().runtimePoolBase = poolBase;
++        hooks().asyncStackTop = asyncTop;
++        hooks().asyncStackFloor = asyncFloor;
++    }
++
+     inline void setCdHostPathHook(CdHostPathFn fn, void *user)
+     {
+         hooks().cdHostPath = fn;
+diff --git a/ps2xRuntime/src/lib/Kernel/Syscalls/Common.h b/ps2xRuntime/src/lib/Kernel/Syscalls/Common.h
+index c0b13bf..fdab889 100644
+--- a/ps2xRuntime/src/lib/Kernel/Syscalls/Common.h
++++ b/ps2xRuntime/src/lib/Kernel/Syscalls/Common.h
+@@ -31,6 +31,7 @@
+ 
+ std::string translatePs2Path(const char *ps2Path);
+ 
++#include "ps2x_hooks.h"
+ #include "Helpers/Path.h"
+ #include "Helpers/State.h"
+ #include "Helpers/Loader.h"
+diff --git a/ps2xRuntime/src/lib/Kernel/Syscalls/Helpers/Runtime.h b/ps2xRuntime/src/lib/Kernel/Syscalls/Helpers/Runtime.h
+index 6204325..7bca29d 100644
+--- a/ps2xRuntime/src/lib/Kernel/Syscalls/Helpers/Runtime.h
++++ b/ps2xRuntime/src/lib/Kernel/Syscalls/Helpers/Runtime.h
+@@ -1,3 +1,11 @@
++// Upstream pool addresses live at 0x01F00000..0x01F31000. A game module may move
++// the whole block (same relative layout) via ps2x_hooks::runtimePoolBase.
++static inline uint32_t runtimePoolAddr(uint32_t upstreamAddr)
++{
++    const uint32_t base = ps2x_hooks::hooks().runtimePoolBase;
++    return base ? base + (upstreamAddr - kRpcPacketPoolBase) : upstreamAddr;
++}
++
+ static void setRegU32(R5900Context *ctx, int reg, uint32_t value)
+ {
+     if (!ctx || reg < 0 || reg > 31)
+@@ -89,7 +97,7 @@ static uint32_t rpcAllocPacketAddr(uint8_t *rdram)
+         return 0;
+ 
+     uint32_t slot = g_rpc_packet_index++ % kRpcPacketPoolCount;
+-    uint32_t addr = kRpcPacketPoolBase + (slot * kRpcPacketSize);
++    uint32_t addr = runtimePoolAddr(kRpcPacketPoolBase) + (slot * kRpcPacketSize);
+     rpcZeroRdram(rdram, addr, kRpcPacketSize);
+     return addr;
+ }
+@@ -100,7 +108,7 @@ static uint32_t rpcAllocServerAddr(uint8_t *rdram)
+         return 0;
+ 
+     uint32_t slot = g_rpc_server_index++ % kRpcServerPoolCount;
+-    uint32_t addr = kRpcServerPoolBase + (slot * kRpcServerStride);
++    uint32_t addr = runtimePoolAddr(kRpcServerPoolBase) + (slot * kRpcServerStride);
+     rpcZeroRdram(rdram, addr, kRpcServerStride);
+     return addr;
+ }
+@@ -332,7 +340,7 @@ static uint32_t allocTlsAddr(uint8_t *rdram)
+ 
+     std::lock_guard<std::mutex> lock(g_tls_mutex);
+     uint32_t slot = g_tls_index++ % kTlsPoolCount;
+-    uint32_t addr = kTlsPoolBase + (slot * kTlsBlockSize);
++    uint32_t addr = runtimePoolAddr(kTlsPoolBase) + (slot * kTlsBlockSize);
+     rpcZeroRdram(rdram, addr, kTlsBlockSize);
+     return addr;
+ }
+@@ -346,7 +354,7 @@ static uint32_t allocBootModeAddr(uint8_t *rdram, size_t bytes)
+     if (g_bootmode_pool_offset + aligned > kBootModePoolBytes)
+         return 0;
+ 
+-    uint32_t addr = kBootModePoolBase + g_bootmode_pool_offset;
++    uint32_t addr = runtimePoolAddr(kBootModePoolBase) + g_bootmode_pool_offset;
+     g_bootmode_pool_offset += static_cast<uint32_t>(aligned);
+     rpcZeroRdram(rdram, addr, aligned);
+     return addr;
+diff --git a/ps2xRuntime/src/lib/ps2_runtime.cpp b/ps2xRuntime/src/lib/ps2_runtime.cpp
+index 028e45f..6fdf916 100644
+--- a/ps2xRuntime/src/lib/ps2_runtime.cpp
++++ b/ps2xRuntime/src/lib/ps2_runtime.cpp
+@@ -1627,9 +1627,23 @@ uint32_t PS2Runtime::clampGuestHeapBase(uint32_t guestBase) const
+     return std::min(normalized, hardLimit);
+ }
+ 
++namespace
++{
++    // kGuestHeapHardLimit unless a game module changed it via ps2x_hooks.
++    uint32_t effectiveGuestHeapHardLimit()
++    {
++        const uint32_t hooked = ps2x_hooks::hooks().guestHeapHardLimit;
++        if (hooked != 0u && hooked <= PS2_RAM_SIZE)
++        {
++            return hooked;
++        }
++        return std::min(kGuestHeapHardLimit, PS2_RAM_SIZE);
++    }
++}
++
+ uint32_t PS2Runtime::clampGuestHeapLimit(uint32_t guestLimit) const
+ {
+-    const uint32_t hardLimit = std::min(kGuestHeapHardLimit, PS2_RAM_SIZE);
++    const uint32_t hardLimit = effectiveGuestHeapHardLimit();
+     if (guestLimit == 0u || guestLimit > hardLimit)
+     {
+         return hardLimit;
+@@ -1991,6 +2005,21 @@ uint32_t PS2Runtime::reserveAsyncCallbackStack(uint32_t size, uint32_t alignment
+     }
+ 
+     std::lock_guard<std::mutex> lock(m_asyncCallbackStackMutex);
++    uint32_t floor = std::max(m_asyncCallbackStackFloor, effectiveGuestHeapHardLimit());
++    {
++        // Optional relocation of callback stacks (e.g. into the EE kernel area)
++        const ps2x_hooks::Hooks &hooks = ps2x_hooks::hooks();
++        if (hooks.asyncStackTop != 0u && hooks.asyncStackTop <= PS2_RAM_SIZE && hooks.asyncStackFloor < hooks.asyncStackTop)
++        {
++            static bool relocated = false;
++            if (!relocated)
++            {
++                m_asyncCallbackStackTop = hooks.asyncStackTop;
++                relocated = true;
++            }
++            floor = hooks.asyncStackFloor;
++        }
++    }
+     uint32_t top = m_asyncCallbackStackTop;
+     if (top > PS2_RAM_SIZE)
+     {
+@@ -2005,7 +2034,7 @@ uint32_t PS2Runtime::reserveAsyncCallbackStack(uint32_t size, uint32_t alignment
+ 
+     uint32_t base = top - allocSize;
+     base &= ~(normalizedAlignment - 1u);
+-    if (base < m_asyncCallbackStackFloor || base >= top)
++    if (base < floor || base >= top)
+     {
+         return 0u;
+     }

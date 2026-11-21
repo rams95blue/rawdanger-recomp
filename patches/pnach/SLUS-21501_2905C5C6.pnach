@@ -1,0 +1,57 @@
+gametitle=Raw Danger! (USA) SLUS-21501 - PCSX2 widescreen + rawdanger-recomp fixes for ps2-native-recomp
+
+// Use with ps2-native-recomp: copy this file over isos\patches\SLUS-21501_2905C5C6.pnach (the app's copy of PCSX2's file),
+// then in the app: Choose extras... -> tick "Fast loading fix" (needed) and "Widescreen 16:9" (optional) -> Build -> Play.
+// Command line: bash scripts/port.sh Raw-Danger "<iso>" --native-only --widescreen --pnach SLUS-21501_2905C5C6.pnach
+//               --pnach-section "Widescreen 16:9" --pnach-section "Fast loading fix"
+// Every site was checked against the retail ELF (PCSX2 CRC 2905C5C6) with ps2-native-recomp's pnach.py.
+
+[Widescreen 16:9]
+gsaspectratio=16:9
+// recomp: live  (only data: RawDangerPC.exe and the game's F1 menu switch it on and off without a new build)
+description=Widescreen Hack (the same three lines as PCSX2's community patch)
+patch=1,EE,003a83e0,word,43e00000
+patch=1,EE,003a8400,word,43e00000
+patch=1,EE,0048bfa8,word,3F400000
+
+[Fast loading fix]
+description=Needed on ps2-native-recomp: its disc reads finish almost at once, so the map loads before the loading screen's fade-in has run its 10 steps. The load-done code then resets the fade (jal at 0x11B2B8), the loading screen never sees it end and waits for ever on the RAW DANGER logo. This keeps the fade running; the game goes on to the opening.
+// 0x0011B2B8: jal 0x2C77E0 (fade reset, original 0x0C0B1DF8) -> nop
+patch=1,EE,0011B2B8,word,00000000
+
+[Original PS2 Post Processing Filter]
+description=The game's own post processing as on the console: a soft glow from bright parts, a tint keyed by brightness and a haze by depth, built per scene (docs/GRAPHICS.md). On by default since v0.8.0: the engine now does its 2,800 small draws a frame in one GPU pass with the same picture (engine patch 0023), and the blur that came with it on the console is gone since v0.7.5. Switch it in the game (F1 -> Settings -> Picture, or the game's own Options list) or in RawDangerPC.exe. (Up to v0.7.9 this was "No post-processing filter", the other way round.)
+// recomp: live switch 00007F04 inverted
+// Switchable in the game: the two calls (0x0011E104 jal 0x19A970, 0x0011E10C jal 0x22A3B0) are skipped while the 16-bit
+// variable at 0x7F04 (free EE kernel memory, written by the recomp options) is 0 and made as on the disc while it is 1
+// ("inverted": this option on writes 1, the filter as on the console).
+// pnach.py turns each pair into a toggle (toggles.txt) and the translator emits both versions (engine patch 0004).
+patch=1,EE,E0010000,extended,00007F04
+patch=1,EE,0011E104,word,00000000
+patch=1,EE,E0010001,extended,00007F04
+patch=1,EE,0011E104,word,0C066A5C
+patch=1,EE,E0010000,extended,00007F04
+patch=1,EE,0011E10C,word,00000000
+patch=1,EE,E0010001,extended,00007F04
+patch=1,EE,0011E10C,word,0C08A8EC
+
+[Skip intro logos]
+description=After the memory-card check the game goes straight to the opening movie, without the Irem and Agetec logos (Start still skips the movie as usual). Switch it in the game (F1 -> Recomp options) or in RawDangerPC.exe.
+// recomp: live switch 00007F00
+// Scene table 0x3A7FF0 (24 bytes per scene; DUMMY 0, BOOTLOAD 1, WARNING 2, MCCHECK 3, HDDCHECK 4, HTCHECK 5, LOGO 6,
+// PUBLOGO1 7, PUBLOGO2 8, OPMOVIE 9, ENDMOVIE 10, TITLE 11). The next scene is set by 0x16ED40(a0 = scene).
+// 0x0023196C: the WARNING scene's "li a0,6" (-> LOGO) is "li a0,9" (-> OPMOVIE) while the variable at 0x7F00 is 0, as on
+// the disc while it is 1 (a toggle, like the section above).
+patch=1,EE,E0010000,extended,00007F00
+patch=1,EE,0023196C,word,24040009
+patch=1,EE,E0010001,extended,00007F00
+patch=1,EE,0023196C,word,24040006
+
+[Direct mouse look]
+description=The mouse turns the camera itself, as far as it moved and as fast, with no top speed (rawdanger-recomp v0.7.9). The game turns its follow camera by f22 radians a step, worked out from the right stick (0x176FDC: mul.s f22 = -stick * degrees per step [camera+0x2C] in radians), then turns the camera's place around the player by it (sin, cos at 0x177154). These three words add a float the engine leaves at 0x7F10 (free EE kernel memory, 0 unless the mouse moved) to f22 and clear it, so each mouse turn is used exactly once; the stick still turns as before. Built in (code).
+// 0x00176FD0: nop -> lwc1 $f2, 0x7F10($zero)   (f2 is free after the div.s at 0x176FCC; fabs at 0x2C4308 keeps it)
+// 0x00176FD4: nop -> sw $zero, 0x7F10($zero)
+// 0x00176FEC: nop -> add.s $f22, $f22, $f2      (after the mul.s that makes f22 at 0x176FDC)
+patch=1,EE,00176FD0,word,C4027F10
+patch=1,EE,00176FD4,word,AC007F10
+patch=1,EE,00176FEC,word,4602B580

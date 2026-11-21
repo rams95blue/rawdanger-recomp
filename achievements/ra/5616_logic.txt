@@ -1,0 +1,3913 @@
+Raw Danger! - RetroAchievements set 5616, 83 achievements
+Kept offline in achievements\ra\5616.json; the game checks it on this PC. Addresses are the PS2's main memory.
+
+==== Hi, I'm Geo!  (1 points, official, ID 392823)
+What to do: In the underground convention center, find a costume of Geo and try it on as Joshua.
+  core:
+    Add address: 8-bit [0x00348FAA] * -5632
+    Add source: 32-bit [0x00492450] * 10000
+    Add address: 8-bit [0x00348FAA] * -5632
+    Add source: 32-bit [0x00492454] * 100
+    Add address: 8-bit [0x00348FAA] * -5632
+    32-bit [0x00492458] = 10100
+    Add address: 8-bit [0x00348FAA] * -5632
+    Add address: 32-bit [0x005EAEF0]
+    last frame's float [0x000000A0] < f27.0
+    Add address: 8-bit [0x00348FAA] * -5632
+    Add address: 32-bit [0x005EAEF0]
+    float [0x000000A0] >= f27.0
+
+==== I Have Special Eyes  (1 points, official, ID 392824)
+What to do: In the underground convention center, find and return a woman's lost contact lenses as Joshua.
+  core:
+    Add address: 8-bit [0x00348FAA] * -10416
+    8-bit [0x0070F9DA] != 8
+    Add address: 8-bit [0x00348FAA] * -5632
+    last frame's bit 4 of [0x00609EC6] = 0
+    Add address: 8-bit [0x00348FAA] * -5632
+    bit 4 of [0x00609EC6] = 1
+  or alternative 1:
+    Add address: 8-bit [0x00348FAA] * -5628
+    32-bit [0x0048F604] = 21
+  or alternative 2:
+    Add address: 8-bit [0x00348FAA] * -5628
+    32-bit [0x0048F604] = 23
+  or alternative 3:
+    Add address: 8-bit [0x00348FAA] * -5628
+    32-bit [0x0048F604] = 24
+  or alternative 4:
+    Add address: 8-bit [0x00348FAA] * -5628
+    32-bit [0x0048F604] = 32
+
+==== Occupational Hazard  (1 points, official, ID 392825)
+What to do: In the underground convention center, return the Italian Recipe to the chef as Joshua.
+  core:
+    Add address: 8-bit [0x00348FAA] * -10416
+    8-bit [0x0070F9DA] != 8
+    Add address: 8-bit [0x00348FAA] * -5632
+    last frame's bit 4 of [0x006094EC] = 0
+    Add address: 8-bit [0x00348FAA] * -5632
+    bit 4 of [0x006094EC] = 1
+  or alternative 1:
+    Add address: 8-bit [0x00348FAA] * -5628
+    32-bit [0x0048F604] = 21
+  or alternative 2:
+    Add address: 8-bit [0x00348FAA] * -5628
+    32-bit [0x0048F604] = 23
+  or alternative 3:
+    Add address: 8-bit [0x00348FAA] * -5628
+    32-bit [0x0048F604] = 24
+  or alternative 4:
+    Add address: 8-bit [0x00348FAA] * -5628
+    32-bit [0x0048F604] = 32
+
+==== Maybe They'll Have Free Drinks There  (1 points, official, ID 392826)
+What to do: In the underground convention center, serve a drunk guest a few more bottles of wine as Joshua.
+  core:
+    Add address: 8-bit [0x00348FAA] * -10416
+    8-bit [0x0070F9DA] != 8
+    Add address: 8-bit [0x00348FAA] * -5632
+    last frame's bit 7 of [0x006094F4] = 0
+    Add address: 8-bit [0x00348FAA] * -5632
+    bit 7 of [0x006094F4] = 1
+    Add address: 8-bit [0x00348FAA] * -5632
+    bit 0 of [0x006094F5] = 0
+    Add address: 8-bit [0x00348FAA] * -5632
+    bit 1 of [0x006094F5] = 0
+    Add address: 8-bit [0x00348FAA] * -5632
+    Add address: 32-bit [0x006003A4]
+    float [0x000000A0] < f27.0
+  or alternative 1:
+    Add address: 8-bit [0x00348FAA] * -5628
+    32-bit [0x0048F604] = 21
+  or alternative 2:
+    Add address: 8-bit [0x00348FAA] * -5628
+    32-bit [0x0048F604] = 23
+  or alternative 3:
+    Add address: 8-bit [0x00348FAA] * -5628
+    32-bit [0x0048F604] = 24
+  or alternative 4:
+    Add address: 8-bit [0x00348FAA] * -5628
+    32-bit [0x0048F604] = 32
+
+==== Good Guy Josh  (1 points, official, ID 392827)
+What to do: In the underground convention center, help Stephanie find the mother of the lost child as Joshua.
+  core:
+    Add address: 8-bit [0x00348FAA] * -10416
+    8-bit [0x0070F9DA] != 8
+    Add address: 8-bit [0x00348FAA] * -5632
+    last frame's bit 3 of [0x0060975E] = 0
+    Add address: 8-bit [0x00348FAA] * -5632
+    bit 3 of [0x0060975E] = 1
+  or alternative 1:
+    Add address: 8-bit [0x00348FAA] * -5628
+    32-bit [0x0048F604] = 21
+  or alternative 2:
+    Add address: 8-bit [0x00348FAA] * -5628
+    32-bit [0x0048F604] = 23
+  or alternative 3:
+    Add address: 8-bit [0x00348FAA] * -5628
+    32-bit [0x0048F604] = 24
+  or alternative 4:
+    Add address: 8-bit [0x00348FAA] * -5628
+    32-bit [0x0048F604] = 32
+
+==== Peeping Josh  (3 points, official, ID 392828)
+What to do: In the underground convention center, find a (small) hole in the wall as Joshua.
+  core:
+    Add address: 8-bit [0x00348FAA] * -10416
+    8-bit [0x0070F9DA] != 8
+    Add address: 8-bit [0x00348FAA] * -5632
+    last frame's bit 6 of [0x006094EB] = 0
+    Add address: 8-bit [0x00348FAA] * -5632
+    bit 6 of [0x006094EB] = 1
+  or alternative 1:
+    Add address: 8-bit [0x00348FAA] * -5628
+    32-bit [0x0048F604] = 21
+  or alternative 2:
+    Add address: 8-bit [0x00348FAA] * -5628
+    32-bit [0x0048F604] = 23
+  or alternative 3:
+    Add address: 8-bit [0x00348FAA] * -5628
+    32-bit [0x0048F604] = 24
+  or alternative 4:
+    Add address: 8-bit [0x00348FAA] * -5628
+    32-bit [0x0048F604] = 32
+
+==== Behind the Scenes  (2 points, official, ID 392829)
+What to do: In the underground convention center, find and give an investigative reporter a Waitress Uniform as Joshua.
+  core:
+    Add address: 8-bit [0x00348FAA] * -10416
+    8-bit [0x0070F9DA] != 8
+    Add address: 8-bit [0x00348FAA] * -5632
+    last frame's bit 3 of [0x006094E2] = 0
+    Add address: 8-bit [0x00348FAA] * -5632
+    bit 3 of [0x006094E2] = 1
+  or alternative 1:
+    Add address: 8-bit [0x00348FAA] * -5628
+    32-bit [0x0048F604] = 21
+  or alternative 2:
+    Add address: 8-bit [0x00348FAA] * -5628
+    32-bit [0x0048F604] = 23
+  or alternative 3:
+    Add address: 8-bit [0x00348FAA] * -5628
+    32-bit [0x0048F604] = 24
+  or alternative 4:
+    Add address: 8-bit [0x00348FAA] * -5628
+    32-bit [0x0048F604] = 32
+
+==== I Only Drink Cascade Mineral Water  (2 points, official, ID 392830)
+What to do: In the underground convention center, refill the water pitcher with water from the leaking water pipe and deliver it to the mayor without spilling too much as Joshua.
+  core:
+    Add address: 8-bit [0x00348FAA] * -10416
+    8-bit [0x0070F9DA] != 8
+    Add address: 8-bit [0x00348FAA] * -5632
+    last frame's bit 3 of [0x00609EC7] = 0
+    Add address: 8-bit [0x00348FAA] * -5632
+    bit 3 of [0x00609EC7] = 1
+  or alternative 1:
+    Add address: 8-bit [0x00348FAA] * -5628
+    32-bit [0x0048F604] = 21
+  or alternative 2:
+    Add address: 8-bit [0x00348FAA] * -5628
+    32-bit [0x0048F604] = 23
+  or alternative 3:
+    Add address: 8-bit [0x00348FAA] * -5628
+    32-bit [0x0048F604] = 24
+  or alternative 4:
+    Add address: 8-bit [0x00348FAA] * -5628
+    32-bit [0x0048F604] = 32
+
+==== Candid Caper  (2 points, official, ID 392831)
+What to do: In the underground convention center, find and pick up a picture of Stephanie as Joshua.
+  core:
+    Add address: 8-bit [0x00348FAA] * -10416
+    8-bit [0x0070F9DA] != 8
+    Add address: 8-bit [0x00348FAA] * -5632
+    last frame's bit 1 of [0x006094ED] = 0
+    Add address: 8-bit [0x00348FAA] * -5632
+    bit 1 of [0x006094ED] = 1
+  or alternative 1:
+    Add address: 8-bit [0x00348FAA] * -5628
+    32-bit [0x0048F604] = 21
+  or alternative 2:
+    Add address: 8-bit [0x00348FAA] * -5628
+    32-bit [0x0048F604] = 23
+  or alternative 3:
+    Add address: 8-bit [0x00348FAA] * -5628
+    32-bit [0x0048F604] = 24
+  or alternative 4:
+    Add address: 8-bit [0x00348FAA] * -5628
+    32-bit [0x0048F604] = 32
+
+==== Out of the Frying Pan  (5 points, official, ID 392832, progression)
+What to do: Escape the underground convention center as Joshua.
+  core:
+    Add address: 8-bit [0x00348FAA] * -5628
+    32-bit [0x0048F604] != 18
+    Add address: 8-bit [0x00348FAA] * -5632
+    Add source: 32-bit [0x00492440] * 10000
+    Add address: 8-bit [0x00348FAA] * -5632
+    Add source: 32-bit [0x00492444] * 100
+    Add address: 8-bit [0x00348FAA] * -5632
+    32-bit [0x00492448] = 10105
+    Add address: 8-bit [0x00348FAA] * -5632
+    Add source: last frame's 32-bit [0x00492440] * 10000
+    Add address: 8-bit [0x00348FAA] * -5632
+    Add source: last frame's 32-bit [0x00492444] * 100
+    Add address: 8-bit [0x00348FAA] * -5632
+    last frame's 32-bit [0x00492448] = 10101
+
+==== Cold as Ice  (4 points, official, ID 392833)
+What to do: Obtain the Cheap Pearl.
+  core:
+    Add address: 8-bit [0x00348FAA] * -10416
+    8-bit [0x0070F9DA] != 8
+    Add address: 8-bit [0x00348FAA] * -10432
+    last frame's 8-bit [0x007173B6] = 0
+    Add address: 8-bit [0x00348FAA] * -10432
+    8-bit [0x007173B6] != 0
+  or alternative 1:
+    Add address: 8-bit [0x00348FAA] * -5628
+    32-bit [0x0048F604] = 21
+  or alternative 2:
+    Add address: 8-bit [0x00348FAA] * -5628
+    32-bit [0x0048F604] = 23
+  or alternative 3:
+    Add address: 8-bit [0x00348FAA] * -5628
+    32-bit [0x0048F604] = 24
+  or alternative 4:
+    Add address: 8-bit [0x00348FAA] * -5628
+    32-bit [0x0048F604] = 32
+
+==== Hot Like Fire  (3 points, official, ID 392834)
+What to do: In the Downtown Station Area, light a band of wreathes on fire as Joshua.
+  core:
+    Add address: 8-bit [0x00348FAA] * -10416
+    8-bit [0x0070F9DA] != 8
+    Add address: 8-bit [0x00348FAA] * -5632
+    last frame's bit 2 of [0x006097DB] = 0
+    Add address: 8-bit [0x00348FAA] * -5632
+    bit 2 of [0x006097DB] = 1
+  or alternative 1:
+    Add address: 8-bit [0x00348FAA] * -5628
+    32-bit [0x0048F604] = 21
+  or alternative 2:
+    Add address: 8-bit [0x00348FAA] * -5628
+    32-bit [0x0048F604] = 23
+  or alternative 3:
+    Add address: 8-bit [0x00348FAA] * -5628
+    32-bit [0x0048F604] = 24
+  or alternative 4:
+    Add address: 8-bit [0x00348FAA] * -5628
+    32-bit [0x0048F604] = 32
+
+==== We Just Gotta Wait  (5 points, official, ID 392835, progression)
+What to do: Arrive at the evacuation point in West Junction as Joshua.
+  core:
+    Add address: 8-bit [0x00348FAA] * -10416
+    8-bit [0x0070F9DA] != 8
+    Add address: 8-bit [0x00348FAA] * -5632
+    last frame's bit 4 of [0x00609512] = 0
+    Add address: 8-bit [0x00348FAA] * -5632
+    bit 4 of [0x00609512] = 1
+  or alternative 1:
+    Add address: 8-bit [0x00348FAA] * -5628
+    32-bit [0x0048F604] = 21
+  or alternative 2:
+    Add address: 8-bit [0x00348FAA] * -5628
+    32-bit [0x0048F604] = 23
+  or alternative 3:
+    Add address: 8-bit [0x00348FAA] * -5628
+    32-bit [0x0048F604] = 24
+  or alternative 4:
+    Add address: 8-bit [0x00348FAA] * -5628
+    32-bit [0x0048F604] = 32
+
+==== Popup Chef  (3 points, official, ID 392836)
+What to do: At the West Junction evacuation point, cook a meal with the chef as Joshua.
+  core:
+    Add address: 8-bit [0x00348FAA] * -10416
+    8-bit [0x0070F9DA] != 8
+    Add address: 8-bit [0x00348FAA] * -5632
+    last frame's bit 3 of [0x00609515] = 0
+    Add address: 8-bit [0x00348FAA] * -5632
+    bit 3 of [0x00609515] = 1
+  or alternative 1:
+    Add address: 8-bit [0x00348FAA] * -5628
+    32-bit [0x0048F604] = 21
+  or alternative 2:
+    Add address: 8-bit [0x00348FAA] * -5628
+    32-bit [0x0048F604] = 23
+  or alternative 3:
+    Add address: 8-bit [0x00348FAA] * -5628
+    32-bit [0x0048F604] = 24
+  or alternative 4:
+    Add address: 8-bit [0x00348FAA] * -5628
+    32-bit [0x0048F604] = 32
+
+==== I Need a Hero  (5 points, official, ID 392837, progression)
+What to do: At the East Junction, rescue a trapped woman and girl as Joshua.
+  core:
+    Add address: 8-bit [0x00348FAA] * -10416
+    8-bit [0x0070F9DA] != 8
+    Add address: 8-bit [0x00348FAA] * -5632
+    last frame's bit 5 of [0x0060952B] = 0
+    Add address: 8-bit [0x00348FAA] * -5632
+    bit 5 of [0x0060952B] = 1
+  or alternative 1:
+    Add address: 8-bit [0x00348FAA] * -5628
+    32-bit [0x0048F604] = 21
+  or alternative 2:
+    Add address: 8-bit [0x00348FAA] * -5628
+    32-bit [0x0048F604] = 23
+  or alternative 3:
+    Add address: 8-bit [0x00348FAA] * -5628
+    32-bit [0x0048F604] = 24
+  or alternative 4:
+    Add address: 8-bit [0x00348FAA] * -5628
+    32-bit [0x0048F604] = 32
+
+==== Future Regret  (10 points, official, ID 392838)
+What to do: Obtain either Ending 1-B or 1-C.
+  core:
+    Add address: 8-bit [0x00348FAA] * -10416
+    8-bit [0x0070F9DA] != 8
+    Add address: 8-bit [0x00348FAA] * -5552
+    last frame's 8-bit [0x0048DAB0] = 255
+  or alternative 1:
+    Add address: 8-bit [0x00348FAA] * -5628
+    32-bit [0x0048F604] = 21
+    Add address: 8-bit [0x00348FAA] * -5552
+    8-bit [0x0048DAB0] = 1
+  or alternative 2:
+    Add address: 8-bit [0x00348FAA] * -5628
+    32-bit [0x0048F604] = 21
+    Add address: 8-bit [0x00348FAA] * -5552
+    8-bit [0x0048DAB0] = 2
+  or alternative 3:
+    Add address: 8-bit [0x00348FAA] * -5628
+    32-bit [0x0048F604] = 23
+    Add address: 8-bit [0x00348FAA] * -5552
+    8-bit [0x0048DAB0] = 1
+  or alternative 4:
+    Add address: 8-bit [0x00348FAA] * -5628
+    32-bit [0x0048F604] = 23
+    Add address: 8-bit [0x00348FAA] * -5552
+    8-bit [0x0048DAB0] = 2
+  or alternative 5:
+    Add address: 8-bit [0x00348FAA] * -5628
+    32-bit [0x0048F604] = 24
+    Add address: 8-bit [0x00348FAA] * -5552
+    8-bit [0x0048DAB0] = 1
+  or alternative 6:
+    Add address: 8-bit [0x00348FAA] * -5628
+    32-bit [0x0048F604] = 24
+    Add address: 8-bit [0x00348FAA] * -5552
+    8-bit [0x0048DAB0] = 2
+  or alternative 7:
+    Add address: 8-bit [0x00348FAA] * -5628
+    32-bit [0x0048F604] = 32
+    Add address: 8-bit [0x00348FAA] * -5552
+    8-bit [0x0048DAB0] = 1
+  or alternative 8:
+    Add address: 8-bit [0x00348FAA] * -5628
+    32-bit [0x0048F604] = 32
+    Add address: 8-bit [0x00348FAA] * -5552
+    8-bit [0x0048DAB0] = 2
+
+==== Social Link Rank Up  (1 points, official, ID 392839)
+What to do: Adopt a new name for Stephanie as Joshua.
+  core:
+    Add address: 8-bit [0x00348FAA] * -10416
+    8-bit [0x0070F9DA] != 8
+    Add address: 8-bit [0x00348FAA] * -5632
+    last frame's bit 5 of [0x00609761] = 0
+    Add address: 8-bit [0x00348FAA] * -5632
+    bit 5 of [0x00609761] = 1
+  or alternative 1:
+    Add address: 8-bit [0x00348FAA] * -5628
+    32-bit [0x0048F604] = 21
+  or alternative 2:
+    Add address: 8-bit [0x00348FAA] * -5628
+    32-bit [0x0048F604] = 23
+  or alternative 3:
+    Add address: 8-bit [0x00348FAA] * -5628
+    32-bit [0x0048F604] = 24
+  or alternative 4:
+    Add address: 8-bit [0x00348FAA] * -5628
+    32-bit [0x0048F604] = 32
+
+==== Kitchen Nightmare  (3 points, official, ID 392840)
+What to do: Using the large pot, cook a meal for yourself and/or Stephanie inside the Angelina restaurant as Joshua.
+  core:
+    Add address: 8-bit [0x00348FAA] * -10416
+    8-bit [0x0070F9DA] != 8
+  or alternative 1:
+    Add address: 8-bit [0x00348FAA] * -5628
+    32-bit [0x0048F604] = 21
+    Add address: 8-bit [0x00348FAA] * -5632
+    last frame's bit 3 of [0x00609762] = 0
+    Add address: 8-bit [0x00348FAA] * -5632
+    bit 3 of [0x00609762] = 1
+  or alternative 2:
+    Add address: 8-bit [0x00348FAA] * -5628
+    32-bit [0x0048F604] = 21
+    Add address: 8-bit [0x00348FAA] * -5632
+    last frame's bit 4 of [0x00609762] = 0
+    Add address: 8-bit [0x00348FAA] * -5632
+    bit 4 of [0x00609762] = 1
+  or alternative 3:
+    Add address: 8-bit [0x00348FAA] * -5628
+    32-bit [0x0048F604] = 21
+    Add address: 8-bit [0x00348FAA] * -5632
+    last frame's bit 5 of [0x00609762] = 0
+    Add address: 8-bit [0x00348FAA] * -5632
+    bit 5 of [0x00609762] = 1
+  or alternative 4:
+    Add address: 8-bit [0x00348FAA] * -5628
+    32-bit [0x0048F604] = 23
+    Add address: 8-bit [0x00348FAA] * -5632
+    last frame's bit 3 of [0x00609762] = 0
+    Add address: 8-bit [0x00348FAA] * -5632
+    bit 3 of [0x00609762] = 1
+  or alternative 5:
+    Add address: 8-bit [0x00348FAA] * -5628
+    32-bit [0x0048F604] = 23
+    Add address: 8-bit [0x00348FAA] * -5632
+    last frame's bit 4 of [0x00609762] = 0
+    Add address: 8-bit [0x00348FAA] * -5632
+    bit 4 of [0x00609762] = 1
+  or alternative 6:
+    Add address: 8-bit [0x00348FAA] * -5628
+    32-bit [0x0048F604] = 23
+    Add address: 8-bit [0x00348FAA] * -5632
+    last frame's bit 5 of [0x00609762] = 0
+    Add address: 8-bit [0x00348FAA] * -5632
+    bit 5 of [0x00609762] = 1
+  or alternative 7:
+    Add address: 8-bit [0x00348FAA] * -5628
+    32-bit [0x0048F604] = 24
+    Add address: 8-bit [0x00348FAA] * -5632
+    last frame's bit 3 of [0x00609762] = 0
+    Add address: 8-bit [0x00348FAA] * -5632
+    bit 3 of [0x00609762] = 1
+  or alternative 8:
+    Add address: 8-bit [0x00348FAA] * -5628
+    32-bit [0x0048F604] = 24
+    Add address: 8-bit [0x00348FAA] * -5632
+    last frame's bit 4 of [0x00609762] = 0
+    Add address: 8-bit [0x00348FAA] * -5632
+    bit 4 of [0x00609762] = 1
+  or alternative 9:
+    Add address: 8-bit [0x00348FAA] * -5628
+    32-bit [0x0048F604] = 24
+    Add address: 8-bit [0x00348FAA] * -5632
+    last frame's bit 5 of [0x00609762] = 0
+    Add address: 8-bit [0x00348FAA] * -5632
+    bit 5 of [0x00609762] = 1
+  or alternative 10:
+    Add address: 8-bit [0x00348FAA] * -5628
+    32-bit [0x0048F604] = 32
+    Add address: 8-bit [0x00348FAA] * -5632
+    last frame's bit 3 of [0x00609762] = 0
+    Add address: 8-bit [0x00348FAA] * -5632
+    bit 3 of [0x00609762] = 1
+  or alternative 11:
+    Add address: 8-bit [0x00348FAA] * -5628
+    32-bit [0x0048F604] = 32
+    Add address: 8-bit [0x00348FAA] * -5632
+    last frame's bit 4 of [0x00609762] = 0
+    Add address: 8-bit [0x00348FAA] * -5632
+    bit 4 of [0x00609762] = 1
+  or alternative 12:
+    Add address: 8-bit [0x00348FAA] * -5628
+    32-bit [0x0048F604] = 32
+    Add address: 8-bit [0x00348FAA] * -5632
+    last frame's bit 5 of [0x00609762] = 0
+    Add address: 8-bit [0x00348FAA] * -5632
+    bit 5 of [0x00609762] = 1
+
+==== We May Be Too Late...  (5 points, official, ID 392841)
+What to do: Arrive at the Mission Care Center with Stephanie as Joshua.
+  core:
+    Add address: 8-bit [0x00348FAA] * -10416
+    8-bit [0x0070F9DA] != 8
+    Add address: 8-bit [0x00348FAA] * -5632
+    last frame's bit 4 of [0x00609535] = 0
+    Add address: 8-bit [0x00348FAA] * -5632
+    bit 4 of [0x00609535] = 1
+  or alternative 1:
+    Add address: 8-bit [0x00348FAA] * -5628
+    32-bit [0x0048F604] = 21
+  or alternative 2:
+    Add address: 8-bit [0x00348FAA] * -5628
+    32-bit [0x0048F604] = 23
+  or alternative 3:
+    Add address: 8-bit [0x00348FAA] * -5628
+    32-bit [0x0048F604] = 24
+  or alternative 4:
+    Add address: 8-bit [0x00348FAA] * -5628
+    32-bit [0x0048F604] = 32
+
+==== Waiting is the Hardest Part  (3 points, official, ID 392842)
+What to do: Assist in rescuing a collapsed person in Del Ray Inner Park as Joshua, then bring them food without spilling too much.
+  core:
+    Add address: 8-bit [0x00348FAA] * -10416
+    8-bit [0x0070F9DA] != 8
+    Add address: 8-bit [0x00348FAA] * -5632
+    last frame's bit 5 of [0x0060953A] = 0
+    Add address: 8-bit [0x00348FAA] * -5632
+    bit 5 of [0x0060953A] = 1
+    Add address: 8-bit [0x00348FAA] * -5632
+    bit 3 of [0x00609539] = 0
+  or alternative 1:
+    Add address: 8-bit [0x00348FAA] * -5628
+    32-bit [0x0048F604] = 21
+  or alternative 2:
+    Add address: 8-bit [0x00348FAA] * -5628
+    32-bit [0x0048F604] = 23
+  or alternative 3:
+    Add address: 8-bit [0x00348FAA] * -5628
+    32-bit [0x0048F604] = 24
+  or alternative 4:
+    Add address: 8-bit [0x00348FAA] * -5628
+    32-bit [0x0048F604] = 32
+
+==== Flotsam's Circus Troupe  (2 points, official, ID 392843)
+What to do: Convince the ringmaster in Del Ray Inner Park to keep pursuing his passion as Joshua.
+  core:
+    Add address: 8-bit [0x00348FAA] * -10416
+    8-bit [0x0070F9DA] != 8
+    Add address: 8-bit [0x00348FAA] * -5632
+    bit 5 of [0x0060953D] = 1
+    Add address: 8-bit [0x00348FAA] * -5632
+    last frame's bit 0 of [0x0060953E] = 0
+    Add address: 8-bit [0x00348FAA] * -5632
+    bit 0 of [0x0060953E] = 1
+  or alternative 1:
+    Add address: 8-bit [0x00348FAA] * -5628
+    32-bit [0x0048F604] = 21
+  or alternative 2:
+    Add address: 8-bit [0x00348FAA] * -5628
+    32-bit [0x0048F604] = 23
+  or alternative 3:
+    Add address: 8-bit [0x00348FAA] * -5628
+    32-bit [0x0048F604] = 24
+  or alternative 4:
+    Add address: 8-bit [0x00348FAA] * -5628
+    32-bit [0x0048F604] = 32
+
+==== Conflict Resolution  (5 points, official, ID 392844)
+What to do: Reunite Stephanie with her mother as Joshua.
+  core:
+    Add address: 8-bit [0x00348FAA] * -10416
+    8-bit [0x0070F9DA] != 8
+    Add address: 8-bit [0x00348FAA] * -5632
+    last frame's bit 3 of [0x00609F00] = 0
+    Add address: 8-bit [0x00348FAA] * -5632
+    bit 3 of [0x00609F00] = 1
+  or alternative 1:
+    Add address: 8-bit [0x00348FAA] * -5628
+    32-bit [0x0048F604] = 21
+  or alternative 2:
+    Add address: 8-bit [0x00348FAA] * -5628
+    32-bit [0x0048F604] = 23
+  or alternative 3:
+    Add address: 8-bit [0x00348FAA] * -5628
+    32-bit [0x0048F604] = 24
+  or alternative 4:
+    Add address: 8-bit [0x00348FAA] * -5628
+    32-bit [0x0048F604] = 32
+
+==== Let's Go Home, Princess  (10 points, official, ID 392845)
+What to do: Obtain Ending 1-A.
+  core:
+    Add address: 8-bit [0x00348FAA] * -10416
+    8-bit [0x0070F9DA] != 8
+    Add address: 8-bit [0x00348FAA] * -5552
+    last frame's 8-bit [0x0048DAB0] = 255
+    Add address: 8-bit [0x00348FAA] * -5552
+    8-bit [0x0048DAB0] = 0
+  or alternative 1:
+    Add address: 8-bit [0x00348FAA] * -5628
+    32-bit [0x0048F604] = 21
+  or alternative 2:
+    Add address: 8-bit [0x00348FAA] * -5628
+    32-bit [0x0048F604] = 23
+  or alternative 3:
+    Add address: 8-bit [0x00348FAA] * -5628
+    32-bit [0x0048F604] = 24
+  or alternative 4:
+    Add address: 8-bit [0x00348FAA] * -5628
+    32-bit [0x0048F604] = 32
+
+==== Master of Disguise  (3 points, official, ID 392846)
+What to do: Escape out of the gate of the Police Station parking lot as Amber.
+  core:
+    Add address: 8-bit [0x00348FAA] * -10416
+    8-bit [0x0070F9DA] != 8
+    Add address: 8-bit [0x00348FAA] * -5632
+    last frame's bit 3 of [0x00609589] = 0
+    Add address: 8-bit [0x00348FAA] * -5632
+    bit 3 of [0x00609589] = 1
+  or alternative 1:
+    Add address: 8-bit [0x00348FAA] * -5628
+    32-bit [0x0048F604] = 21
+  or alternative 2:
+    Add address: 8-bit [0x00348FAA] * -5628
+    32-bit [0x0048F604] = 23
+  or alternative 3:
+    Add address: 8-bit [0x00348FAA] * -5628
+    32-bit [0x0048F604] = 24
+  or alternative 4:
+    Add address: 8-bit [0x00348FAA] * -5628
+    32-bit [0x0048F604] = 32
+
+==== Just Another Day in Paradise  (3 points, official, ID 392847, progression)
+What to do: Escape the police detective in the Downtown Geo Area as Amber.
+  core:
+    Add address: 8-bit [0x00348FAA] * -10416
+    8-bit [0x0070F9DA] != 8
+    Add address: 8-bit [0x00348FAA] * -5628
+    32-bit [0x0048F604] != 18
+    Add address: 8-bit [0x00348FAA] * -5632
+    Add source: 32-bit [0x00492440] * 10000
+    Add address: 8-bit [0x00348FAA] * -5632
+    Add source: 32-bit [0x00492444] * 100
+    Add address: 8-bit [0x00348FAA] * -5632
+    32-bit [0x00492448] = 20400
+    Add address: 8-bit [0x00348FAA] * -5632
+    Add source: last frame's 32-bit [0x00492440] * 10000
+    Add address: 8-bit [0x00348FAA] * -5632
+    Add source: last frame's 32-bit [0x00492444] * 100
+    Add address: 8-bit [0x00348FAA] * -5632
+    last frame's 32-bit [0x00492448] = 20300
+  or alternative 1:
+    Add address: 8-bit [0x00348FAA] * -5628
+    32-bit [0x0048F604] = 21
+  or alternative 2:
+    Add address: 8-bit [0x00348FAA] * -5628
+    32-bit [0x0048F604] = 23
+  or alternative 3:
+    Add address: 8-bit [0x00348FAA] * -5628
+    32-bit [0x0048F604] = 24
+  or alternative 4:
+    Add address: 8-bit [0x00348FAA] * -5628
+    32-bit [0x0048F604] = 32
+
+==== Aidan Today, Saiban Tomorrow  (10 points, official, ID 392848, missable)
+What to do: Obtain Ending 2-B. Free Mode is disallowed.
+  core:
+    Add address: 8-bit [0x00348FAA] * -10416
+    8-bit [0x0070F9DA] != 8
+    Add address: 8-bit [0x00348FAA] * -5552
+    last frame's 8-bit [0x0048DAB0] = 255
+    Add address: 8-bit [0x00348FAA] * -5552
+    8-bit [0x0048DAB0] = 4
+    Add address: 8-bit [0x00348FAA] * -10304
+    8-bit [0x0067DDBA] != 1
+  or alternative 1:
+    Add address: 8-bit [0x00348FAA] * -5628
+    32-bit [0x0048F604] = 21
+  or alternative 2:
+    Add address: 8-bit [0x00348FAA] * -5628
+    32-bit [0x0048F604] = 23
+  or alternative 3:
+    Add address: 8-bit [0x00348FAA] * -5628
+    32-bit [0x0048F604] = 24
+  or alternative 4:
+    Add address: 8-bit [0x00348FAA] * -5628
+    32-bit [0x0048F604] = 32
+
+==== Hot Pursuit  (3 points, official, ID 392849)
+What to do: Escape the police detective again in the Hudson Tunnel Area as Amber.
+  core:
+    Add address: 8-bit [0x00348FAA] * -10416
+    8-bit [0x0070F9DA] != 8
+    Add address: 8-bit [0x00348FAA] * -5632
+    Add source: 32-bit [0x00492450] * 10000
+    Add address: 8-bit [0x00348FAA] * -5632
+    Add source: 32-bit [0x00492454] * 100
+    Add address: 8-bit [0x00348FAA] * -5632
+    32-bit [0x00492458] = 20500
+    Add address: 8-bit [0x00348FAA] * -5632
+    32-bit [0x0049245C] = 1
+    Add address: 8-bit [0x00348FAA] * -5632
+    last frame's 32-bit [0x0049245C] != 1
+  or alternative 1:
+    Add address: 8-bit [0x00348FAA] * -5628
+    32-bit [0x0048F604] = 21
+  or alternative 2:
+    Add address: 8-bit [0x00348FAA] * -5628
+    32-bit [0x0048F604] = 23
+  or alternative 3:
+    Add address: 8-bit [0x00348FAA] * -5628
+    32-bit [0x0048F604] = 24
+  or alternative 4:
+    Add address: 8-bit [0x00348FAA] * -5628
+    32-bit [0x0048F604] = 32
+
+==== Leave a 5-Star Review  (4 points, official, ID 392850)
+What to do: Obtain the Flawed Sapphire.
+  core:
+    Add address: 8-bit [0x00348FAA] * -10416
+    8-bit [0x0070F9DA] != 8
+    Add address: 8-bit [0x00348FAA] * -10432
+    last frame's 8-bit [0x007173E6] = 0
+    Add address: 8-bit [0x00348FAA] * -10432
+    8-bit [0x007173E6] != 0
+  or alternative 1:
+    Add address: 8-bit [0x00348FAA] * -5628
+    32-bit [0x0048F604] = 21
+  or alternative 2:
+    Add address: 8-bit [0x00348FAA] * -5628
+    32-bit [0x0048F604] = 23
+  or alternative 3:
+    Add address: 8-bit [0x00348FAA] * -5628
+    32-bit [0x0048F604] = 24
+  or alternative 4:
+    Add address: 8-bit [0x00348FAA] * -5628
+    32-bit [0x0048F604] = 32
+
+==== Too Much Eggnog  (2 points, official, ID 392851)
+What to do: Rescue the unconscious man in the Hudson Tunnel Area as Amber.
+  core:
+    Add address: 8-bit [0x00348FAA] * -5632
+    Add source: 32-bit [0x00492450] * 10000
+    Add address: 8-bit [0x00348FAA] * -5632
+    Add source: 32-bit [0x00492454] * 100
+    Add address: 8-bit [0x00348FAA] * -5632
+    32-bit [0x00492458] = 20500
+    Add address: 8-bit [0x00348FAA] * -5632
+    32-bit [0x005EAF1C] != 0
+    Add address: 8-bit [0x00348FAA] * -5632
+    Add address: 32-bit [0x005EAF1C]
+    last frame's 16-bit [0x00001884] = 65535
+    Add address: 8-bit [0x00348FAA] * -5632
+    Add address: 32-bit [0x005EAF1C]
+    16-bit [0x00001884] = 4
+
+==== I'm a Friend of Amber Brazil  (3 points, official, ID 392852)
+What to do: Escape the police detective (again) in the Landmark Apartments Area as Amber.
+  core:
+    Add address: 8-bit [0x00348FAA] * -10416
+    8-bit [0x0070F9DA] != 8
+    Add address: 8-bit [0x00348FAA] * -5632
+    Add source: 32-bit [0x00492450] * 10000
+    Add address: 8-bit [0x00348FAA] * -5632
+    Add source: 32-bit [0x00492454] * 100
+    Add address: 8-bit [0x00348FAA] * -5632
+    32-bit [0x00492458] = 20600
+    Add address: 8-bit [0x00348FAA] * -5632
+    Add address: 32-bit [0x006003A4]
+    last frame's float [0x000000A8] < f-30.0
+    Add address: 8-bit [0x00348FAA] * -5632
+    Add address: 32-bit [0x006003A4]
+    float [0x000000A8] >= f-30.0
+  or alternative 1:
+    Add address: 8-bit [0x00348FAA] * -5628
+    32-bit [0x0048F604] = 21
+  or alternative 2:
+    Add address: 8-bit [0x00348FAA] * -5628
+    32-bit [0x0048F604] = 23
+  or alternative 3:
+    Add address: 8-bit [0x00348FAA] * -5628
+    32-bit [0x0048F604] = 24
+  or alternative 4:
+    Add address: 8-bit [0x00348FAA] * -5628
+    32-bit [0x0048F604] = 32
+
+==== FYI I am a Spy  (10 points, official, ID 392853)
+What to do: Obtain Ending 2-A.
+  core:
+    Add address: 8-bit [0x00348FAA] * -10416
+    8-bit [0x0070F9DA] != 8
+    Add address: 8-bit [0x00348FAA] * -5552
+    last frame's 8-bit [0x0048DAB0] = 255
+    Add address: 8-bit [0x00348FAA] * -5552
+    8-bit [0x0048DAB0] = 3
+  or alternative 1:
+    Add address: 8-bit [0x00348FAA] * -5628
+    32-bit [0x0048F604] = 21
+  or alternative 2:
+    Add address: 8-bit [0x00348FAA] * -5628
+    32-bit [0x0048F604] = 23
+  or alternative 3:
+    Add address: 8-bit [0x00348FAA] * -5628
+    32-bit [0x0048F604] = 24
+  or alternative 4:
+    Add address: 8-bit [0x00348FAA] * -5628
+    32-bit [0x0048F604] = 32
+
+==== When's This Rain Gonna Stop?  (4 points, official, ID 392854)
+What to do: Obtain the Small Opal.
+  core:
+    Add address: 8-bit [0x00348FAA] * -10416
+    8-bit [0x0070F9DA] != 8
+    Add address: 8-bit [0x00348FAA] * -10432
+    last frame's 8-bit [0x007173CE] = 0
+    Add address: 8-bit [0x00348FAA] * -10432
+    8-bit [0x007173CE] != 0
+  or alternative 1:
+    Add address: 8-bit [0x00348FAA] * -5628
+    32-bit [0x0048F604] = 21
+  or alternative 2:
+    Add address: 8-bit [0x00348FAA] * -5628
+    32-bit [0x0048F604] = 23
+  or alternative 3:
+    Add address: 8-bit [0x00348FAA] * -5628
+    32-bit [0x0048F604] = 24
+  or alternative 4:
+    Add address: 8-bit [0x00348FAA] * -5628
+    32-bit [0x0048F604] = 32
+
+==== Disaster-Prepared  (1 points, official, ID 392855)
+What to do: In the Tutorial, complete the training program and receive a performance evaluation.
+  core:
+    Add address: 8-bit [0x00348FAA] * -10416
+    8-bit [0x0070F9DA] != 8
+    Add address: 8-bit [0x00348FAA] * -5632
+    last frame's bit 7 of [0x00609479] = 0
+    Add address: 8-bit [0x00348FAA] * -5632
+    bit 7 of [0x00609479] = 1
+  or alternative 1:
+    Add address: 8-bit [0x00348FAA] * -5628
+    32-bit [0x0048F604] = 21
+  or alternative 2:
+    Add address: 8-bit [0x00348FAA] * -5628
+    32-bit [0x0048F604] = 23
+  or alternative 3:
+    Add address: 8-bit [0x00348FAA] * -5628
+    32-bit [0x0048F604] = 24
+  or alternative 4:
+    Add address: 8-bit [0x00348FAA] * -5628
+    32-bit [0x0048F604] = 32
+
+==== She Didn't Have Any Money  (10 points, official, ID 393429, missable)
+What to do: Obtain ending 3-B. Free Mode is disallowed.
+  core:
+    Add address: 8-bit [0x00348FAA] * -10416
+    8-bit [0x0070F9DA] != 8
+    Add address: 8-bit [0x00348FAA] * -5552
+    last frame's 8-bit [0x0048DAB0] = 255
+    Add address: 8-bit [0x00348FAA] * -5552
+    8-bit [0x0048DAB0] = 6
+    Add address: 8-bit [0x00348FAA] * -10304
+    8-bit [0x0067DDBA] != 1
+  or alternative 1:
+    Add address: 8-bit [0x00348FAA] * -5628
+    32-bit [0x0048F604] = 21
+  or alternative 2:
+    Add address: 8-bit [0x00348FAA] * -5628
+    32-bit [0x0048F604] = 23
+  or alternative 3:
+    Add address: 8-bit [0x00348FAA] * -5628
+    32-bit [0x0048F604] = 24
+  or alternative 4:
+    Add address: 8-bit [0x00348FAA] * -5628
+    32-bit [0x0048F604] = 32
+
+==== Wheelman  (3 points, official, ID 393430)
+What to do: Replace a tire on your taxi as Isaac.
+  core:
+    Add address: 8-bit [0x00348FAA] * -10416
+    8-bit [0x0070F9DA] != 8
+    Add address: 8-bit [0x00348FAA] * -5632
+    last frame's bit 7 of [0x00609629] = 0
+    Add address: 8-bit [0x00348FAA] * -5632
+    bit 7 of [0x00609629] = 1
+  or alternative 1:
+    Add address: 8-bit [0x00348FAA] * -5628
+    32-bit [0x0048F604] = 21
+  or alternative 2:
+    Add address: 8-bit [0x00348FAA] * -5628
+    32-bit [0x0048F604] = 23
+  or alternative 3:
+    Add address: 8-bit [0x00348FAA] * -5628
+    32-bit [0x0048F604] = 24
+  or alternative 4:
+    Add address: 8-bit [0x00348FAA] * -5628
+    32-bit [0x0048F604] = 32
+
+==== Great Parking and Ease of Access  (5 points, official, ID 393431)
+What to do: Find a taxi repair shop as Isaac.
+  core:
+    Add address: 8-bit [0x00348FAA] * -10416
+    8-bit [0x0070F9DA] != 8
+    Add address: 8-bit [0x00348FAA] * -5632
+    32-bit [0x006003A4] != 0
+    Add address: 8-bit [0x00348FAA] * -5632
+    Add address: 32-bit [0x006003A4]
+    float [0x000000A4] <= 8
+  or alternative 1:
+    Add address: 8-bit [0x00348FAA] * -5628
+    32-bit [0x0048F604] = 21
+    Add address: 8-bit [0x00348FAA] * -5632
+    Add source: 32-bit [0x00492450] * 10000
+    Add address: 8-bit [0x00348FAA] * -5632
+    Add source: 32-bit [0x00492454] * 100
+    Add address: 8-bit [0x00348FAA] * -5632
+    32-bit [0x00492458] = 30300
+    Add address: 8-bit [0x00348FAA] * -5632
+    Add address: 32-bit [0x006003A4]
+    float [0x000000A0] >= 203
+    Add address: 8-bit [0x00348FAA] * -5632
+    Add address: 32-bit [0x006003A4]
+    float [0x000000A0] <= 207
+    Add address: 8-bit [0x00348FAA] * -5632
+    Add address: 32-bit [0x006003A4]
+    float [0x000000A4] >= 3
+    Add address: 8-bit [0x00348FAA] * -5632
+    Add address: 32-bit [0x006003A4]
+    float [0x000000A8] >= 228
+    Add address: 8-bit [0x00348FAA] * -5632
+    Add address: 32-bit [0x006003A4]
+    float [0x000000A8] <= 235
+  or alternative 2:
+    Add address: 8-bit [0x00348FAA] * -5628
+    32-bit [0x0048F604] = 21
+    Add address: 8-bit [0x00348FAA] * -5632
+    Add source: 32-bit [0x00492450] * 10000
+    Add address: 8-bit [0x00348FAA] * -5632
+    Add source: 32-bit [0x00492454] * 100
+    Add address: 8-bit [0x00348FAA] * -5632
+    32-bit [0x00492458] = 30600
+    Add address: 8-bit [0x00348FAA] * -5632
+    Add address: 32-bit [0x006003A4]
+    float [0x000000A0] >= 247
+    Add address: 8-bit [0x00348FAA] * -5632
+    Add address: 32-bit [0x006003A4]
+    float [0x000000A0] <= 251
+    Add address: 8-bit [0x00348FAA] * -5632
+    Add address: 32-bit [0x006003A4]
+    float [0x000000A4] >= 5
+    Add address: 8-bit [0x00348FAA] * -5632
+    Add address: 32-bit [0x006003A4]
+    float [0x000000A8] >= 13
+    Add address: 8-bit [0x00348FAA] * -5632
+    Add address: 32-bit [0x006003A4]
+    float [0x000000A8] <= 22
+  or alternative 3:
+    Add address: 8-bit [0x00348FAA] * -5628
+    32-bit [0x0048F604] = 23
+    Add address: 8-bit [0x00348FAA] * -5632
+    Add source: 32-bit [0x00492450] * 10000
+    Add address: 8-bit [0x00348FAA] * -5632
+    Add source: 32-bit [0x00492454] * 100
+    Add address: 8-bit [0x00348FAA] * -5632
+    32-bit [0x00492458] = 30300
+    Add address: 8-bit [0x00348FAA] * -5632
+    Add address: 32-bit [0x006003A4]
+    float [0x000000A0] >= 203
+    Add address: 8-bit [0x00348FAA] * -5632
+    Add address: 32-bit [0x006003A4]
+    float [0x000000A0] <= 207
+    Add address: 8-bit [0x00348FAA] * -5632
+    Add address: 32-bit [0x006003A4]
+    float [0x000000A4] >= 3
+    Add address: 8-bit [0x00348FAA] * -5632
+    Add address: 32-bit [0x006003A4]
+    float [0x000000A8] >= 228
+    Add address: 8-bit [0x00348FAA] * -5632
+    Add address: 32-bit [0x006003A4]
+    float [0x000000A8] <= 235
+  or alternative 4:
+    Add address: 8-bit [0x00348FAA] * -5628
+    32-bit [0x0048F604] = 23
+    Add address: 8-bit [0x00348FAA] * -5632
+    Add source: 32-bit [0x00492450] * 10000
+    Add address: 8-bit [0x00348FAA] * -5632
+    Add source: 32-bit [0x00492454] * 100
+    Add address: 8-bit [0x00348FAA] * -5632
+    32-bit [0x00492458] = 30600
+    Add address: 8-bit [0x00348FAA] * -5632
+    Add address: 32-bit [0x006003A4]
+    float [0x000000A0] >= 247
+    Add address: 8-bit [0x00348FAA] * -5632
+    Add address: 32-bit [0x006003A4]
+    float [0x000000A0] <= 251
+    Add address: 8-bit [0x00348FAA] * -5632
+    Add address: 32-bit [0x006003A4]
+    float [0x000000A4] >= 5
+    Add address: 8-bit [0x00348FAA] * -5632
+    Add address: 32-bit [0x006003A4]
+    float [0x000000A8] >= 13
+    Add address: 8-bit [0x00348FAA] * -5632
+    Add address: 32-bit [0x006003A4]
+    float [0x000000A8] <= 22
+  or alternative 5:
+    Add address: 8-bit [0x00348FAA] * -5628
+    32-bit [0x0048F604] = 24
+    Add address: 8-bit [0x00348FAA] * -5632
+    Add source: 32-bit [0x00492450] * 10000
+    Add address: 8-bit [0x00348FAA] * -5632
+    Add source: 32-bit [0x00492454] * 100
+    Add address: 8-bit [0x00348FAA] * -5632
+    32-bit [0x00492458] = 30300
+    Add address: 8-bit [0x00348FAA] * -5632
+    Add address: 32-bit [0x006003A4]
+    float [0x000000A0] >= 203
+    Add address: 8-bit [0x00348FAA] * -5632
+    Add address: 32-bit [0x006003A4]
+    float [0x000000A0] <= 207
+    Add address: 8-bit [0x00348FAA] * -5632
+    Add address: 32-bit [0x006003A4]
+    float [0x000000A4] >= 3
+    Add address: 8-bit [0x00348FAA] * -5632
+    Add address: 32-bit [0x006003A4]
+    float [0x000000A8] >= 228
+    Add address: 8-bit [0x00348FAA] * -5632
+    Add address: 32-bit [0x006003A4]
+    float [0x000000A8] <= 235
+  or alternative 6:
+    Add address: 8-bit [0x00348FAA] * -5628
+    32-bit [0x0048F604] = 24
+    Add address: 8-bit [0x00348FAA] * -5632
+    Add source: 32-bit [0x00492450] * 10000
+    Add address: 8-bit [0x00348FAA] * -5632
+    Add source: 32-bit [0x00492454] * 100
+    Add address: 8-bit [0x00348FAA] * -5632
+    32-bit [0x00492458] = 30600
+    Add address: 8-bit [0x00348FAA] * -5632
+    Add address: 32-bit [0x006003A4]
+    float [0x000000A0] >= 247
+    Add address: 8-bit [0x00348FAA] * -5632
+    Add address: 32-bit [0x006003A4]
+    float [0x000000A0] <= 251
+    Add address: 8-bit [0x00348FAA] * -5632
+    Add address: 32-bit [0x006003A4]
+    float [0x000000A4] >= 5
+    Add address: 8-bit [0x00348FAA] * -5632
+    Add address: 32-bit [0x006003A4]
+    float [0x000000A8] >= 13
+    Add address: 8-bit [0x00348FAA] * -5632
+    Add address: 32-bit [0x006003A4]
+    float [0x000000A8] <= 22
+  or alternative 7:
+    Add address: 8-bit [0x00348FAA] * -5628
+    32-bit [0x0048F604] = 32
+    Add address: 8-bit [0x00348FAA] * -5632
+    Add source: 32-bit [0x00492450] * 10000
+    Add address: 8-bit [0x00348FAA] * -5632
+    Add source: 32-bit [0x00492454] * 100
+    Add address: 8-bit [0x00348FAA] * -5632
+    32-bit [0x00492458] = 30300
+    Add address: 8-bit [0x00348FAA] * -5632
+    Add address: 32-bit [0x006003A4]
+    float [0x000000A0] >= 203
+    Add address: 8-bit [0x00348FAA] * -5632
+    Add address: 32-bit [0x006003A4]
+    float [0x000000A0] <= 207
+    Add address: 8-bit [0x00348FAA] * -5632
+    Add address: 32-bit [0x006003A4]
+    float [0x000000A4] >= 3
+    Add address: 8-bit [0x00348FAA] * -5632
+    Add address: 32-bit [0x006003A4]
+    float [0x000000A8] >= 228
+    Add address: 8-bit [0x00348FAA] * -5632
+    Add address: 32-bit [0x006003A4]
+    float [0x000000A8] <= 235
+  or alternative 8:
+    Add address: 8-bit [0x00348FAA] * -5628
+    32-bit [0x0048F604] = 32
+    Add address: 8-bit [0x00348FAA] * -5632
+    Add source: 32-bit [0x00492450] * 10000
+    Add address: 8-bit [0x00348FAA] * -5632
+    Add source: 32-bit [0x00492454] * 100
+    Add address: 8-bit [0x00348FAA] * -5632
+    32-bit [0x00492458] = 30600
+    Add address: 8-bit [0x00348FAA] * -5632
+    Add address: 32-bit [0x006003A4]
+    float [0x000000A0] >= 247
+    Add address: 8-bit [0x00348FAA] * -5632
+    Add address: 32-bit [0x006003A4]
+    float [0x000000A0] <= 251
+    Add address: 8-bit [0x00348FAA] * -5632
+    Add address: 32-bit [0x006003A4]
+    float [0x000000A4] >= 5
+    Add address: 8-bit [0x00348FAA] * -5632
+    Add address: 32-bit [0x006003A4]
+    float [0x000000A8] >= 13
+    Add address: 8-bit [0x00348FAA] * -5632
+    Add address: 32-bit [0x006003A4]
+    float [0x000000A8] <= 22
+
+==== 25 Hour Lifeguard  (3 points, official, ID 393432)
+What to do: Rescue Sophia from a flooded room in the NorCal R&D Department as Isaac.
+  core:
+    Add address: 8-bit [0x00348FAA] * -10416
+    8-bit [0x0070F9DA] != 8
+    Add address: 8-bit [0x00348FAA] * -5632
+    Add source: 32-bit [0x00492450] * 10000
+    Add address: 8-bit [0x00348FAA] * -5632
+    Add source: 32-bit [0x00492454] * 100
+    Add address: 8-bit [0x00348FAA] * -5632
+    32-bit [0x00492458] = 30601
+    Add address: 8-bit [0x00348FAA] * -5632
+    last frame's 32-bit [0x0049245C] != 30
+    Add address: 8-bit [0x00348FAA] * -5632
+    32-bit [0x0049245C] = 30
+  or alternative 1:
+    Add address: 8-bit [0x00348FAA] * -5628
+    32-bit [0x0048F604] = 21
+  or alternative 2:
+    Add address: 8-bit [0x00348FAA] * -5628
+    32-bit [0x0048F604] = 23
+  or alternative 3:
+    Add address: 8-bit [0x00348FAA] * -5628
+    32-bit [0x0048F604] = 24
+  or alternative 4:
+    Add address: 8-bit [0x00348FAA] * -5628
+    32-bit [0x0048F604] = 32
+
+==== I Picked Up an Attractive Female in Downtown Geo  (10 points, official, ID 393433)
+What to do: Obtain Ending 3-A.
+  core:
+    Add address: 8-bit [0x00348FAA] * -10416
+    8-bit [0x0070F9DA] != 8
+    Add address: 8-bit [0x00348FAA] * -5552
+    last frame's 8-bit [0x0048DAB0] = 255
+    Add address: 8-bit [0x00348FAA] * -5552
+    8-bit [0x0048DAB0] = 5
+  or alternative 1:
+    Add address: 8-bit [0x00348FAA] * -5628
+    32-bit [0x0048F604] = 21
+  or alternative 2:
+    Add address: 8-bit [0x00348FAA] * -5628
+    32-bit [0x0048F604] = 23
+  or alternative 3:
+    Add address: 8-bit [0x00348FAA] * -5628
+    32-bit [0x0048F604] = 24
+  or alternative 4:
+    Add address: 8-bit [0x00348FAA] * -5628
+    32-bit [0x0048F604] = 32
+
+==== Up & Running  (1 points, official, ID 393434)
+What to do: Deliver the maintenance worker to Downtown Geo and receive the best assessment as Isaac.
+  core:
+    Add address: 8-bit [0x00348FAA] * -5632
+    Add source: 32-bit [0x00492450] * 10000
+    Add address: 8-bit [0x00348FAA] * -5632
+    Add source: 32-bit [0x00492454] * 100
+    Add address: 8-bit [0x00348FAA] * -5632
+    And next: 32-bit [0x00492458] = 30100
+    Add address: 8-bit [0x00348FAA] * -5632
+    And next: 32-bit [0x006003A4] != 0
+    Add address: 8-bit [0x00348FAA] * -5632
+    Add address: 32-bit [0x006003A4]
+    32-bit [0x00001854] != 0  (1 times)
+    Reset if: 8-bit [0x00376078] != 60
+    Add address: 8-bit [0x00348FAA] * -5628
+    Reset if: 32-bit [0x0048F604] = 11
+    Add address: 8-bit [0x00348FAA] * -5544
+    Reset if: 32-bit [0x0048EDC0] < 91
+    Add address: 8-bit [0x00348FAA] * -5628
+    And next: 32-bit [0x0048F604] = 21
+    Add address: 8-bit [0x00348FAA] * -5632
+    Add source: 32-bit [0x00492450] * 10000
+    Add address: 8-bit [0x00348FAA] * -5632
+    Add source: 32-bit [0x00492454] * 100
+    Add address: 8-bit [0x00348FAA] * -5632
+    And next: 32-bit [0x00492458] = 30100
+    Add address: 8-bit [0x00348FAA] * -5632
+    Add address: 32-bit [0x006003A4]
+    Reset if: 32-bit [0x00001854] = 0
+    Add address: 8-bit [0x00348FAA] * -5632
+    Trigger: last frame's bit 6 of [0x00609FC6] = 0
+    Add address: 8-bit [0x00348FAA] * -5632
+    Trigger: bit 6 of [0x00609FC6] = 1
+
+==== Frozen Memories  (1 points, official, ID 393620)
+What to do: Obtain the Hot Dog Compass and relive a bad memory as Paige.
+  core:
+    Add address: 8-bit [0x00348FAA] * -10416
+    8-bit [0x0070F9DA] != 8
+    Add address: 8-bit [0x00348FAA] * -5632
+    last frame's bit 3 of [0x0060A044] = 0
+    Add address: 8-bit [0x00348FAA] * -5632
+    bit 3 of [0x0060A044] = 1
+  or alternative 1:
+    Add address: 8-bit [0x00348FAA] * -5628
+    32-bit [0x0048F604] = 21
+  or alternative 2:
+    Add address: 8-bit [0x00348FAA] * -5628
+    32-bit [0x0048F604] = 23
+  or alternative 3:
+    Add address: 8-bit [0x00348FAA] * -5628
+    32-bit [0x0048F604] = 24
+  or alternative 4:
+    Add address: 8-bit [0x00348FAA] * -5628
+    32-bit [0x0048F604] = 32
+
+==== Tight Squeeze  (2 points, official, ID 393621)
+What to do: Consider using Vegetable Oil to free the trapped teacher as Paige.
+  core:
+    Add address: 8-bit [0x00348FAA] * -10416
+    8-bit [0x0070F9DA] != 8
+    Add address: 8-bit [0x00348FAA] * -5632
+    last frame's bit 5 of [0x0060A044] = 0
+    Add address: 8-bit [0x00348FAA] * -5632
+    bit 5 of [0x0060A044] = 1
+  or alternative 1:
+    Add address: 8-bit [0x00348FAA] * -5628
+    32-bit [0x0048F604] = 21
+  or alternative 2:
+    Add address: 8-bit [0x00348FAA] * -5628
+    32-bit [0x0048F604] = 23
+  or alternative 3:
+    Add address: 8-bit [0x00348FAA] * -5628
+    32-bit [0x0048F604] = 24
+  or alternative 4:
+    Add address: 8-bit [0x00348FAA] * -5628
+    32-bit [0x0048F604] = 32
+
+==== Evacuate to the Gym  (3 points, official, ID 393622, progression)
+What to do: Reach the gymnasium as Paige.
+  core:
+    Add address: 8-bit [0x00348FAA] * -5628
+    32-bit [0x0048F604] != 18
+    Add address: 8-bit [0x00348FAA] * -5632
+    Add source: 32-bit [0x00492440] * 10000
+    Add address: 8-bit [0x00348FAA] * -5632
+    Add source: 32-bit [0x00492444] * 100
+    Add address: 8-bit [0x00348FAA] * -5632
+    32-bit [0x00492448] = 40300
+    Add address: 8-bit [0x00348FAA] * -5632
+    Add source: last frame's 32-bit [0x00492440] * 10000
+    Add address: 8-bit [0x00348FAA] * -5632
+    Add source: last frame's 32-bit [0x00492444] * 100
+    Add address: 8-bit [0x00348FAA] * -5632
+    last frame's 32-bit [0x00492448] = 40200
+
+==== You're a Lot Like Me  (4 points, official, ID 393623)
+What to do: Obtain the Crimson Ruby.
+  core:
+    Add address: 8-bit [0x00348FAA] * -10416
+    8-bit [0x0070F9DA] != 8
+    Add address: 8-bit [0x00348FAA] * -10432
+    last frame's 8-bit [0x007173FE] = 0
+    Add address: 8-bit [0x00348FAA] * -10432
+    8-bit [0x007173FE] != 0
+  or alternative 1:
+    Add address: 8-bit [0x00348FAA] * -5628
+    32-bit [0x0048F604] = 21
+  or alternative 2:
+    Add address: 8-bit [0x00348FAA] * -5628
+    32-bit [0x0048F604] = 23
+  or alternative 3:
+    Add address: 8-bit [0x00348FAA] * -5628
+    32-bit [0x0048F604] = 24
+  or alternative 4:
+    Add address: 8-bit [0x00348FAA] * -5628
+    32-bit [0x0048F604] = 32
+
+==== Forgive or Forget  (10 points, official, ID 393624)
+What to do: Obtain Ending 4-A.
+  core:
+    Add address: 8-bit [0x00348FAA] * -10416
+    8-bit [0x0070F9DA] != 8
+    Add address: 8-bit [0x00348FAA] * -5552
+    last frame's 8-bit [0x0048DAB0] = 255
+    Add address: 8-bit [0x00348FAA] * -5552
+    8-bit [0x0048DAB0] = 7
+  or alternative 1:
+    Add address: 8-bit [0x00348FAA] * -5628
+    32-bit [0x0048F604] = 21
+  or alternative 2:
+    Add address: 8-bit [0x00348FAA] * -5628
+    32-bit [0x0048F604] = 23
+  or alternative 3:
+    Add address: 8-bit [0x00348FAA] * -5628
+    32-bit [0x0048F604] = 24
+  or alternative 4:
+    Add address: 8-bit [0x00348FAA] * -5628
+    32-bit [0x0048F604] = 32
+
+==== My Life as a Teenage Onryou  (10 points, official, ID 393625)
+What to do: Obtain Ending 4-B.
+  core:
+    Add address: 8-bit [0x00348FAA] * -10416
+    8-bit [0x0070F9DA] != 8
+    Add address: 8-bit [0x00348FAA] * -5552
+    last frame's 8-bit [0x0048DAB0] = 255
+    Add address: 8-bit [0x00348FAA] * -5552
+    8-bit [0x0048DAB0] = 8
+  or alternative 1:
+    Add address: 8-bit [0x00348FAA] * -5628
+    32-bit [0x0048F604] = 21
+  or alternative 2:
+    Add address: 8-bit [0x00348FAA] * -5628
+    32-bit [0x0048F604] = 23
+  or alternative 3:
+    Add address: 8-bit [0x00348FAA] * -5628
+    32-bit [0x0048F604] = 24
+  or alternative 4:
+    Add address: 8-bit [0x00348FAA] * -5628
+    32-bit [0x0048F604] = 32
+
+==== Your Name is MacGyver  (5 points, official, ID 393626)
+What to do: Assemble Assembled Oars.
+  core:
+    Add address: 8-bit [0x00348FAA] * -10416
+    8-bit [0x0070F9DA] != 8
+    Add address: 8-bit [0x00348FAA] * -5628
+    32-bit [0x0048F604] = 23
+  or alternative 1:
+    Add address: 8-bit [0x00348FAA] * -9984
+    16-bit [0x00622014] = 190
+    Add address: 8-bit [0x00348FAA] * -9984
+    last frame's 16-bit [0x00622014] != 190
+  or alternative 2:
+    Add address: 8-bit [0x00348FAA] * -9984
+    16-bit [0x00622058] = 190
+    Add address: 8-bit [0x00348FAA] * -9984
+    last frame's 16-bit [0x00622058] != 190
+  or alternative 3:
+    Add address: 8-bit [0x00348FAA] * -9984
+    16-bit [0x0062209C] = 190
+    Add address: 8-bit [0x00348FAA] * -9984
+    last frame's 16-bit [0x0062209C] != 190
+  or alternative 4:
+    Add address: 8-bit [0x00348FAA] * -9984
+    16-bit [0x006220E0] = 190
+    Add address: 8-bit [0x00348FAA] * -9984
+    last frame's 16-bit [0x006220E0] != 190
+  or alternative 5:
+    Add address: 8-bit [0x00348FAA] * -9984
+    16-bit [0x00622124] = 190
+    Add address: 8-bit [0x00348FAA] * -9984
+    last frame's 16-bit [0x00622124] != 190
+  or alternative 6:
+    Add address: 8-bit [0x00348FAA] * -9984
+    16-bit [0x00622168] = 190
+    Add address: 8-bit [0x00348FAA] * -9984
+    last frame's 16-bit [0x00622168] != 190
+  or alternative 7:
+    Add address: 8-bit [0x00348FAA] * -9984
+    16-bit [0x006221AC] = 190
+    Add address: 8-bit [0x00348FAA] * -9984
+    last frame's 16-bit [0x006221AC] != 190
+  or alternative 8:
+    Add address: 8-bit [0x00348FAA] * -9984
+    16-bit [0x006221F0] = 190
+    Add address: 8-bit [0x00348FAA] * -9984
+    last frame's 16-bit [0x006221F0] != 190
+  or alternative 9:
+    Add address: 8-bit [0x00348FAA] * -9984
+    16-bit [0x00622234] = 190
+    Add address: 8-bit [0x00348FAA] * -9984
+    last frame's 16-bit [0x00622234] != 190
+  or alternative 10:
+    Add address: 8-bit [0x00348FAA] * -9984
+    16-bit [0x00622278] = 190
+    Add address: 8-bit [0x00348FAA] * -9984
+    last frame's 16-bit [0x00622278] != 190
+  or alternative 11:
+    Add address: 8-bit [0x00348FAA] * -9984
+    16-bit [0x006222BC] = 190
+    Add address: 8-bit [0x00348FAA] * -9984
+    last frame's 16-bit [0x006222BC] != 190
+  or alternative 12:
+    Add address: 8-bit [0x00348FAA] * -9984
+    16-bit [0x00622300] = 190
+    Add address: 8-bit [0x00348FAA] * -9984
+    last frame's 16-bit [0x00622300] != 190
+  or alternative 13:
+    Add address: 8-bit [0x00348FAA] * -9984
+    16-bit [0x00622344] = 190
+    Add address: 8-bit [0x00348FAA] * -9984
+    last frame's 16-bit [0x00622344] != 190
+  or alternative 14:
+    Add address: 8-bit [0x00348FAA] * -9984
+    16-bit [0x00622388] = 190
+    Add address: 8-bit [0x00348FAA] * -9984
+    last frame's 16-bit [0x00622388] != 190
+  or alternative 15:
+    Add address: 8-bit [0x00348FAA] * -9984
+    16-bit [0x006223CC] = 190
+    Add address: 8-bit [0x00348FAA] * -9984
+    last frame's 16-bit [0x006223CC] != 190
+  or alternative 16:
+    Add address: 8-bit [0x00348FAA] * -9984
+    16-bit [0x00622410] = 190
+    Add address: 8-bit [0x00348FAA] * -9984
+    last frame's 16-bit [0x00622410] != 190
+  or alternative 17:
+    Add address: 8-bit [0x00348FAA] * -9984
+    16-bit [0x00622454] = 190
+    Add address: 8-bit [0x00348FAA] * -9984
+    last frame's 16-bit [0x00622454] != 190
+  or alternative 18:
+    Add address: 8-bit [0x00348FAA] * -9984
+    16-bit [0x00622498] = 190
+    Add address: 8-bit [0x00348FAA] * -9984
+    last frame's 16-bit [0x00622498] != 190
+  or alternative 19:
+    Add address: 8-bit [0x00348FAA] * -9984
+    16-bit [0x006224DC] = 190
+    Add address: 8-bit [0x00348FAA] * -9984
+    last frame's 16-bit [0x006224DC] != 190
+  or alternative 20:
+    Add address: 8-bit [0x00348FAA] * -9984
+    16-bit [0x00622520] = 190
+    Add address: 8-bit [0x00348FAA] * -9984
+    last frame's 16-bit [0x00622520] != 190
+  or alternative 21:
+    Add address: 8-bit [0x00348FAA] * -9984
+    16-bit [0x00622564] = 190
+    Add address: 8-bit [0x00348FAA] * -9984
+    last frame's 16-bit [0x00622564] != 190
+  or alternative 22:
+    Add address: 8-bit [0x00348FAA] * -9984
+    16-bit [0x006225A8] = 190
+    Add address: 8-bit [0x00348FAA] * -9984
+    last frame's 16-bit [0x006225A8] != 190
+  or alternative 23:
+    Add address: 8-bit [0x00348FAA] * -9984
+    16-bit [0x006225EC] = 190
+    Add address: 8-bit [0x00348FAA] * -9984
+    last frame's 16-bit [0x006225EC] != 190
+  or alternative 24:
+    Add address: 8-bit [0x00348FAA] * -9984
+    16-bit [0x00622630] = 190
+    Add address: 8-bit [0x00348FAA] * -9984
+    last frame's 16-bit [0x00622630] != 190
+  or alternative 25:
+    Add address: 8-bit [0x00348FAA] * -9984
+    16-bit [0x00622674] = 190
+    Add address: 8-bit [0x00348FAA] * -9984
+    last frame's 16-bit [0x00622674] != 190
+  or alternative 26:
+    Add address: 8-bit [0x00348FAA] * -9984
+    16-bit [0x006226B8] = 190
+    Add address: 8-bit [0x00348FAA] * -9984
+    last frame's 16-bit [0x006226B8] != 190
+  or alternative 27:
+    Add address: 8-bit [0x00348FAA] * -9984
+    16-bit [0x006226FC] = 190
+    Add address: 8-bit [0x00348FAA] * -9984
+    last frame's 16-bit [0x006226FC] != 190
+  or alternative 28:
+    Add address: 8-bit [0x00348FAA] * -9984
+    16-bit [0x00622740] = 190
+    Add address: 8-bit [0x00348FAA] * -9984
+    last frame's 16-bit [0x00622740] != 190
+  or alternative 29:
+    Add address: 8-bit [0x00348FAA] * -9984
+    16-bit [0x00622784] = 190
+    Add address: 8-bit [0x00348FAA] * -9984
+    last frame's 16-bit [0x00622784] != 190
+  or alternative 30:
+    Add address: 8-bit [0x00348FAA] * -9984
+    16-bit [0x006227C8] = 190
+    Add address: 8-bit [0x00348FAA] * -9984
+    last frame's 16-bit [0x006227C8] != 190
+  or alternative 31:
+    Add address: 8-bit [0x00348FAA] * -9984
+    16-bit [0x0062280C] = 190
+    Add address: 8-bit [0x00348FAA] * -9984
+    last frame's 16-bit [0x0062280C] != 190
+  or alternative 32:
+    Add address: 8-bit [0x00348FAA] * -9984
+    16-bit [0x00622850] = 190
+    Add address: 8-bit [0x00348FAA] * -9984
+    last frame's 16-bit [0x00622850] != 190
+  or alternative 33:
+    Add address: 8-bit [0x00348FAA] * -9984
+    16-bit [0x00622894] = 190
+    Add address: 8-bit [0x00348FAA] * -9984
+    last frame's 16-bit [0x00622894] != 190
+  or alternative 34:
+    Add address: 8-bit [0x00348FAA] * -9984
+    16-bit [0x006228D8] = 190
+    Add address: 8-bit [0x00348FAA] * -9984
+    last frame's 16-bit [0x006228D8] != 190
+  or alternative 35:
+    Add address: 8-bit [0x00348FAA] * -9984
+    16-bit [0x0062291C] = 190
+    Add address: 8-bit [0x00348FAA] * -9984
+    last frame's 16-bit [0x0062291C] != 190
+  or alternative 36:
+    Add address: 8-bit [0x00348FAA] * -9984
+    16-bit [0x00622960] = 190
+    Add address: 8-bit [0x00348FAA] * -9984
+    last frame's 16-bit [0x00622960] != 190
+  or alternative 37:
+    Add address: 8-bit [0x00348FAA] * -9984
+    16-bit [0x006229A4] = 190
+    Add address: 8-bit [0x00348FAA] * -9984
+    last frame's 16-bit [0x006229A4] != 190
+  or alternative 38:
+    Add address: 8-bit [0x00348FAA] * -9984
+    16-bit [0x006229E8] = 190
+    Add address: 8-bit [0x00348FAA] * -9984
+    last frame's 16-bit [0x006229E8] != 190
+  or alternative 39:
+    Add address: 8-bit [0x00348FAA] * -9984
+    16-bit [0x00622A2C] = 190
+    Add address: 8-bit [0x00348FAA] * -9984
+    last frame's 16-bit [0x00622A2C] != 190
+  or alternative 40:
+    Add address: 8-bit [0x00348FAA] * -9984
+    16-bit [0x00622A70] = 190
+    Add address: 8-bit [0x00348FAA] * -9984
+    last frame's 16-bit [0x00622A70] != 190
+  or alternative 41:
+    Add address: 8-bit [0x00348FAA] * -9984
+    16-bit [0x00622AB4] = 190
+    Add address: 8-bit [0x00348FAA] * -9984
+    last frame's 16-bit [0x00622AB4] != 190
+  or alternative 42:
+    Add address: 8-bit [0x00348FAA] * -9984
+    16-bit [0x00622AF8] = 190
+    Add address: 8-bit [0x00348FAA] * -9984
+    last frame's 16-bit [0x00622AF8] != 190
+  or alternative 43:
+    Add address: 8-bit [0x00348FAA] * -9984
+    16-bit [0x00622B3C] = 190
+    Add address: 8-bit [0x00348FAA] * -9984
+    last frame's 16-bit [0x00622B3C] != 190
+  or alternative 44:
+    Add address: 8-bit [0x00348FAA] * -9984
+    16-bit [0x00622B80] = 190
+    Add address: 8-bit [0x00348FAA] * -9984
+    last frame's 16-bit [0x00622B80] != 190
+  or alternative 45:
+    Add address: 8-bit [0x00348FAA] * -9984
+    16-bit [0x00622BC4] = 190
+    Add address: 8-bit [0x00348FAA] * -9984
+    last frame's 16-bit [0x00622BC4] != 190
+  or alternative 46:
+    Add address: 8-bit [0x00348FAA] * -9984
+    16-bit [0x00622C08] = 190
+    Add address: 8-bit [0x00348FAA] * -9984
+    last frame's 16-bit [0x00622C08] != 190
+  or alternative 47:
+    Add address: 8-bit [0x00348FAA] * -9984
+    16-bit [0x00622C4C] = 190
+    Add address: 8-bit [0x00348FAA] * -9984
+    last frame's 16-bit [0x00622C4C] != 190
+  or alternative 48:
+    Add address: 8-bit [0x00348FAA] * -9984
+    16-bit [0x00622C90] = 190
+    Add address: 8-bit [0x00348FAA] * -9984
+    last frame's 16-bit [0x00622C90] != 190
+  or alternative 49:
+    Add address: 8-bit [0x00348FAA] * -9984
+    16-bit [0x00622CD4] = 190
+    Add address: 8-bit [0x00348FAA] * -9984
+    last frame's 16-bit [0x00622CD4] != 190
+  or alternative 50:
+    Add address: 8-bit [0x00348FAA] * -9984
+    16-bit [0x00622D18] = 190
+    Add address: 8-bit [0x00348FAA] * -9984
+    last frame's 16-bit [0x00622D18] != 190
+  or alternative 51:
+    Add address: 8-bit [0x00348FAA] * -9984
+    16-bit [0x00622D5C] = 190
+    Add address: 8-bit [0x00348FAA] * -9984
+    last frame's 16-bit [0x00622D5C] != 190
+  or alternative 52:
+    Add address: 8-bit [0x00348FAA] * -9984
+    16-bit [0x00622DA0] = 190
+    Add address: 8-bit [0x00348FAA] * -9984
+    last frame's 16-bit [0x00622DA0] != 190
+  or alternative 53:
+    Add address: 8-bit [0x00348FAA] * -9984
+    16-bit [0x00622DE4] = 190
+    Add address: 8-bit [0x00348FAA] * -9984
+    last frame's 16-bit [0x00622DE4] != 190
+  or alternative 54:
+    Add address: 8-bit [0x00348FAA] * -9984
+    16-bit [0x00622E28] = 190
+    Add address: 8-bit [0x00348FAA] * -9984
+    last frame's 16-bit [0x00622E28] != 190
+  or alternative 55:
+    Add address: 8-bit [0x00348FAA] * -9984
+    16-bit [0x00622E6C] = 190
+    Add address: 8-bit [0x00348FAA] * -9984
+    last frame's 16-bit [0x00622E6C] != 190
+  or alternative 56:
+    Add address: 8-bit [0x00348FAA] * -9984
+    16-bit [0x00622EB0] = 190
+    Add address: 8-bit [0x00348FAA] * -9984
+    last frame's 16-bit [0x00622EB0] != 190
+  or alternative 57:
+    Add address: 8-bit [0x00348FAA] * -9984
+    16-bit [0x00622EF4] = 190
+    Add address: 8-bit [0x00348FAA] * -9984
+    last frame's 16-bit [0x00622EF4] != 190
+  or alternative 58:
+    Add address: 8-bit [0x00348FAA] * -9984
+    16-bit [0x00622F38] = 190
+    Add address: 8-bit [0x00348FAA] * -9984
+    last frame's 16-bit [0x00622F38] != 190
+  or alternative 59:
+    Add address: 8-bit [0x00348FAA] * -9984
+    16-bit [0x00622F7C] = 190
+    Add address: 8-bit [0x00348FAA] * -9984
+    last frame's 16-bit [0x00622F7C] != 190
+  or alternative 60:
+    Add address: 8-bit [0x00348FAA] * -9984
+    16-bit [0x00622FC0] = 190
+    Add address: 8-bit [0x00348FAA] * -9984
+    last frame's 16-bit [0x00622FC0] != 190
+  or alternative 61:
+    Add address: 8-bit [0x00348FAA] * -9984
+    16-bit [0x00623004] = 190
+    Add address: 8-bit [0x00348FAA] * -9984
+    last frame's 16-bit [0x00623004] != 190
+  or alternative 62:
+    Add address: 8-bit [0x00348FAA] * -9984
+    16-bit [0x00623048] = 190
+    Add address: 8-bit [0x00348FAA] * -9984
+    last frame's 16-bit [0x00623048] != 190
+  or alternative 63:
+    Add address: 8-bit [0x00348FAA] * -9984
+    16-bit [0x0062308C] = 190
+    Add address: 8-bit [0x00348FAA] * -9984
+    last frame's 16-bit [0x0062308C] != 190
+  or alternative 64:
+    Add address: 8-bit [0x00348FAA] * -9984
+    16-bit [0x006230D0] = 190
+    Add address: 8-bit [0x00348FAA] * -9984
+    last frame's 16-bit [0x006230D0] != 190
+  or alternative 65:
+    Add address: 8-bit [0x00348FAA] * -9984
+    16-bit [0x00623114] = 190
+    Add address: 8-bit [0x00348FAA] * -9984
+    last frame's 16-bit [0x00623114] != 190
+  or alternative 66:
+    Add address: 8-bit [0x00348FAA] * -9984
+    16-bit [0x00623158] = 190
+    Add address: 8-bit [0x00348FAA] * -9984
+    last frame's 16-bit [0x00623158] != 190
+  or alternative 67:
+    Add address: 8-bit [0x00348FAA] * -9984
+    16-bit [0x0062319C] = 190
+    Add address: 8-bit [0x00348FAA] * -9984
+    last frame's 16-bit [0x0062319C] != 190
+  or alternative 68:
+    Add address: 8-bit [0x00348FAA] * -9984
+    16-bit [0x006231E0] = 190
+    Add address: 8-bit [0x00348FAA] * -9984
+    last frame's 16-bit [0x006231E0] != 190
+  or alternative 69:
+    Add address: 8-bit [0x00348FAA] * -9984
+    16-bit [0x00623224] = 190
+    Add address: 8-bit [0x00348FAA] * -9984
+    last frame's 16-bit [0x00623224] != 190
+  or alternative 70:
+    Add address: 8-bit [0x00348FAA] * -9984
+    16-bit [0x00623268] = 190
+    Add address: 8-bit [0x00348FAA] * -9984
+    last frame's 16-bit [0x00623268] != 190
+  or alternative 71:
+    Add address: 8-bit [0x00348FAA] * -9984
+    16-bit [0x006232AC] = 190
+    Add address: 8-bit [0x00348FAA] * -9984
+    last frame's 16-bit [0x006232AC] != 190
+  or alternative 72:
+    Add address: 8-bit [0x00348FAA] * -9984
+    16-bit [0x006232F0] = 190
+    Add address: 8-bit [0x00348FAA] * -9984
+    last frame's 16-bit [0x006232F0] != 190
+  or alternative 73:
+    Add address: 8-bit [0x00348FAA] * -9984
+    16-bit [0x00623334] = 190
+    Add address: 8-bit [0x00348FAA] * -9984
+    last frame's 16-bit [0x00623334] != 190
+  or alternative 74:
+    Add address: 8-bit [0x00348FAA] * -9984
+    16-bit [0x00623378] = 190
+    Add address: 8-bit [0x00348FAA] * -9984
+    last frame's 16-bit [0x00623378] != 190
+  or alternative 75:
+    Add address: 8-bit [0x00348FAA] * -9984
+    16-bit [0x006233BC] = 190
+    Add address: 8-bit [0x00348FAA] * -9984
+    last frame's 16-bit [0x006233BC] != 190
+  or alternative 76:
+    Add address: 8-bit [0x00348FAA] * -9984
+    16-bit [0x00623400] = 190
+    Add address: 8-bit [0x00348FAA] * -9984
+    last frame's 16-bit [0x00623400] != 190
+  or alternative 77:
+    Add address: 8-bit [0x00348FAA] * -9984
+    16-bit [0x00623444] = 190
+    Add address: 8-bit [0x00348FAA] * -9984
+    last frame's 16-bit [0x00623444] != 190
+  or alternative 78:
+    Add address: 8-bit [0x00348FAA] * -9984
+    16-bit [0x00623488] = 190
+    Add address: 8-bit [0x00348FAA] * -9984
+    last frame's 16-bit [0x00623488] != 190
+  or alternative 79:
+    Add address: 8-bit [0x00348FAA] * -9984
+    16-bit [0x006234CC] = 190
+    Add address: 8-bit [0x00348FAA] * -9984
+    last frame's 16-bit [0x006234CC] != 190
+  or alternative 80:
+    Add address: 8-bit [0x00348FAA] * -9984
+    16-bit [0x00623510] = 190
+    Add address: 8-bit [0x00348FAA] * -9984
+    last frame's 16-bit [0x00623510] != 190
+  or alternative 81:
+    Add address: 8-bit [0x00348FAA] * -9984
+    16-bit [0x00623554] = 190
+    Add address: 8-bit [0x00348FAA] * -9984
+    last frame's 16-bit [0x00623554] != 190
+  or alternative 82:
+    Add address: 8-bit [0x00348FAA] * -9984
+    16-bit [0x00623598] = 190
+    Add address: 8-bit [0x00348FAA] * -9984
+    last frame's 16-bit [0x00623598] != 190
+  or alternative 83:
+    Add address: 8-bit [0x00348FAA] * -9984
+    16-bit [0x006235DC] = 190
+    Add address: 8-bit [0x00348FAA] * -9984
+    last frame's 16-bit [0x006235DC] != 190
+  or alternative 84:
+    Add address: 8-bit [0x00348FAA] * -9984
+    16-bit [0x00623620] = 190
+    Add address: 8-bit [0x00348FAA] * -9984
+    last frame's 16-bit [0x00623620] != 190
+  or alternative 85:
+    Add address: 8-bit [0x00348FAA] * -9984
+    16-bit [0x00623664] = 190
+    Add address: 8-bit [0x00348FAA] * -9984
+    last frame's 16-bit [0x00623664] != 190
+  or alternative 86:
+    Add address: 8-bit [0x00348FAA] * -9984
+    16-bit [0x006236A8] = 190
+    Add address: 8-bit [0x00348FAA] * -9984
+    last frame's 16-bit [0x006236A8] != 190
+  or alternative 87:
+    Add address: 8-bit [0x00348FAA] * -9984
+    16-bit [0x006236EC] = 190
+    Add address: 8-bit [0x00348FAA] * -9984
+    last frame's 16-bit [0x006236EC] != 190
+  or alternative 88:
+    Add address: 8-bit [0x00348FAA] * -9984
+    16-bit [0x00623730] = 190
+    Add address: 8-bit [0x00348FAA] * -9984
+    last frame's 16-bit [0x00623730] != 190
+  or alternative 89:
+    Add address: 8-bit [0x00348FAA] * -9984
+    16-bit [0x00623774] = 190
+    Add address: 8-bit [0x00348FAA] * -9984
+    last frame's 16-bit [0x00623774] != 190
+  or alternative 90:
+    Add address: 8-bit [0x00348FAA] * -9984
+    16-bit [0x006237B8] = 190
+    Add address: 8-bit [0x00348FAA] * -9984
+    last frame's 16-bit [0x006237B8] != 190
+  or alternative 91:
+    Add address: 8-bit [0x00348FAA] * -9984
+    16-bit [0x006237FC] = 190
+    Add address: 8-bit [0x00348FAA] * -9984
+    last frame's 16-bit [0x006237FC] != 190
+  or alternative 92:
+    Add address: 8-bit [0x00348FAA] * -9984
+    16-bit [0x00623840] = 190
+    Add address: 8-bit [0x00348FAA] * -9984
+    last frame's 16-bit [0x00623840] != 190
+  or alternative 93:
+    Add address: 8-bit [0x00348FAA] * -9984
+    16-bit [0x00623884] = 190
+    Add address: 8-bit [0x00348FAA] * -9984
+    last frame's 16-bit [0x00623884] != 190
+  or alternative 94:
+    Add address: 8-bit [0x00348FAA] * -9984
+    16-bit [0x006238C8] = 190
+    Add address: 8-bit [0x00348FAA] * -9984
+    last frame's 16-bit [0x006238C8] != 190
+  or alternative 95:
+    Add address: 8-bit [0x00348FAA] * -9984
+    16-bit [0x0062390C] = 190
+    Add address: 8-bit [0x00348FAA] * -9984
+    last frame's 16-bit [0x0062390C] != 190
+  or alternative 96:
+    Add address: 8-bit [0x00348FAA] * -9984
+    16-bit [0x00623950] = 190
+    Add address: 8-bit [0x00348FAA] * -9984
+    last frame's 16-bit [0x00623950] != 190
+  or alternative 97:
+    Add address: 8-bit [0x00348FAA] * -9984
+    16-bit [0x00623994] = 190
+    Add address: 8-bit [0x00348FAA] * -9984
+    last frame's 16-bit [0x00623994] != 190
+  or alternative 98:
+    Add address: 8-bit [0x00348FAA] * -9984
+    16-bit [0x006239D8] = 190
+    Add address: 8-bit [0x00348FAA] * -9984
+    last frame's 16-bit [0x006239D8] != 190
+  or alternative 99:
+    Add address: 8-bit [0x00348FAA] * -9984
+    16-bit [0x00623A1C] = 190
+    Add address: 8-bit [0x00348FAA] * -9984
+    last frame's 16-bit [0x00623A1C] != 190
+  or alternative 100:
+    Add address: 8-bit [0x00348FAA] * -9984
+    16-bit [0x00623A60] = 190
+    Add address: 8-bit [0x00348FAA] * -9984
+    last frame's 16-bit [0x00623A60] != 190
+  or alternative 101:
+    Add address: 8-bit [0x00348FAA] * -9984
+    16-bit [0x00623AA4] = 190
+    Add address: 8-bit [0x00348FAA] * -9984
+    last frame's 16-bit [0x00623AA4] != 190
+  or alternative 102:
+    Add address: 8-bit [0x00348FAA] * -9984
+    16-bit [0x00623AE8] = 190
+    Add address: 8-bit [0x00348FAA] * -9984
+    last frame's 16-bit [0x00623AE8] != 190
+  or alternative 103:
+    Add address: 8-bit [0x00348FAA] * -9984
+    16-bit [0x00623B2C] = 190
+    Add address: 8-bit [0x00348FAA] * -9984
+    last frame's 16-bit [0x00623B2C] != 190
+  or alternative 104:
+    Add address: 8-bit [0x00348FAA] * -9984
+    16-bit [0x00623B70] = 190
+    Add address: 8-bit [0x00348FAA] * -9984
+    last frame's 16-bit [0x00623B70] != 190
+  or alternative 105:
+    Add address: 8-bit [0x00348FAA] * -9984
+    16-bit [0x00623BB4] = 190
+    Add address: 8-bit [0x00348FAA] * -9984
+    last frame's 16-bit [0x00623BB4] != 190
+  or alternative 106:
+    Add address: 8-bit [0x00348FAA] * -9984
+    16-bit [0x00623BF8] = 190
+    Add address: 8-bit [0x00348FAA] * -9984
+    last frame's 16-bit [0x00623BF8] != 190
+  or alternative 107:
+    Add address: 8-bit [0x00348FAA] * -9984
+    16-bit [0x00623C3C] = 190
+    Add address: 8-bit [0x00348FAA] * -9984
+    last frame's 16-bit [0x00623C3C] != 190
+  or alternative 108:
+    Add address: 8-bit [0x00348FAA] * -9984
+    16-bit [0x00623C80] = 190
+    Add address: 8-bit [0x00348FAA] * -9984
+    last frame's 16-bit [0x00623C80] != 190
+  or alternative 109:
+    Add address: 8-bit [0x00348FAA] * -9984
+    16-bit [0x00623CC4] = 190
+    Add address: 8-bit [0x00348FAA] * -9984
+    last frame's 16-bit [0x00623CC4] != 190
+  or alternative 110:
+    Add address: 8-bit [0x00348FAA] * -9984
+    16-bit [0x00623D08] = 190
+    Add address: 8-bit [0x00348FAA] * -9984
+    last frame's 16-bit [0x00623D08] != 190
+  or alternative 111:
+    Add address: 8-bit [0x00348FAA] * -9984
+    16-bit [0x00623D4C] = 190
+    Add address: 8-bit [0x00348FAA] * -9984
+    last frame's 16-bit [0x00623D4C] != 190
+  or alternative 112:
+    Add address: 8-bit [0x00348FAA] * -9984
+    16-bit [0x00623D90] = 190
+    Add address: 8-bit [0x00348FAA] * -9984
+    last frame's 16-bit [0x00623D90] != 190
+  or alternative 113:
+    Add address: 8-bit [0x00348FAA] * -9984
+    16-bit [0x00623DD4] = 190
+    Add address: 8-bit [0x00348FAA] * -9984
+    last frame's 16-bit [0x00623DD4] != 190
+  or alternative 114:
+    Add address: 8-bit [0x00348FAA] * -9984
+    16-bit [0x00623E18] = 190
+    Add address: 8-bit [0x00348FAA] * -9984
+    last frame's 16-bit [0x00623E18] != 190
+  or alternative 115:
+    Add address: 8-bit [0x00348FAA] * -9984
+    16-bit [0x00623E5C] = 190
+    Add address: 8-bit [0x00348FAA] * -9984
+    last frame's 16-bit [0x00623E5C] != 190
+  or alternative 116:
+    Add address: 8-bit [0x00348FAA] * -9984
+    16-bit [0x00623EA0] = 190
+    Add address: 8-bit [0x00348FAA] * -9984
+    last frame's 16-bit [0x00623EA0] != 190
+  or alternative 117:
+    Add address: 8-bit [0x00348FAA] * -9984
+    16-bit [0x00623EE4] = 190
+    Add address: 8-bit [0x00348FAA] * -9984
+    last frame's 16-bit [0x00623EE4] != 190
+  or alternative 118:
+    Add address: 8-bit [0x00348FAA] * -9984
+    16-bit [0x00623F28] = 190
+    Add address: 8-bit [0x00348FAA] * -9984
+    last frame's 16-bit [0x00623F28] != 190
+  or alternative 119:
+    Add address: 8-bit [0x00348FAA] * -9984
+    16-bit [0x00623F6C] = 190
+    Add address: 8-bit [0x00348FAA] * -9984
+    last frame's 16-bit [0x00623F6C] != 190
+  or alternative 120:
+    Add address: 8-bit [0x00348FAA] * -9984
+    16-bit [0x00623FB0] = 190
+    Add address: 8-bit [0x00348FAA] * -9984
+    last frame's 16-bit [0x00623FB0] != 190
+  or alternative 121:
+    Add address: 8-bit [0x00348FAA] * -9984
+    16-bit [0x00623FF4] = 190
+    Add address: 8-bit [0x00348FAA] * -9984
+    last frame's 16-bit [0x00623FF4] != 190
+  or alternative 122:
+    Add address: 8-bit [0x00348FAA] * -9984
+    16-bit [0x00624038] = 190
+    Add address: 8-bit [0x00348FAA] * -9984
+    last frame's 16-bit [0x00624038] != 190
+  or alternative 123:
+    Add address: 8-bit [0x00348FAA] * -9984
+    16-bit [0x0062407C] = 190
+    Add address: 8-bit [0x00348FAA] * -9984
+    last frame's 16-bit [0x0062407C] != 190
+  or alternative 124:
+    Add address: 8-bit [0x00348FAA] * -9984
+    16-bit [0x006240C0] = 190
+    Add address: 8-bit [0x00348FAA] * -9984
+    last frame's 16-bit [0x006240C0] != 190
+  or alternative 125:
+    Add address: 8-bit [0x00348FAA] * -9984
+    16-bit [0x00624104] = 190
+    Add address: 8-bit [0x00348FAA] * -9984
+    last frame's 16-bit [0x00624104] != 190
+  or alternative 126:
+    Add address: 8-bit [0x00348FAA] * -9984
+    16-bit [0x00624148] = 190
+    Add address: 8-bit [0x00348FAA] * -9984
+    last frame's 16-bit [0x00624148] != 190
+  or alternative 127:
+    Add address: 8-bit [0x00348FAA] * -9984
+    16-bit [0x0062418C] = 190
+    Add address: 8-bit [0x00348FAA] * -9984
+    last frame's 16-bit [0x0062418C] != 190
+  or alternative 128:
+    Add address: 8-bit [0x00348FAA] * -9984
+    16-bit [0x006241D0] = 190
+    Add address: 8-bit [0x00348FAA] * -9984
+    last frame's 16-bit [0x006241D0] != 190
+
+==== Memory Fragment - Brave  (3 points, official, ID 393627)
+What to do: Obtain the Brave memory fragment as Ivan.
+  core:
+    Add address: 8-bit [0x00348FAA] * -5628
+    Or next: 32-bit [0x0048F604] = 21
+    Add address: 8-bit [0x00348FAA] * -5628
+    Or next: 32-bit [0x0048F604] = 23
+    Add address: 8-bit [0x00348FAA] * -5628
+    Or next: 32-bit [0x0048F604] = 24
+    Add address: 8-bit [0x00348FAA] * -5628
+    And next: 32-bit [0x0048F604] = 32
+    Add address: 8-bit [0x00348FAA] * -10416
+    And next: 8-bit [0x0070F9DA] != 8
+    Add address: 8-bit [0x00348FAA] * -5632
+    And next: last frame's bit 1 of [0x0060A782] = 0
+    Add address: 8-bit [0x00348FAA] * -5632
+    bit 1 of [0x0060A782] = 1  (1 times)
+    Add address: 8-bit [0x00348FAA] * -5628
+    Reset if: 32-bit [0x0048F604] = 11
+    Add address: 8-bit [0x00348FAA] * -5628
+    Reset if: 32-bit [0x0048F604] = 22
+    Reset if: 8-bit [0x00376078] != 60
+    Add address: 8-bit [0x00348FAA] * -5632
+    And next: 8-bit [0x0048F900] != 1
+    Add address: 8-bit [0x00348FAA] * -5632
+    And next: 32-bit [0x0048F8F4] != 1
+    Add address: 8-bit [0x00348FAA] * -5632
+    Add address: 32-bit [0x006003A4]
+    And next: 32-bit [0x00000B80] != 15
+    Add address: 8-bit [0x00348FAA] * -5632
+    Add address: 32-bit [0x006003A4]
+    And next: 32-bit [0x00000B80] != 16
+    Add address: 8-bit [0x00348FAA] * -5632
+    Add address: 32-bit [0x006003A4]
+    32-bit [0x00000B80] != 23  (3 times)
+    Add address: 8-bit [0x00348FAA] * -5628
+    Or next: 32-bit [0x0048F604] = 21
+    Add address: 8-bit [0x00348FAA] * -5628
+    Or next: 32-bit [0x0048F604] = 23
+    Add address: 8-bit [0x00348FAA] * -5628
+    Or next: 32-bit [0x0048F604] = 24
+    Add address: 8-bit [0x00348FAA] * -5628
+    And next: 32-bit [0x0048F604] = 32
+    Add address: 8-bit [0x00348FAA] * -10416
+    And next: 8-bit [0x0070F9DA] != 8
+    Add address: 8-bit [0x00348FAA] * -5632
+    And next: last frame's bit 1 of [0x0060A782] = 0
+    Add address: 8-bit [0x00348FAA] * -5632
+    Reset next if: bit 1 of [0x0060A782] = 1  (1 times)
+    Pause if: 1 = 1  (1 times)
+
+==== Memory Fragment - Curious  (3 points, official, ID 393628)
+What to do: Obtain the Curious memory fragment as Ivan.
+  core:
+    Add address: 8-bit [0x00348FAA] * -5628
+    Or next: 32-bit [0x0048F604] = 21
+    Add address: 8-bit [0x00348FAA] * -5628
+    Or next: 32-bit [0x0048F604] = 23
+    Add address: 8-bit [0x00348FAA] * -5628
+    Or next: 32-bit [0x0048F604] = 24
+    Add address: 8-bit [0x00348FAA] * -5628
+    And next: 32-bit [0x0048F604] = 32
+    Add address: 8-bit [0x00348FAA] * -10416
+    And next: 8-bit [0x0070F9DA] != 8
+    Add address: 8-bit [0x00348FAA] * -5632
+    And next: last frame's bit 5 of [0x0060A781] = 0
+    Add address: 8-bit [0x00348FAA] * -5632
+    bit 5 of [0x0060A781] = 1  (1 times)
+    Add address: 8-bit [0x00348FAA] * -5628
+    Reset if: 32-bit [0x0048F604] = 11
+    Add address: 8-bit [0x00348FAA] * -5628
+    Reset if: 32-bit [0x0048F604] = 22
+    Reset if: 8-bit [0x00376078] != 60
+    Add address: 8-bit [0x00348FAA] * -5632
+    And next: 8-bit [0x0048F900] != 1
+    Add address: 8-bit [0x00348FAA] * -5632
+    And next: 32-bit [0x0048F8F4] != 1
+    Add address: 8-bit [0x00348FAA] * -5632
+    Add address: 32-bit [0x006003A4]
+    And next: 32-bit [0x00000B80] != 15
+    Add address: 8-bit [0x00348FAA] * -5632
+    Add address: 32-bit [0x006003A4]
+    And next: 32-bit [0x00000B80] != 16
+    Add address: 8-bit [0x00348FAA] * -5632
+    Add address: 32-bit [0x006003A4]
+    32-bit [0x00000B80] != 23  (3 times)
+    Add address: 8-bit [0x00348FAA] * -5628
+    Or next: 32-bit [0x0048F604] = 21
+    Add address: 8-bit [0x00348FAA] * -5628
+    Or next: 32-bit [0x0048F604] = 23
+    Add address: 8-bit [0x00348FAA] * -5628
+    Or next: 32-bit [0x0048F604] = 24
+    Add address: 8-bit [0x00348FAA] * -5628
+    And next: 32-bit [0x0048F604] = 32
+    Add address: 8-bit [0x00348FAA] * -10416
+    And next: 8-bit [0x0070F9DA] != 8
+    Add address: 8-bit [0x00348FAA] * -5632
+    And next: last frame's bit 5 of [0x0060A781] = 0
+    Add address: 8-bit [0x00348FAA] * -5632
+    Reset next if: bit 5 of [0x0060A781] = 1  (1 times)
+    Pause if: 1 = 1  (1 times)
+
+==== Memory Fragment - Devoted  (3 points, official, ID 393629)
+What to do: Obtain the Devoted memory fragment as Ivan.
+  core:
+    Add address: 8-bit [0x00348FAA] * -5628
+    Or next: 32-bit [0x0048F604] = 21
+    Add address: 8-bit [0x00348FAA] * -5628
+    Or next: 32-bit [0x0048F604] = 23
+    Add address: 8-bit [0x00348FAA] * -5628
+    Or next: 32-bit [0x0048F604] = 24
+    Add address: 8-bit [0x00348FAA] * -5628
+    And next: 32-bit [0x0048F604] = 32
+    Add address: 8-bit [0x00348FAA] * -10416
+    And next: 8-bit [0x0070F9DA] != 8
+    Add address: 8-bit [0x00348FAA] * -5632
+    And next: last frame's bit 3 of [0x0060A781] = 0
+    Add address: 8-bit [0x00348FAA] * -5632
+    bit 3 of [0x0060A781] = 1  (1 times)
+    Add address: 8-bit [0x00348FAA] * -5628
+    Reset if: 32-bit [0x0048F604] = 11
+    Add address: 8-bit [0x00348FAA] * -5628
+    Reset if: 32-bit [0x0048F604] = 22
+    Reset if: 8-bit [0x00376078] != 60
+    Add address: 8-bit [0x00348FAA] * -5632
+    And next: 8-bit [0x0048F900] != 1
+    Add address: 8-bit [0x00348FAA] * -5632
+    And next: 32-bit [0x0048F8F4] != 1
+    Add address: 8-bit [0x00348FAA] * -5632
+    Add address: 32-bit [0x006003A4]
+    And next: 32-bit [0x00000B80] != 15
+    Add address: 8-bit [0x00348FAA] * -5632
+    Add address: 32-bit [0x006003A4]
+    And next: 32-bit [0x00000B80] != 16
+    Add address: 8-bit [0x00348FAA] * -5632
+    Add address: 32-bit [0x006003A4]
+    32-bit [0x00000B80] != 23  (3 times)
+    Add address: 8-bit [0x00348FAA] * -5628
+    Or next: 32-bit [0x0048F604] = 21
+    Add address: 8-bit [0x00348FAA] * -5628
+    Or next: 32-bit [0x0048F604] = 23
+    Add address: 8-bit [0x00348FAA] * -5628
+    Or next: 32-bit [0x0048F604] = 24
+    Add address: 8-bit [0x00348FAA] * -5628
+    And next: 32-bit [0x0048F604] = 32
+    Add address: 8-bit [0x00348FAA] * -10416
+    And next: 8-bit [0x0070F9DA] != 8
+    Add address: 8-bit [0x00348FAA] * -5632
+    And next: last frame's bit 3 of [0x0060A781] = 0
+    Add address: 8-bit [0x00348FAA] * -5632
+    Reset next if: bit 3 of [0x0060A781] = 1  (1 times)
+    Pause if: 1 = 1  (1 times)
+
+==== Memory Fragment - Evil  (3 points, official, ID 393630)
+What to do: Obtain the Evil memory fragment as Ivan.
+  core:
+    Add address: 8-bit [0x00348FAA] * -5628
+    Or next: 32-bit [0x0048F604] = 21
+    Add address: 8-bit [0x00348FAA] * -5628
+    Or next: 32-bit [0x0048F604] = 23
+    Add address: 8-bit [0x00348FAA] * -5628
+    Or next: 32-bit [0x0048F604] = 24
+    Add address: 8-bit [0x00348FAA] * -5628
+    And next: 32-bit [0x0048F604] = 32
+    Add address: 8-bit [0x00348FAA] * -10416
+    And next: 8-bit [0x0070F9DA] != 8
+    Add address: 8-bit [0x00348FAA] * -5632
+    And next: last frame's bit 5 of [0x0060A782] = 0
+    Add address: 8-bit [0x00348FAA] * -5632
+    bit 5 of [0x0060A782] = 1  (1 times)
+    Add address: 8-bit [0x00348FAA] * -5628
+    Reset if: 32-bit [0x0048F604] = 11
+    Add address: 8-bit [0x00348FAA] * -5628
+    Reset if: 32-bit [0x0048F604] = 22
+    Reset if: 8-bit [0x00376078] != 60
+    Add address: 8-bit [0x00348FAA] * -5632
+    And next: 8-bit [0x0048F900] != 1
+    Add address: 8-bit [0x00348FAA] * -5632
+    And next: 32-bit [0x0048F8F4] != 1
+    Add address: 8-bit [0x00348FAA] * -5632
+    Add address: 32-bit [0x006003A4]
+    And next: 32-bit [0x00000B80] != 15
+    Add address: 8-bit [0x00348FAA] * -5632
+    Add address: 32-bit [0x006003A4]
+    And next: 32-bit [0x00000B80] != 16
+    Add address: 8-bit [0x00348FAA] * -5632
+    Add address: 32-bit [0x006003A4]
+    32-bit [0x00000B80] != 23  (3 times)
+    Add address: 8-bit [0x00348FAA] * -5628
+    Or next: 32-bit [0x0048F604] = 21
+    Add address: 8-bit [0x00348FAA] * -5628
+    Or next: 32-bit [0x0048F604] = 23
+    Add address: 8-bit [0x00348FAA] * -5628
+    Or next: 32-bit [0x0048F604] = 24
+    Add address: 8-bit [0x00348FAA] * -5628
+    And next: 32-bit [0x0048F604] = 32
+    Add address: 8-bit [0x00348FAA] * -10416
+    And next: 8-bit [0x0070F9DA] != 8
+    Add address: 8-bit [0x00348FAA] * -5632
+    And next: last frame's bit 5 of [0x0060A782] = 0
+    Add address: 8-bit [0x00348FAA] * -5632
+    Reset next if: bit 5 of [0x0060A782] = 1  (1 times)
+    Pause if: 1 = 1  (1 times)
+
+==== Memory Fragment - Friendship  (3 points, official, ID 393631)
+What to do: Obtain the Friendship memory fragment as Ivan.
+  core:
+    Add address: 8-bit [0x00348FAA] * -5628
+    Or next: 32-bit [0x0048F604] = 21
+    Add address: 8-bit [0x00348FAA] * -5628
+    Or next: 32-bit [0x0048F604] = 23
+    Add address: 8-bit [0x00348FAA] * -5628
+    Or next: 32-bit [0x0048F604] = 24
+    Add address: 8-bit [0x00348FAA] * -5628
+    And next: 32-bit [0x0048F604] = 32
+    Add address: 8-bit [0x00348FAA] * -10416
+    And next: 8-bit [0x0070F9DA] != 8
+    Add address: 8-bit [0x00348FAA] * -5632
+    And next: last frame's bit 2 of [0x0060A781] = 0
+    Add address: 8-bit [0x00348FAA] * -5632
+    bit 2 of [0x0060A781] = 1  (1 times)
+    Add address: 8-bit [0x00348FAA] * -5628
+    Reset if: 32-bit [0x0048F604] = 11
+    Add address: 8-bit [0x00348FAA] * -5628
+    Reset if: 32-bit [0x0048F604] = 22
+    Reset if: 8-bit [0x00376078] != 60
+    Add address: 8-bit [0x00348FAA] * -5632
+    And next: 8-bit [0x0048F900] != 1
+    Add address: 8-bit [0x00348FAA] * -5632
+    And next: 32-bit [0x0048F8F4] != 1
+    Add address: 8-bit [0x00348FAA] * -5632
+    Add address: 32-bit [0x006003A4]
+    And next: 32-bit [0x00000B80] != 15
+    Add address: 8-bit [0x00348FAA] * -5632
+    Add address: 32-bit [0x006003A4]
+    And next: 32-bit [0x00000B80] != 16
+    Add address: 8-bit [0x00348FAA] * -5632
+    Add address: 32-bit [0x006003A4]
+    32-bit [0x00000B80] != 23  (3 times)
+    Add address: 8-bit [0x00348FAA] * -5628
+    Or next: 32-bit [0x0048F604] = 21
+    Add address: 8-bit [0x00348FAA] * -5628
+    Or next: 32-bit [0x0048F604] = 23
+    Add address: 8-bit [0x00348FAA] * -5628
+    Or next: 32-bit [0x0048F604] = 24
+    Add address: 8-bit [0x00348FAA] * -5628
+    And next: 32-bit [0x0048F604] = 32
+    Add address: 8-bit [0x00348FAA] * -10416
+    And next: 8-bit [0x0070F9DA] != 8
+    Add address: 8-bit [0x00348FAA] * -5632
+    And next: last frame's bit 2 of [0x0060A781] = 0
+    Add address: 8-bit [0x00348FAA] * -5632
+    Reset next if: bit 2 of [0x0060A781] = 1  (1 times)
+    Pause if: 1 = 1  (1 times)
+
+==== Memory Fragment - Honorable  (3 points, official, ID 393632)
+What to do: Obtain the Honorable memory fragment as Ivan.
+  core:
+    Add address: 8-bit [0x00348FAA] * -5628
+    Or next: 32-bit [0x0048F604] = 21
+    Add address: 8-bit [0x00348FAA] * -5628
+    Or next: 32-bit [0x0048F604] = 23
+    Add address: 8-bit [0x00348FAA] * -5628
+    Or next: 32-bit [0x0048F604] = 24
+    Add address: 8-bit [0x00348FAA] * -5628
+    And next: 32-bit [0x0048F604] = 32
+    Add address: 8-bit [0x00348FAA] * -10416
+    And next: 8-bit [0x0070F9DA] != 8
+    Add address: 8-bit [0x00348FAA] * -5632
+    And next: last frame's bit 4 of [0x0060A781] = 0
+    Add address: 8-bit [0x00348FAA] * -5632
+    bit 4 of [0x0060A781] = 1  (1 times)
+    Add address: 8-bit [0x00348FAA] * -5628
+    Reset if: 32-bit [0x0048F604] = 11
+    Add address: 8-bit [0x00348FAA] * -5628
+    Reset if: 32-bit [0x0048F604] = 22
+    Reset if: 8-bit [0x00376078] != 60
+    Add address: 8-bit [0x00348FAA] * -5632
+    And next: 8-bit [0x0048F900] != 1
+    Add address: 8-bit [0x00348FAA] * -5632
+    And next: 32-bit [0x0048F8F4] != 1
+    Add address: 8-bit [0x00348FAA] * -5632
+    Add address: 32-bit [0x006003A4]
+    And next: 32-bit [0x00000B80] != 15
+    Add address: 8-bit [0x00348FAA] * -5632
+    Add address: 32-bit [0x006003A4]
+    And next: 32-bit [0x00000B80] != 16
+    Add address: 8-bit [0x00348FAA] * -5632
+    Add address: 32-bit [0x006003A4]
+    32-bit [0x00000B80] != 23  (3 times)
+    Add address: 8-bit [0x00348FAA] * -5628
+    Or next: 32-bit [0x0048F604] = 21
+    Add address: 8-bit [0x00348FAA] * -5628
+    Or next: 32-bit [0x0048F604] = 23
+    Add address: 8-bit [0x00348FAA] * -5628
+    Or next: 32-bit [0x0048F604] = 24
+    Add address: 8-bit [0x00348FAA] * -5628
+    And next: 32-bit [0x0048F604] = 32
+    Add address: 8-bit [0x00348FAA] * -10416
+    And next: 8-bit [0x0070F9DA] != 8
+    Add address: 8-bit [0x00348FAA] * -5632
+    And next: last frame's bit 4 of [0x0060A781] = 0
+    Add address: 8-bit [0x00348FAA] * -5632
+    Reset next if: bit 4 of [0x0060A781] = 1  (1 times)
+    Pause if: 1 = 1  (1 times)
+
+==== Memory Fragment - In Love  (3 points, official, ID 393633)
+What to do: Obtain the In Love memory fragment as Ivan.
+  core:
+    Add address: 8-bit [0x00348FAA] * -5628
+    Or next: 32-bit [0x0048F604] = 21
+    Add address: 8-bit [0x00348FAA] * -5628
+    Or next: 32-bit [0x0048F604] = 23
+    Add address: 8-bit [0x00348FAA] * -5628
+    Or next: 32-bit [0x0048F604] = 24
+    Add address: 8-bit [0x00348FAA] * -5628
+    And next: 32-bit [0x0048F604] = 32
+    Add address: 8-bit [0x00348FAA] * -10416
+    And next: 8-bit [0x0070F9DA] != 8
+    Add address: 8-bit [0x00348FAA] * -5632
+    And next: last frame's bit 7 of [0x0060A781] = 0
+    Add address: 8-bit [0x00348FAA] * -5632
+    bit 7 of [0x0060A781] = 1  (1 times)
+    Add address: 8-bit [0x00348FAA] * -5628
+    Reset if: 32-bit [0x0048F604] = 11
+    Add address: 8-bit [0x00348FAA] * -5628
+    Reset if: 32-bit [0x0048F604] = 22
+    Reset if: 8-bit [0x00376078] != 60
+    Add address: 8-bit [0x00348FAA] * -5632
+    And next: 8-bit [0x0048F900] != 1
+    Add address: 8-bit [0x00348FAA] * -5632
+    And next: 32-bit [0x0048F8F4] != 1
+    Add address: 8-bit [0x00348FAA] * -5632
+    Add address: 32-bit [0x006003A4]
+    And next: 32-bit [0x00000B80] != 15
+    Add address: 8-bit [0x00348FAA] * -5632
+    Add address: 32-bit [0x006003A4]
+    And next: 32-bit [0x00000B80] != 16
+    Add address: 8-bit [0x00348FAA] * -5632
+    Add address: 32-bit [0x006003A4]
+    32-bit [0x00000B80] != 23  (3 times)
+    Add address: 8-bit [0x00348FAA] * -5628
+    Or next: 32-bit [0x0048F604] = 21
+    Add address: 8-bit [0x00348FAA] * -5628
+    Or next: 32-bit [0x0048F604] = 23
+    Add address: 8-bit [0x00348FAA] * -5628
+    Or next: 32-bit [0x0048F604] = 24
+    Add address: 8-bit [0x00348FAA] * -5628
+    And next: 32-bit [0x0048F604] = 32
+    Add address: 8-bit [0x00348FAA] * -10416
+    And next: 8-bit [0x0070F9DA] != 8
+    Add address: 8-bit [0x00348FAA] * -5632
+    And next: last frame's bit 7 of [0x0060A781] = 0
+    Add address: 8-bit [0x00348FAA] * -5632
+    Reset next if: bit 7 of [0x0060A781] = 1  (1 times)
+    Pause if: 1 = 1  (1 times)
+
+==== Memory Fragment - Loyal  (3 points, official, ID 393634)
+What to do: Obtain the Loyal memory fragment as Ivan.
+  core:
+    Add address: 8-bit [0x00348FAA] * -5628
+    Or next: 32-bit [0x0048F604] = 21
+    Add address: 8-bit [0x00348FAA] * -5628
+    Or next: 32-bit [0x0048F604] = 23
+    Add address: 8-bit [0x00348FAA] * -5628
+    Or next: 32-bit [0x0048F604] = 24
+    Add address: 8-bit [0x00348FAA] * -5628
+    And next: 32-bit [0x0048F604] = 32
+    Add address: 8-bit [0x00348FAA] * -10416
+    And next: 8-bit [0x0070F9DA] != 8
+    Add address: 8-bit [0x00348FAA] * -5632
+    And next: last frame's bit 0 of [0x0060A782] = 0
+    Add address: 8-bit [0x00348FAA] * -5632
+    bit 0 of [0x0060A782] = 1  (1 times)
+    Add address: 8-bit [0x00348FAA] * -5628
+    Reset if: 32-bit [0x0048F604] = 11
+    Add address: 8-bit [0x00348FAA] * -5628
+    Reset if: 32-bit [0x0048F604] = 22
+    Reset if: 8-bit [0x00376078] != 60
+    Add address: 8-bit [0x00348FAA] * -5632
+    And next: 8-bit [0x0048F900] != 1
+    Add address: 8-bit [0x00348FAA] * -5632
+    And next: 32-bit [0x0048F8F4] != 1
+    Add address: 8-bit [0x00348FAA] * -5632
+    Add address: 32-bit [0x006003A4]
+    And next: 32-bit [0x00000B80] != 15
+    Add address: 8-bit [0x00348FAA] * -5632
+    Add address: 32-bit [0x006003A4]
+    And next: 32-bit [0x00000B80] != 16
+    Add address: 8-bit [0x00348FAA] * -5632
+    Add address: 32-bit [0x006003A4]
+    32-bit [0x00000B80] != 23  (3 times)
+    Add address: 8-bit [0x00348FAA] * -5628
+    Or next: 32-bit [0x0048F604] = 21
+    Add address: 8-bit [0x00348FAA] * -5628
+    Or next: 32-bit [0x0048F604] = 23
+    Add address: 8-bit [0x00348FAA] * -5628
+    Or next: 32-bit [0x0048F604] = 24
+    Add address: 8-bit [0x00348FAA] * -5628
+    And next: 32-bit [0x0048F604] = 32
+    Add address: 8-bit [0x00348FAA] * -10416
+    And next: 8-bit [0x0070F9DA] != 8
+    Add address: 8-bit [0x00348FAA] * -5632
+    And next: last frame's bit 0 of [0x0060A782] = 0
+    Add address: 8-bit [0x00348FAA] * -5632
+    Reset next if: bit 0 of [0x0060A782] = 1  (1 times)
+    Pause if: 1 = 1  (1 times)
+
+==== Memory Fragment - Narcissist  (3 points, official, ID 393635, missable)
+What to do: Obtain the Narcissist memory fragment as Ivan.
+  core:
+    Add address: 8-bit [0x00348FAA] * -5628
+    Or next: 32-bit [0x0048F604] = 21
+    Add address: 8-bit [0x00348FAA] * -5628
+    Or next: 32-bit [0x0048F604] = 23
+    Add address: 8-bit [0x00348FAA] * -5628
+    Or next: 32-bit [0x0048F604] = 24
+    Add address: 8-bit [0x00348FAA] * -5628
+    And next: 32-bit [0x0048F604] = 32
+    Add address: 8-bit [0x00348FAA] * -10416
+    And next: 8-bit [0x0070F9DA] != 8
+    Add address: 8-bit [0x00348FAA] * -5632
+    And next: last frame's bit 2 of [0x0060A782] = 0
+    Add address: 8-bit [0x00348FAA] * -5632
+    bit 2 of [0x0060A782] = 1  (1 times)
+    Add address: 8-bit [0x00348FAA] * -5628
+    Reset if: 32-bit [0x0048F604] = 11
+    Add address: 8-bit [0x00348FAA] * -5628
+    Reset if: 32-bit [0x0048F604] = 22
+    Reset if: 8-bit [0x00376078] != 60
+    Add address: 8-bit [0x00348FAA] * -5632
+    And next: 8-bit [0x0048F900] != 1
+    Add address: 8-bit [0x00348FAA] * -5632
+    And next: 32-bit [0x0048F8F4] != 1
+    Add address: 8-bit [0x00348FAA] * -5632
+    Add address: 32-bit [0x006003A4]
+    And next: 32-bit [0x00000B80] != 15
+    Add address: 8-bit [0x00348FAA] * -5632
+    Add address: 32-bit [0x006003A4]
+    And next: 32-bit [0x00000B80] != 16
+    Add address: 8-bit [0x00348FAA] * -5632
+    Add address: 32-bit [0x006003A4]
+    32-bit [0x00000B80] != 23  (3 times)
+    Add address: 8-bit [0x00348FAA] * -5628
+    Or next: 32-bit [0x0048F604] = 21
+    Add address: 8-bit [0x00348FAA] * -5628
+    Or next: 32-bit [0x0048F604] = 23
+    Add address: 8-bit [0x00348FAA] * -5628
+    Or next: 32-bit [0x0048F604] = 24
+    Add address: 8-bit [0x00348FAA] * -5628
+    And next: 32-bit [0x0048F604] = 32
+    Add address: 8-bit [0x00348FAA] * -10416
+    And next: 8-bit [0x0070F9DA] != 8
+    Add address: 8-bit [0x00348FAA] * -5632
+    And next: last frame's bit 2 of [0x0060A782] = 0
+    Add address: 8-bit [0x00348FAA] * -5632
+    Reset next if: bit 2 of [0x0060A782] = 1  (1 times)
+    Pause if: 1 = 1  (1 times)
+
+==== Memory Fragment - Pervert  (3 points, official, ID 393636)
+What to do: Obtain the Pervert memory fragment as Ivan.
+  core:
+    Add address: 8-bit [0x00348FAA] * -5628
+    Or next: 32-bit [0x0048F604] = 21
+    Add address: 8-bit [0x00348FAA] * -5628
+    Or next: 32-bit [0x0048F604] = 23
+    Add address: 8-bit [0x00348FAA] * -5628
+    Or next: 32-bit [0x0048F604] = 24
+    Add address: 8-bit [0x00348FAA] * -5628
+    And next: 32-bit [0x0048F604] = 32
+    Add address: 8-bit [0x00348FAA] * -10416
+    And next: 8-bit [0x0070F9DA] != 8
+    Add address: 8-bit [0x00348FAA] * -5632
+    And next: last frame's bit 4 of [0x0060A782] = 0
+    Add address: 8-bit [0x00348FAA] * -5632
+    bit 4 of [0x0060A782] = 1  (1 times)
+    Add address: 8-bit [0x00348FAA] * -5628
+    Reset if: 32-bit [0x0048F604] = 11
+    Add address: 8-bit [0x00348FAA] * -5628
+    Reset if: 32-bit [0x0048F604] = 22
+    Reset if: 8-bit [0x00376078] != 60
+    Add address: 8-bit [0x00348FAA] * -5632
+    And next: 8-bit [0x0048F900] != 1
+    Add address: 8-bit [0x00348FAA] * -5632
+    And next: 32-bit [0x0048F8F4] != 1
+    Add address: 8-bit [0x00348FAA] * -5632
+    Add address: 32-bit [0x006003A4]
+    And next: 32-bit [0x00000B80] != 15
+    Add address: 8-bit [0x00348FAA] * -5632
+    Add address: 32-bit [0x006003A4]
+    And next: 32-bit [0x00000B80] != 16
+    Add address: 8-bit [0x00348FAA] * -5632
+    Add address: 32-bit [0x006003A4]
+    32-bit [0x00000B80] != 23  (3 times)
+    Add address: 8-bit [0x00348FAA] * -5628
+    Or next: 32-bit [0x0048F604] = 21
+    Add address: 8-bit [0x00348FAA] * -5628
+    Or next: 32-bit [0x0048F604] = 23
+    Add address: 8-bit [0x00348FAA] * -5628
+    Or next: 32-bit [0x0048F604] = 24
+    Add address: 8-bit [0x00348FAA] * -5628
+    And next: 32-bit [0x0048F604] = 32
+    Add address: 8-bit [0x00348FAA] * -10416
+    And next: 8-bit [0x0070F9DA] != 8
+    Add address: 8-bit [0x00348FAA] * -5632
+    And next: last frame's bit 4 of [0x0060A782] = 0
+    Add address: 8-bit [0x00348FAA] * -5632
+    Reset next if: bit 4 of [0x0060A782] = 1  (1 times)
+    Pause if: 1 = 1  (1 times)
+
+==== Do You Think Love Can Bloom, Even in a Disaster?  (4 points, official, ID 393637)
+What to do: Obtain the Large Diamond.
+  core:
+    Add address: 8-bit [0x00348FAA] * -10416
+    8-bit [0x0070F9DA] != 8
+    Add address: 8-bit [0x00348FAA] * -10432
+    last frame's 8-bit [0x00717416] = 0
+    Add address: 8-bit [0x00348FAA] * -10432
+    8-bit [0x00717416] != 0
+  or alternative 1:
+    Add address: 8-bit [0x00348FAA] * -5628
+    32-bit [0x0048F604] = 21
+  or alternative 2:
+    Add address: 8-bit [0x00348FAA] * -5628
+    32-bit [0x0048F604] = 23
+  or alternative 3:
+    Add address: 8-bit [0x00348FAA] * -5628
+    32-bit [0x0048F604] = 24
+  or alternative 4:
+    Add address: 8-bit [0x00348FAA] * -5628
+    32-bit [0x0048F604] = 32
+
+==== No Central Heating  (3 points, official, ID 393638, progression)
+What to do: Reach Ivan's apartment as Ivan.
+  core:
+    Add address: 8-bit [0x00348FAA] * -10416
+    8-bit [0x0070F9DA] != 8
+    Add address: 8-bit [0x00348FAA] * -5632
+    last frame's bit 6 of [0x0060970A] = 0
+    Add address: 8-bit [0x00348FAA] * -5632
+    bit 6 of [0x0060970A] = 1
+  or alternative 1:
+    Add address: 8-bit [0x00348FAA] * -5628
+    32-bit [0x0048F604] = 21
+  or alternative 2:
+    Add address: 8-bit [0x00348FAA] * -5628
+    32-bit [0x0048F604] = 23
+  or alternative 3:
+    Add address: 8-bit [0x00348FAA] * -5628
+    32-bit [0x0048F604] = 24
+  or alternative 4:
+    Add address: 8-bit [0x00348FAA] * -5628
+    32-bit [0x0048F604] = 32
+
+==== Prosperity Built From Sacrifice  (10 points, official, ID 393639)
+What to do: Obtain Ending 5-A.
+  core:
+    Add address: 8-bit [0x00348FAA] * -10416
+    8-bit [0x0070F9DA] != 8
+    Add address: 8-bit [0x00348FAA] * -5552
+    last frame's 8-bit [0x0048DAB0] = 255
+    Add address: 8-bit [0x00348FAA] * -5552
+    8-bit [0x0048DAB0] = 9
+  or alternative 1:
+    Add address: 8-bit [0x00348FAA] * -5628
+    32-bit [0x0048F604] = 21
+  or alternative 2:
+    Add address: 8-bit [0x00348FAA] * -5628
+    32-bit [0x0048F604] = 23
+  or alternative 3:
+    Add address: 8-bit [0x00348FAA] * -5628
+    32-bit [0x0048F604] = 24
+  or alternative 4:
+    Add address: 8-bit [0x00348FAA] * -5628
+    32-bit [0x0048F604] = 32
+
+==== I'm Just Warming Up  (5 points, official, ID 393640, win_condition)
+What to do: Beat the game and witness the credits on the Easy difficulty or higher.
+  core:
+    Add address: 8-bit [0x00348FAA] * -5640
+    32-bit [0x0048FD74] != 0
+    Add address: 8-bit [0x00348FAA] * -10304
+    last frame's 32-bit [0x006A4318] = 3
+    Add address: 8-bit [0x00348FAA] * -10304
+    32-bit [0x006A4318] = 1
+    Add address: 8-bit [0x00348FAA] * -10304
+    8-bit [0x0067DDBA] != 1
+
+==== I Saw the Sun Shining Through the Clouds  (25 points, official, ID 393641, missable)
+What to do: Obtain Ending 6-A.
+  core:
+    Add address: 8-bit [0x00348FAA] * -10416
+    8-bit [0x0070F9DA] != 8
+    Add address: 8-bit [0x00348FAA] * -5552
+    last frame's 8-bit [0x0048DAB0] = 255
+    Add address: 8-bit [0x00348FAA] * -5552
+    8-bit [0x0048DAB0] = 12
+  or alternative 1:
+    Add address: 8-bit [0x00348FAA] * -5628
+    32-bit [0x0048F604] = 21
+  or alternative 2:
+    Add address: 8-bit [0x00348FAA] * -5628
+    32-bit [0x0048F604] = 23
+  or alternative 3:
+    Add address: 8-bit [0x00348FAA] * -5628
+    32-bit [0x0048F604] = 24
+  or alternative 4:
+    Add address: 8-bit [0x00348FAA] * -5628
+    32-bit [0x0048F604] = 32
+
+==== This'll Make a Good Story  (25 points, official, ID 393642, missable)
+What to do: Obtain Ending 7-A.
+  core:
+    Add address: 8-bit [0x00348FAA] * -10416
+    8-bit [0x0070F9DA] != 8
+    Add address: 8-bit [0x00348FAA] * -5552
+    last frame's 8-bit [0x0048DAB0] = 255
+    Add address: 8-bit [0x00348FAA] * -5552
+    8-bit [0x0048DAB0] = 13
+  or alternative 1:
+    Add address: 8-bit [0x00348FAA] * -5628
+    32-bit [0x0048F604] = 21
+  or alternative 2:
+    Add address: 8-bit [0x00348FAA] * -5628
+    32-bit [0x0048F604] = 23
+  or alternative 3:
+    Add address: 8-bit [0x00348FAA] * -5628
+    32-bit [0x0048F604] = 24
+  or alternative 4:
+    Add address: 8-bit [0x00348FAA] * -5628
+    32-bit [0x0048F604] = 32
+
+==== Memory Fragment - Selfish  (3 points, official, ID 393643)
+What to do: Obtain the Selfish memory fragment as Ivan.
+  core:
+    Add address: 8-bit [0x00348FAA] * -5628
+    Or next: 32-bit [0x0048F604] = 21
+    Add address: 8-bit [0x00348FAA] * -5628
+    Or next: 32-bit [0x0048F604] = 23
+    Add address: 8-bit [0x00348FAA] * -5628
+    Or next: 32-bit [0x0048F604] = 24
+    Add address: 8-bit [0x00348FAA] * -5628
+    And next: 32-bit [0x0048F604] = 32
+    Add address: 8-bit [0x00348FAA] * -10416
+    And next: 8-bit [0x0070F9DA] != 8
+    Add address: 8-bit [0x00348FAA] * -5632
+    And next: last frame's bit 6 of [0x0060A781] = 0
+    Add address: 8-bit [0x00348FAA] * -5632
+    bit 6 of [0x0060A781] = 1  (1 times)
+    Add address: 8-bit [0x00348FAA] * -5628
+    Reset if: 32-bit [0x0048F604] = 11
+    Add address: 8-bit [0x00348FAA] * -5628
+    Reset if: 32-bit [0x0048F604] = 22
+    Reset if: 8-bit [0x00376078] != 60
+    Add address: 8-bit [0x00348FAA] * -5632
+    And next: 8-bit [0x0048F900] != 1
+    Add address: 8-bit [0x00348FAA] * -5632
+    And next: 32-bit [0x0048F8F4] != 1
+    Add address: 8-bit [0x00348FAA] * -5632
+    Add address: 32-bit [0x006003A4]
+    And next: 32-bit [0x00000B80] != 15
+    Add address: 8-bit [0x00348FAA] * -5632
+    Add address: 32-bit [0x006003A4]
+    And next: 32-bit [0x00000B80] != 16
+    Add address: 8-bit [0x00348FAA] * -5632
+    Add address: 32-bit [0x006003A4]
+    32-bit [0x00000B80] != 23  (3 times)
+    Add address: 8-bit [0x00348FAA] * -5628
+    Or next: 32-bit [0x0048F604] = 21
+    Add address: 8-bit [0x00348FAA] * -5628
+    Or next: 32-bit [0x0048F604] = 23
+    Add address: 8-bit [0x00348FAA] * -5628
+    Or next: 32-bit [0x0048F604] = 24
+    Add address: 8-bit [0x00348FAA] * -5628
+    And next: 32-bit [0x0048F604] = 32
+    Add address: 8-bit [0x00348FAA] * -10416
+    And next: 8-bit [0x0070F9DA] != 8
+    Add address: 8-bit [0x00348FAA] * -5632
+    And next: last frame's bit 6 of [0x0060A781] = 0
+    Add address: 8-bit [0x00348FAA] * -5632
+    Reset next if: bit 6 of [0x0060A781] = 1  (1 times)
+    Pause if: 1 = 1  (1 times)
+
+==== A Worldwide Pandemic (& Knuckles)  (10 points, official, ID 393644, missable)
+What to do: Obtain Ending 5-C. Free Mode is disallowed.
+  core:
+    Add address: 8-bit [0x00348FAA] * -10416
+    8-bit [0x0070F9DA] != 8
+    Add address: 8-bit [0x00348FAA] * -5552
+    last frame's 8-bit [0x0048DAB0] = 255
+    Add address: 8-bit [0x00348FAA] * -5552
+    8-bit [0x0048DAB0] = 11
+    Add address: 8-bit [0x00348FAA] * -10304
+    8-bit [0x0067DDBA] != 1
+  or alternative 1:
+    Add address: 8-bit [0x00348FAA] * -5628
+    32-bit [0x0048F604] = 21
+  or alternative 2:
+    Add address: 8-bit [0x00348FAA] * -5628
+    32-bit [0x0048F604] = 23
+  or alternative 3:
+    Add address: 8-bit [0x00348FAA] * -5628
+    32-bit [0x0048F604] = 24
+  or alternative 4:
+    Add address: 8-bit [0x00348FAA] * -5628
+    32-bit [0x0048F604] = 32
+
+==== Grab an Umbrella  (10 points, official, ID 393645)
+What to do: Obtain Ending 5-B.
+  core:
+    Add address: 8-bit [0x00348FAA] * -10416
+    8-bit [0x0070F9DA] != 8
+    Add address: 8-bit [0x00348FAA] * -5552
+    last frame's 8-bit [0x0048DAB0] = 255
+    Add address: 8-bit [0x00348FAA] * -5552
+    8-bit [0x0048DAB0] = 10
+  or alternative 1:
+    Add address: 8-bit [0x00348FAA] * -5628
+    32-bit [0x0048F604] = 21
+  or alternative 2:
+    Add address: 8-bit [0x00348FAA] * -5628
+    32-bit [0x0048F604] = 23
+  or alternative 3:
+    Add address: 8-bit [0x00348FAA] * -5628
+    32-bit [0x0048F604] = 24
+  or alternative 4:
+    Add address: 8-bit [0x00348FAA] * -5628
+    32-bit [0x0048F604] = 32
+
+==== I'm on Fire!  (25 points, official, ID 393646)
+What to do: Beat the game and witness the credits on the Hard difficulty.
+  core:
+    Add address: 8-bit [0x00348FAA] * -5640
+    32-bit [0x0048FD74] != 0
+    Add address: 8-bit [0x00348FAA] * -10304
+    last frame's 32-bit [0x006A4318] = 3
+    Add address: 8-bit [0x00348FAA] * -10304
+    32-bit [0x006A4318] = 1
+    Add address: 8-bit [0x00348FAA] * -10304
+    8-bit [0x0067DDBA] != 1
+    Add address: 8-bit [0x00348FAA] * -10304
+    8-bit [0x0067DDBB] = 2
+
+==== This Would Have Made a Good Story  (25 points, official, ID 393647, missable)
+What to do: Obtain Ending 7-B. Free Mode is disallowed.
+  core:
+    Add address: 8-bit [0x00348FAA] * -10416
+    8-bit [0x0070F9DA] != 8
+    Add address: 8-bit [0x00348FAA] * -5552
+    last frame's 8-bit [0x0048DAB0] = 255
+    Add address: 8-bit [0x00348FAA] * -5552
+    8-bit [0x0048DAB0] = 14
+    Add address: 8-bit [0x00348FAA] * -10304
+    8-bit [0x0067DDBA] != 1
+  or alternative 1:
+    Add address: 8-bit [0x00348FAA] * -5628
+    32-bit [0x0048F604] = 21
+  or alternative 2:
+    Add address: 8-bit [0x00348FAA] * -5628
+    32-bit [0x0048F604] = 23
+  or alternative 3:
+    Add address: 8-bit [0x00348FAA] * -5628
+    32-bit [0x0048F604] = 24
+  or alternative 4:
+    Add address: 8-bit [0x00348FAA] * -5628
+    32-bit [0x0048F604] = 32
+
+==== Rush Hour  (10 points, official, ID 393759)
+What to do: Without dying and on Hard difficulty, complete Isaac's chapter in 4 minutes and 15 seconds or less in Free Mode and obtain any ending.
+  core:
+    Add address: 8-bit [0x00348FAA] * -5632
+    Add source: 32-bit [0x00492450] * 1000000
+    Add address: 8-bit [0x00348FAA] * -5632
+    Add source: 32-bit [0x00492454] * 10000
+    Add address: 8-bit [0x00348FAA] * -5632
+    Add source: 32-bit [0x00492458] * 100
+    Add address: 8-bit [0x00348FAA] * -5632
+    And next: 32-bit [0x0049245C] = 3010000
+    Add address: 8-bit [0x00348FAA] * -5628
+    And next: 32-bit [0x0048F604] = 21
+    Add address: 8-bit [0x00348FAA] * -10432
+    32-bit [0x007173D0] < 150  (1 times)
+    Add address: 8-bit [0x00348FAA] * -5628
+    Reset if: 32-bit [0x0048F604] = 11
+    Add address: 8-bit [0x00348FAA] * -5628
+    Reset if: 32-bit [0x0048F604] = 22
+    Reset if: 8-bit [0x00376078] != 60
+    Add address: 8-bit [0x00348FAA] * -10304
+    8-bit [0x0067DDBA] = 1
+    Add address: 8-bit [0x00348FAA] * -10304
+    8-bit [0x0067DDBB] = 2
+    Add address: 8-bit [0x00348FAA] * -10432
+    32-bit [0x007173D0] <= 7650
+    Add address: 8-bit [0x00348FAA] * -5628
+    Trigger: last frame's 32-bit [0x0048F604] != 32
+    Add address: 8-bit [0x00348FAA] * -5628
+    Trigger: 32-bit [0x0048F604] = 32
+  or alternative 1:
+    Add address: 8-bit [0x00348FAA] * -5552
+    Trigger: 8-bit [0x0048DAB0] = 5
+  or alternative 2:
+    Add address: 8-bit [0x00348FAA] * -5552
+    Trigger: 8-bit [0x0048DAB0] = 6
+
+==== Survivor - Joshua  (25 points, official, ID 394216)
+What to do: Without dying and on Hard difficulty, complete Joshua's chapter in 32 minutes or less in Free Mode and obtain Ending 1-B or 1-C.
+  core:
+    Add address: 8-bit [0x00348FAA] * -5632
+    Add source: 32-bit [0x00492450] * 1000000
+    Add address: 8-bit [0x00348FAA] * -5632
+    Add source: 32-bit [0x00492454] * 10000
+    Add address: 8-bit [0x00348FAA] * -5632
+    Add source: 32-bit [0x00492458] * 100
+    Add address: 8-bit [0x00348FAA] * -5632
+    And next: 32-bit [0x0049245C] = 1000000
+    Add address: 8-bit [0x00348FAA] * -5628
+    And next: 32-bit [0x0048F604] = 21
+    Add address: 8-bit [0x00348FAA] * -10432
+    32-bit [0x007173A0] < 150  (1 times)
+    Add address: 8-bit [0x00348FAA] * -5628
+    Reset if: 32-bit [0x0048F604] = 11
+    Add address: 8-bit [0x00348FAA] * -5628
+    Reset if: 32-bit [0x0048F604] = 22
+    Reset if: 8-bit [0x00376078] != 60
+    Add address: 8-bit [0x00348FAA] * -10304
+    8-bit [0x0067DDBA] = 1
+    Add address: 8-bit [0x00348FAA] * -10304
+    8-bit [0x0067DDBB] = 2
+    Add address: 8-bit [0x00348FAA] * -10432
+    32-bit [0x007173A0] <= 57600
+    Add address: 8-bit [0x00348FAA] * -5628
+    Trigger: last frame's 32-bit [0x0048F604] != 32
+    Add address: 8-bit [0x00348FAA] * -5628
+    Trigger: 32-bit [0x0048F604] = 32
+  or alternative 1:
+    Add address: 8-bit [0x00348FAA] * -5552
+    Trigger: 8-bit [0x0048DAB0] = 1
+  or alternative 2:
+    Add address: 8-bit [0x00348FAA] * -5552
+    Trigger: 8-bit [0x0048DAB0] = 2
+
+==== Survivor - Amber  (25 points, official, ID 394217)
+What to do: Without dying and on Hard difficulty, complete Amber's chapter in 29 minutes or less in Free Mode and obtain Ending 2-A.
+  core:
+    Add address: 8-bit [0x00348FAA] * -5632
+    Add source: 32-bit [0x00492450] * 1000000
+    Add address: 8-bit [0x00348FAA] * -5632
+    Add source: 32-bit [0x00492454] * 10000
+    Add address: 8-bit [0x00348FAA] * -5632
+    Add source: 32-bit [0x00492458] * 100
+    Add address: 8-bit [0x00348FAA] * -5632
+    And next: 32-bit [0x0049245C] = 2020000
+    Add address: 8-bit [0x00348FAA] * -5628
+    And next: 32-bit [0x0048F604] = 21
+    Add address: 8-bit [0x00348FAA] * -10432
+    32-bit [0x007173B8] < 150  (1 times)
+    Add address: 8-bit [0x00348FAA] * -5628
+    Reset if: 32-bit [0x0048F604] = 11
+    Add address: 8-bit [0x00348FAA] * -5628
+    Reset if: 32-bit [0x0048F604] = 22
+    Reset if: 8-bit [0x00376078] != 60
+    Add address: 8-bit [0x00348FAA] * -10304
+    8-bit [0x0067DDBA] = 1
+    Add address: 8-bit [0x00348FAA] * -10304
+    8-bit [0x0067DDBB] = 2
+    Add address: 8-bit [0x00348FAA] * -10432
+    32-bit [0x007173B8] <= 52200
+    Add address: 8-bit [0x00348FAA] * -5552
+    Trigger: 8-bit [0x0048DAB0] = 3
+    Add address: 8-bit [0x00348FAA] * -5628
+    Trigger: last frame's 32-bit [0x0048F604] != 32
+    Add address: 8-bit [0x00348FAA] * -5628
+    Trigger: 32-bit [0x0048F604] = 32
+
+==== Survivor - Isaac  (25 points, official, ID 394218)
+What to do: Without dying and on Hard difficulty, complete Isaac's chapter in 23 minutes or less in Free Mode and obtain Ending 3-A.
+  core:
+    Add address: 8-bit [0x00348FAA] * -5632
+    Add source: 32-bit [0x00492450] * 1000000
+    Add address: 8-bit [0x00348FAA] * -5632
+    Add source: 32-bit [0x00492454] * 10000
+    Add address: 8-bit [0x00348FAA] * -5632
+    Add source: 32-bit [0x00492458] * 100
+    Add address: 8-bit [0x00348FAA] * -5632
+    And next: 32-bit [0x0049245C] = 3010000
+    Add address: 8-bit [0x00348FAA] * -5628
+    And next: 32-bit [0x0048F604] = 21
+    Add address: 8-bit [0x00348FAA] * -10432
+    32-bit [0x007173D0] < 150  (1 times)
+    Add address: 8-bit [0x00348FAA] * -5628
+    Reset if: 32-bit [0x0048F604] = 11
+    Add address: 8-bit [0x00348FAA] * -5628
+    Reset if: 32-bit [0x0048F604] = 22
+    Reset if: 8-bit [0x00376078] != 60
+    Add address: 8-bit [0x00348FAA] * -10304
+    8-bit [0x0067DDBA] = 1
+    Add address: 8-bit [0x00348FAA] * -10304
+    8-bit [0x0067DDBB] = 2
+    Add address: 8-bit [0x00348FAA] * -10432
+    32-bit [0x007173D0] <= 41400
+    Add address: 8-bit [0x00348FAA] * -5552
+    Trigger: 8-bit [0x0048DAB0] = 5
+    Add address: 8-bit [0x00348FAA] * -5628
+    Trigger: last frame's 32-bit [0x0048F604] != 32
+    Add address: 8-bit [0x00348FAA] * -5628
+    Trigger: 32-bit [0x0048F604] = 32
+
+==== Survivor - Paige  (25 points, official, ID 394219)
+What to do: Without dying and on Hard difficulty, complete Paige's chapter in 12 minutes and 15 seconds or less in Free Mode and obtain Ending 4-A.
+  core:
+    Add address: 8-bit [0x00348FAA] * -5632
+    Add source: 32-bit [0x00492450] * 1000000
+    Add address: 8-bit [0x00348FAA] * -5632
+    Add source: 32-bit [0x00492454] * 10000
+    Add address: 8-bit [0x00348FAA] * -5632
+    Add source: 32-bit [0x00492458] * 100
+    Add address: 8-bit [0x00348FAA] * -5632
+    And next: 32-bit [0x0049245C] = 4020000
+    Add address: 8-bit [0x00348FAA] * -5628
+    And next: 32-bit [0x0048F604] = 21
+    Add address: 8-bit [0x00348FAA] * -10432
+    32-bit [0x007173E8] < 150  (1 times)
+    Add address: 8-bit [0x00348FAA] * -5628
+    Reset if: 32-bit [0x0048F604] = 11
+    Add address: 8-bit [0x00348FAA] * -5628
+    Reset if: 32-bit [0x0048F604] = 22
+    Reset if: 8-bit [0x00376078] != 60
+    Add address: 8-bit [0x00348FAA] * -10304
+    8-bit [0x0067DDBA] = 1
+    Add address: 8-bit [0x00348FAA] * -10304
+    8-bit [0x0067DDBB] = 2
+    Add address: 8-bit [0x00348FAA] * -10432
+    32-bit [0x007173E8] <= 22050
+    Add address: 8-bit [0x00348FAA] * -5552
+    Trigger: 8-bit [0x0048DAB0] = 7
+    Add address: 8-bit [0x00348FAA] * -5628
+    Trigger: last frame's 32-bit [0x0048F604] != 32
+    Add address: 8-bit [0x00348FAA] * -5628
+    Trigger: 32-bit [0x0048F604] = 32
+
+==== Survivor - Ivan  (25 points, official, ID 394220)
+What to do: Without dying and on Hard difficulty, complete Ivan's chapter in 20 minutes and 15 seconds or less in Free Mode and obtain Ending 5-B.
+  core:
+    Add address: 8-bit [0x00348FAA] * -5632
+    Add source: 32-bit [0x00492450] * 1000000
+    Add address: 8-bit [0x00348FAA] * -5632
+    Add source: 32-bit [0x00492454] * 10000
+    Add address: 8-bit [0x00348FAA] * -5632
+    Add source: 32-bit [0x00492458] * 100
+    Add address: 8-bit [0x00348FAA] * -5632
+    And next: 32-bit [0x0049245C] = 5010000
+    Add address: 8-bit [0x00348FAA] * -5628
+    And next: 32-bit [0x0048F604] = 21
+    Add address: 8-bit [0x00348FAA] * -10432
+    32-bit [0x00717400] < 150  (1 times)
+    Add address: 8-bit [0x00348FAA] * -5628
+    Reset if: 32-bit [0x0048F604] = 11
+    Add address: 8-bit [0x00348FAA] * -5628
+    Reset if: 32-bit [0x0048F604] = 22
+    Reset if: 8-bit [0x00376078] != 60
+    Add address: 8-bit [0x00348FAA] * -10304
+    8-bit [0x0067DDBA] = 1
+    Add address: 8-bit [0x00348FAA] * -10304
+    8-bit [0x0067DDBB] = 2
+    Add address: 8-bit [0x00348FAA] * -10432
+    32-bit [0x00717400] <= 36450
+    Add address: 8-bit [0x00348FAA] * -5552
+    Trigger: 8-bit [0x0048DAB0] = 10
+    Add address: 8-bit [0x00348FAA] * -5628
+    Trigger: last frame's 32-bit [0x0048F604] != 32
+    Add address: 8-bit [0x00348FAA] * -5628
+    Trigger: 32-bit [0x0048F604] = 32
+
+==== Collection - Coat  (10 points, official, ID 394415)
+What to do: Obtain all items in the Coat category of the Collection.
+  core:
+    Add address: 8-bit [0x00348FAA] * -10416
+    Add source: bit 1 of [0x007101CF]
+    Add address: 8-bit [0x00348FAA] * -10416
+    Add source: bit 2 of [0x007101CF]
+    Add address: 8-bit [0x00348FAA] * -10416
+    Add source: bit 3 of [0x007101CF]
+    Add address: 8-bit [0x00348FAA] * -10416
+    Add source: bit 4 of [0x007101CF]
+    Add address: 8-bit [0x00348FAA] * -10416
+    Add source: bit 5 of [0x007101CF]
+    Add address: 8-bit [0x00348FAA] * -10416
+    Add source: bit 4 of [0x007101D2]
+    Add address: 8-bit [0x00348FAA] * -10416
+    Add source: bit 5 of [0x007101D2]
+    Add address: 8-bit [0x00348FAA] * -10416
+    Add source: bit 0 of [0x007101D4]
+    Add address: 8-bit [0x00348FAA] * -10416
+    Add source: bit 1 of [0x007101D4]
+    Add address: 8-bit [0x00348FAA] * -10416
+    Add source: bit 2 of [0x007101D4]
+    Add address: 8-bit [0x00348FAA] * -10416
+    Add source: bit 3 of [0x007101D4]
+    Add address: 8-bit [0x00348FAA] * -10416
+    Add source: bit 5 of [0x007101D4]
+    Add address: 8-bit [0x00348FAA] * -10416
+    Add source: bit 1 of [0x007101D6]
+    Add address: 8-bit [0x00348FAA] * -10416
+    Add source: bit 0 of [0x007101DB]
+    Add address: 8-bit [0x00348FAA] * -10416
+    Add source: bit 4 of [0x007101DB]
+    Add address: 8-bit [0x00348FAA] * -10416
+    Add source: bit 5 of [0x007101DB]
+    Add address: 8-bit [0x00348FAA] * -10416
+    Add source: bit 6 of [0x007101DB]
+    Add address: 8-bit [0x00348FAA] * -10416
+    Add source: bit 7 of [0x007101DB]
+    Add address: 8-bit [0x00348FAA] * -10416
+    Measured: bit 0 of [0x007101DC] = 19
+    Add address: 8-bit [0x00348FAA] * -5628
+    Or next: 32-bit [0x0048F604] = 21
+    Add address: 8-bit [0x00348FAA] * -5628
+    Or next: 32-bit [0x0048F604] = 23
+    Add address: 8-bit [0x00348FAA] * -5628
+    Or next: 32-bit [0x0048F604] = 24
+    Add address: 8-bit [0x00348FAA] * -5628
+    And next: 32-bit [0x0048F604] = 32
+    Add address: 8-bit [0x00348FAA] * -10416
+    Or next: 8-bit [0x0070F9DA] != 8
+    Add address: 8-bit [0x00348FAA] * -5628
+    Or next: 32-bit [0x0048F604] = 12
+    Add address: 8-bit [0x00348FAA] * -5628
+    Or next: 32-bit [0x0048F604] = 17
+    Add address: 8-bit [0x00348FAA] * -5628
+    Measured if: 32-bit [0x0048F604] = 14
+    Add address: 8-bit [0x00348FAA] * -5632
+    Add source: 32-bit [0x00492450] * 10000
+    Add address: 8-bit [0x00348FAA] * -5632
+    Add source: 32-bit [0x00492454] * 100
+    Add address: 8-bit [0x00348FAA] * -5632
+    Measured if: 32-bit [0x00492458] != 19900
+    Add address: 8-bit [0x00348FAA] * -10416
+    Or next: bit 1 of [0x007101CF] != last frame's bit 1 of [0x007101CF]
+    Add address: 8-bit [0x00348FAA] * -10416
+    Or next: bit 2 of [0x007101CF] != last frame's bit 2 of [0x007101CF]
+    Add address: 8-bit [0x00348FAA] * -10416
+    Or next: bit 3 of [0x007101CF] != last frame's bit 3 of [0x007101CF]
+    Add address: 8-bit [0x00348FAA] * -10416
+    Or next: bit 4 of [0x007101CF] != last frame's bit 4 of [0x007101CF]
+    Add address: 8-bit [0x00348FAA] * -10416
+    Or next: bit 5 of [0x007101CF] != last frame's bit 5 of [0x007101CF]
+    Add address: 8-bit [0x00348FAA] * -10416
+    Or next: bit 4 of [0x007101D2] != last frame's bit 4 of [0x007101D2]
+    Add address: 8-bit [0x00348FAA] * -10416
+    Or next: bit 5 of [0x007101D2] != last frame's bit 5 of [0x007101D2]
+    Add address: 8-bit [0x00348FAA] * -10416
+    Or next: bit 0 of [0x007101D4] != last frame's bit 0 of [0x007101D4]
+    Add address: 8-bit [0x00348FAA] * -10416
+    Or next: bit 1 of [0x007101D4] != last frame's bit 1 of [0x007101D4]
+    Add address: 8-bit [0x00348FAA] * -10416
+    Or next: bit 2 of [0x007101D4] != last frame's bit 2 of [0x007101D4]
+    Add address: 8-bit [0x00348FAA] * -10416
+    Or next: bit 3 of [0x007101D4] != last frame's bit 3 of [0x007101D4]
+    Add address: 8-bit [0x00348FAA] * -10416
+    Or next: bit 5 of [0x007101D4] != last frame's bit 5 of [0x007101D4]
+    Add address: 8-bit [0x00348FAA] * -10416
+    Or next: bit 1 of [0x007101D6] != last frame's bit 1 of [0x007101D6]
+    Add address: 8-bit [0x00348FAA] * -10416
+    Or next: bit 0 of [0x007101DB] != last frame's bit 0 of [0x007101DB]
+    Add address: 8-bit [0x00348FAA] * -10416
+    Or next: bit 4 of [0x007101DB] != last frame's bit 4 of [0x007101DB]
+    Add address: 8-bit [0x00348FAA] * -10416
+    Or next: bit 5 of [0x007101DB] != last frame's bit 5 of [0x007101DB]
+    Add address: 8-bit [0x00348FAA] * -10416
+    Or next: bit 6 of [0x007101DB] != last frame's bit 6 of [0x007101DB]
+    Add address: 8-bit [0x00348FAA] * -10416
+    Or next: bit 7 of [0x007101DB] != last frame's bit 7 of [0x007101DB]
+    Add address: 8-bit [0x00348FAA] * -10416
+    Measured if: bit 0 of [0x007101DC] != last frame's bit 0 of [0x007101DC]
+    Add address: 8-bit [0x00348FAA] * -5628
+    And next: 32-bit [0x0048F604] != 12
+    Add address: 8-bit [0x00348FAA] * -5628
+    And next: 32-bit [0x0048F604] != 17
+    Add address: 8-bit [0x00348FAA] * -5628
+    Or next: 32-bit [0x0048F604] != 14
+    Add address: 8-bit [0x00348FAA] * -10416
+    Add source: bit 1 of [0x007101CF]
+    Add address: 8-bit [0x00348FAA] * -10416
+    Add source: bit 2 of [0x007101CF]
+    Add address: 8-bit [0x00348FAA] * -10416
+    Add source: bit 3 of [0x007101CF]
+    Add address: 8-bit [0x00348FAA] * -10416
+    Add source: bit 4 of [0x007101CF]
+    Add address: 8-bit [0x00348FAA] * -10416
+    Add source: bit 5 of [0x007101CF]
+    Add address: 8-bit [0x00348FAA] * -10416
+    Add source: bit 4 of [0x007101D2]
+    Add address: 8-bit [0x00348FAA] * -10416
+    Add source: bit 5 of [0x007101D2]
+    Add address: 8-bit [0x00348FAA] * -10416
+    Add source: bit 0 of [0x007101D4]
+    Add address: 8-bit [0x00348FAA] * -10416
+    Add source: bit 1 of [0x007101D4]
+    Add address: 8-bit [0x00348FAA] * -10416
+    Add source: bit 2 of [0x007101D4]
+    Add address: 8-bit [0x00348FAA] * -10416
+    Add source: bit 3 of [0x007101D4]
+    Add address: 8-bit [0x00348FAA] * -10416
+    Add source: bit 5 of [0x007101D4]
+    Add address: 8-bit [0x00348FAA] * -10416
+    Add source: bit 1 of [0x007101D6]
+    Add address: 8-bit [0x00348FAA] * -10416
+    Add source: bit 0 of [0x007101DB]
+    Add address: 8-bit [0x00348FAA] * -10416
+    Add source: bit 4 of [0x007101DB]
+    Add address: 8-bit [0x00348FAA] * -10416
+    Add source: bit 5 of [0x007101DB]
+    Add address: 8-bit [0x00348FAA] * -10416
+    Add source: bit 6 of [0x007101DB]
+    Add address: 8-bit [0x00348FAA] * -10416
+    Add source: bit 7 of [0x007101DB]
+    Add address: 8-bit [0x00348FAA] * -10416
+    Measured if: bit 0 of [0x007101DC] = 19
+
+==== Collection - Inner Wear  (10 points, official, ID 394416)
+What to do: Obtain all items in the Inner Wear category of the Collection.
+  core:
+    Add address: 8-bit [0x00348FAA] * -10416
+    Add source: bit 5 of [0x007101D0]
+    Add address: 8-bit [0x00348FAA] * -10416
+    Add source: bit 6 of [0x007101D0]
+    Add address: 8-bit [0x00348FAA] * -10416
+    Add source: bit 7 of [0x007101D0]
+    Add address: 8-bit [0x00348FAA] * -10416
+    Add source: bit 0 of [0x007101D1]
+    Add address: 8-bit [0x00348FAA] * -10416
+    Add source: bit 1 of [0x007101D1]
+    Add address: 8-bit [0x00348FAA] * -10416
+    Add source: bit 1 of [0x007101DC]
+    Add address: 8-bit [0x00348FAA] * -10416
+    Add source: bit 3 of [0x007101DC]
+    Add address: 8-bit [0x00348FAA] * -10416
+    Add source: bit 4 of [0x007101DC]
+    Add address: 8-bit [0x00348FAA] * -10416
+    Add source: bit 5 of [0x007101DC]
+    Add address: 8-bit [0x00348FAA] * -10416
+    Add source: bit 6 of [0x007101DC]
+    Add address: 8-bit [0x00348FAA] * -10416
+    Measured: bit 0 of [0x007101DD] = 11
+    Add address: 8-bit [0x00348FAA] * -5628
+    Or next: 32-bit [0x0048F604] = 21
+    Add address: 8-bit [0x00348FAA] * -5628
+    Or next: 32-bit [0x0048F604] = 23
+    Add address: 8-bit [0x00348FAA] * -5628
+    Or next: 32-bit [0x0048F604] = 24
+    Add address: 8-bit [0x00348FAA] * -5628
+    And next: 32-bit [0x0048F604] = 32
+    Add address: 8-bit [0x00348FAA] * -10416
+    Or next: 8-bit [0x0070F9DA] != 8
+    Add address: 8-bit [0x00348FAA] * -5628
+    Or next: 32-bit [0x0048F604] = 12
+    Add address: 8-bit [0x00348FAA] * -5628
+    Or next: 32-bit [0x0048F604] = 17
+    Add address: 8-bit [0x00348FAA] * -5628
+    Measured if: 32-bit [0x0048F604] = 14
+    Add address: 8-bit [0x00348FAA] * -5632
+    Add source: 32-bit [0x00492450] * 10000
+    Add address: 8-bit [0x00348FAA] * -5632
+    Add source: 32-bit [0x00492454] * 100
+    Add address: 8-bit [0x00348FAA] * -5632
+    Measured if: 32-bit [0x00492458] != 19900
+    Add address: 8-bit [0x00348FAA] * -10416
+    Or next: bit 5 of [0x007101D0] != last frame's bit 5 of [0x007101D0]
+    Add address: 8-bit [0x00348FAA] * -10416
+    Or next: bit 6 of [0x007101D0] != last frame's bit 6 of [0x007101D0]
+    Add address: 8-bit [0x00348FAA] * -10416
+    Or next: bit 7 of [0x007101D0] != last frame's bit 7 of [0x007101D0]
+    Add address: 8-bit [0x00348FAA] * -10416
+    Or next: bit 0 of [0x007101D1] != last frame's bit 0 of [0x007101D1]
+    Add address: 8-bit [0x00348FAA] * -10416
+    Or next: bit 1 of [0x007101D1] != last frame's bit 1 of [0x007101D1]
+    Add address: 8-bit [0x00348FAA] * -10416
+    Or next: bit 1 of [0x007101DC] != last frame's bit 1 of [0x007101DC]
+    Add address: 8-bit [0x00348FAA] * -10416
+    Or next: bit 3 of [0x007101DC] != last frame's bit 3 of [0x007101DC]
+    Add address: 8-bit [0x00348FAA] * -10416
+    Or next: bit 4 of [0x007101DC] != last frame's bit 4 of [0x007101DC]
+    Add address: 8-bit [0x00348FAA] * -10416
+    Or next: bit 5 of [0x007101DC] != last frame's bit 5 of [0x007101DC]
+    Add address: 8-bit [0x00348FAA] * -10416
+    Or next: bit 6 of [0x007101DC] != last frame's bit 6 of [0x007101DC]
+    Add address: 8-bit [0x00348FAA] * -10416
+    Measured if: bit 0 of [0x007101DD] != last frame's bit 0 of [0x007101DD]
+    Add address: 8-bit [0x00348FAA] * -5628
+    And next: 32-bit [0x0048F604] != 12
+    Add address: 8-bit [0x00348FAA] * -5628
+    And next: 32-bit [0x0048F604] != 17
+    Add address: 8-bit [0x00348FAA] * -5628
+    Or next: 32-bit [0x0048F604] != 14
+    Add address: 8-bit [0x00348FAA] * -10416
+    Add source: bit 5 of [0x007101D0]
+    Add address: 8-bit [0x00348FAA] * -10416
+    Add source: bit 6 of [0x007101D0]
+    Add address: 8-bit [0x00348FAA] * -10416
+    Add source: bit 7 of [0x007101D0]
+    Add address: 8-bit [0x00348FAA] * -10416
+    Add source: bit 0 of [0x007101D1]
+    Add address: 8-bit [0x00348FAA] * -10416
+    Add source: bit 1 of [0x007101D1]
+    Add address: 8-bit [0x00348FAA] * -10416
+    Add source: bit 1 of [0x007101DC]
+    Add address: 8-bit [0x00348FAA] * -10416
+    Add source: bit 3 of [0x007101DC]
+    Add address: 8-bit [0x00348FAA] * -10416
+    Add source: bit 4 of [0x007101DC]
+    Add address: 8-bit [0x00348FAA] * -10416
+    Add source: bit 5 of [0x007101DC]
+    Add address: 8-bit [0x00348FAA] * -10416
+    Add source: bit 6 of [0x007101DC]
+    Add address: 8-bit [0x00348FAA] * -10416
+    Measured if: bit 0 of [0x007101DD] = 11
+
+==== Collection - Pants/Skirts  (10 points, official, ID 394417)
+What to do: Obtain all items in the Pants/Skirts category of the Collection.
+  core:
+    Add address: 8-bit [0x00348FAA] * -10416
+    Add source: bit 2 of [0x007101D1]
+    Add address: 8-bit [0x00348FAA] * -10416
+    Add source: bit 3 of [0x007101D1]
+    Add address: 8-bit [0x00348FAA] * -10416
+    Add source: bit 4 of [0x007101D1]
+    Add address: 8-bit [0x00348FAA] * -10416
+    Add source: bit 5 of [0x007101D1]
+    Add address: 8-bit [0x00348FAA] * -10416
+    Add source: bit 6 of [0x007101D1]
+    Add address: 8-bit [0x00348FAA] * -10416
+    Add source: bit 6 of [0x007101D2]
+    Add address: 8-bit [0x00348FAA] * -10416
+    Add source: bit 6 of [0x007101D5]
+    Add address: 8-bit [0x00348FAA] * -10416
+    Add source: bit 3 of [0x007101DD]
+    Add address: 8-bit [0x00348FAA] * -10416
+    Add source: bit 4 of [0x007101DD]
+    Add address: 8-bit [0x00348FAA] * -10416
+    Add source: bit 6 of [0x007101DD]
+    Add address: 8-bit [0x00348FAA] * -10416
+    Add source: bit 7 of [0x007101DD]
+    Add address: 8-bit [0x00348FAA] * -10416
+    Add source: bit 1 of [0x007101DE]
+    Add address: 8-bit [0x00348FAA] * -10416
+    Measured: bit 2 of [0x007101DE] = 13
+    Add address: 8-bit [0x00348FAA] * -5628
+    Or next: 32-bit [0x0048F604] = 21
+    Add address: 8-bit [0x00348FAA] * -5628
+    Or next: 32-bit [0x0048F604] = 23
+    Add address: 8-bit [0x00348FAA] * -5628
+    Or next: 32-bit [0x0048F604] = 24
+    Add address: 8-bit [0x00348FAA] * -5628
+    And next: 32-bit [0x0048F604] = 32
+    Add address: 8-bit [0x00348FAA] * -10416
+    Or next: 8-bit [0x0070F9DA] != 8
+    Add address: 8-bit [0x00348FAA] * -5628
+    Or next: 32-bit [0x0048F604] = 12
+    Add address: 8-bit [0x00348FAA] * -5628
+    Or next: 32-bit [0x0048F604] = 17
+    Add address: 8-bit [0x00348FAA] * -5628
+    Measured if: 32-bit [0x0048F604] = 14
+    Add address: 8-bit [0x00348FAA] * -5632
+    Add source: 32-bit [0x00492450] * 10000
+    Add address: 8-bit [0x00348FAA] * -5632
+    Add source: 32-bit [0x00492454] * 100
+    Add address: 8-bit [0x00348FAA] * -5632
+    Measured if: 32-bit [0x00492458] != 19900
+    Add address: 8-bit [0x00348FAA] * -10416
+    Or next: bit 2 of [0x007101D1] != last frame's bit 2 of [0x007101D1]
+    Add address: 8-bit [0x00348FAA] * -10416
+    Or next: bit 3 of [0x007101D1] != last frame's bit 3 of [0x007101D1]
+    Add address: 8-bit [0x00348FAA] * -10416
+    Or next: bit 4 of [0x007101D1] != last frame's bit 4 of [0x007101D1]
+    Add address: 8-bit [0x00348FAA] * -10416
+    Or next: bit 5 of [0x007101D1] != last frame's bit 5 of [0x007101D1]
+    Add address: 8-bit [0x00348FAA] * -10416
+    Or next: bit 6 of [0x007101D1] != last frame's bit 6 of [0x007101D1]
+    Add address: 8-bit [0x00348FAA] * -10416
+    Or next: bit 6 of [0x007101D2] != last frame's bit 6 of [0x007101D2]
+    Add address: 8-bit [0x00348FAA] * -10416
+    Or next: bit 6 of [0x007101D5] != last frame's bit 6 of [0x007101D5]
+    Add address: 8-bit [0x00348FAA] * -10416
+    Or next: bit 3 of [0x007101DD] != last frame's bit 3 of [0x007101DD]
+    Add address: 8-bit [0x00348FAA] * -10416
+    Or next: bit 4 of [0x007101DD] != last frame's bit 4 of [0x007101DD]
+    Add address: 8-bit [0x00348FAA] * -10416
+    Or next: bit 6 of [0x007101DD] != last frame's bit 6 of [0x007101DD]
+    Add address: 8-bit [0x00348FAA] * -10416
+    Or next: bit 7 of [0x007101DD] != last frame's bit 7 of [0x007101DD]
+    Add address: 8-bit [0x00348FAA] * -10416
+    Or next: bit 1 of [0x007101DE] != last frame's bit 1 of [0x007101DE]
+    Add address: 8-bit [0x00348FAA] * -10416
+    Measured if: bit 2 of [0x007101DE] != last frame's bit 2 of [0x007101DE]
+    Add address: 8-bit [0x00348FAA] * -5628
+    And next: 32-bit [0x0048F604] != 12
+    Add address: 8-bit [0x00348FAA] * -5628
+    And next: 32-bit [0x0048F604] != 17
+    Add address: 8-bit [0x00348FAA] * -5628
+    Or next: 32-bit [0x0048F604] != 14
+    Add address: 8-bit [0x00348FAA] * -10416
+    Add source: bit 2 of [0x007101D1]
+    Add address: 8-bit [0x00348FAA] * -10416
+    Add source: bit 3 of [0x007101D1]
+    Add address: 8-bit [0x00348FAA] * -10416
+    Add source: bit 4 of [0x007101D1]
+    Add address: 8-bit [0x00348FAA] * -10416
+    Add source: bit 5 of [0x007101D1]
+    Add address: 8-bit [0x00348FAA] * -10416
+    Add source: bit 6 of [0x007101D1]
+    Add address: 8-bit [0x00348FAA] * -10416
+    Add source: bit 6 of [0x007101D2]
+    Add address: 8-bit [0x00348FAA] * -10416
+    Add source: bit 6 of [0x007101D5]
+    Add address: 8-bit [0x00348FAA] * -10416
+    Add source: bit 3 of [0x007101DD]
+    Add address: 8-bit [0x00348FAA] * -10416
+    Add source: bit 4 of [0x007101DD]
+    Add address: 8-bit [0x00348FAA] * -10416
+    Add source: bit 6 of [0x007101DD]
+    Add address: 8-bit [0x00348FAA] * -10416
+    Add source: bit 7 of [0x007101DD]
+    Add address: 8-bit [0x00348FAA] * -10416
+    Add source: bit 1 of [0x007101DE]
+    Add address: 8-bit [0x00348FAA] * -10416
+    Measured if: bit 2 of [0x007101DE] = 13
+
+==== Collection - Head  (10 points, official, ID 394418)
+What to do: Obtain all items in the Head category of the Collection.
+  core:
+    Add address: 8-bit [0x00348FAA] * -10416
+    Add source: bit 4 of [0x007101CE]
+    Add address: 8-bit [0x00348FAA] * -10416
+    Add source: bit 5 of [0x007101CE]
+    Add address: 8-bit [0x00348FAA] * -10416
+    Add source: bit 6 of [0x007101CE]
+    Add address: 8-bit [0x00348FAA] * -10416
+    Add source: bit 7 of [0x007101CE]
+    Add address: 8-bit [0x00348FAA] * -10416
+    Add source: bit 0 of [0x007101CF]
+    Add address: 8-bit [0x00348FAA] * -10416
+    Add source: bit 1 of [0x007101D0]
+    Add address: 8-bit [0x00348FAA] * -10416
+    Add source: bit 7 of [0x007101D2]
+    Add address: 8-bit [0x00348FAA] * -10416
+    Measured: set bits in [0x007101D3] = 15
+    Add address: 8-bit [0x00348FAA] * -5628
+    Or next: 32-bit [0x0048F604] = 21
+    Add address: 8-bit [0x00348FAA] * -5628
+    Or next: 32-bit [0x0048F604] = 23
+    Add address: 8-bit [0x00348FAA] * -5628
+    Or next: 32-bit [0x0048F604] = 24
+    Add address: 8-bit [0x00348FAA] * -5628
+    And next: 32-bit [0x0048F604] = 32
+    Add address: 8-bit [0x00348FAA] * -10416
+    Or next: 8-bit [0x0070F9DA] != 8
+    Add address: 8-bit [0x00348FAA] * -5628
+    Or next: 32-bit [0x0048F604] = 12
+    Add address: 8-bit [0x00348FAA] * -5628
+    Or next: 32-bit [0x0048F604] = 17
+    Add address: 8-bit [0x00348FAA] * -5628
+    Measured if: 32-bit [0x0048F604] = 14
+    Add address: 8-bit [0x00348FAA] * -5632
+    Add source: 32-bit [0x00492450] * 10000
+    Add address: 8-bit [0x00348FAA] * -5632
+    Add source: 32-bit [0x00492454] * 100
+    Add address: 8-bit [0x00348FAA] * -5632
+    Measured if: 32-bit [0x00492458] != 19900
+    Add address: 8-bit [0x00348FAA] * -10416
+    Or next: bit 4 of [0x007101CE] != last frame's bit 4 of [0x007101CE]
+    Add address: 8-bit [0x00348FAA] * -10416
+    Or next: bit 5 of [0x007101CE] != last frame's bit 5 of [0x007101CE]
+    Add address: 8-bit [0x00348FAA] * -10416
+    Or next: bit 6 of [0x007101CE] != last frame's bit 6 of [0x007101CE]
+    Add address: 8-bit [0x00348FAA] * -10416
+    Or next: bit 7 of [0x007101CE] != last frame's bit 7 of [0x007101CE]
+    Add address: 8-bit [0x00348FAA] * -10416
+    Or next: bit 0 of [0x007101CF] != last frame's bit 0 of [0x007101CF]
+    Add address: 8-bit [0x00348FAA] * -10416
+    Or next: bit 1 of [0x007101D0] != last frame's bit 1 of [0x007101D0]
+    Add address: 8-bit [0x00348FAA] * -10416
+    Or next: bit 7 of [0x007101D2] != last frame's bit 7 of [0x007101D2]
+    Add address: 8-bit [0x00348FAA] * -10416
+    Or next: bit 0 of [0x007101D3] != last frame's bit 0 of [0x007101D3]
+    Add address: 8-bit [0x00348FAA] * -10416
+    Or next: bit 1 of [0x007101D3] != last frame's bit 1 of [0x007101D3]
+    Add address: 8-bit [0x00348FAA] * -10416
+    Or next: bit 2 of [0x007101D3] != last frame's bit 2 of [0x007101D3]
+    Add address: 8-bit [0x00348FAA] * -10416
+    Or next: bit 3 of [0x007101D3] != last frame's bit 3 of [0x007101D3]
+    Add address: 8-bit [0x00348FAA] * -10416
+    Or next: bit 4 of [0x007101D3] != last frame's bit 4 of [0x007101D3]
+    Add address: 8-bit [0x00348FAA] * -10416
+    Or next: bit 5 of [0x007101D3] != last frame's bit 5 of [0x007101D3]
+    Add address: 8-bit [0x00348FAA] * -10416
+    Or next: bit 6 of [0x007101D3] != last frame's bit 6 of [0x007101D3]
+    Add address: 8-bit [0x00348FAA] * -10416
+    Measured if: bit 7 of [0x007101D3] != last frame's bit 7 of [0x007101D3]
+    Add address: 8-bit [0x00348FAA] * -5628
+    And next: 32-bit [0x0048F604] != 12
+    Add address: 8-bit [0x00348FAA] * -5628
+    And next: 32-bit [0x0048F604] != 17
+    Add address: 8-bit [0x00348FAA] * -5628
+    Or next: 32-bit [0x0048F604] != 14
+    Add address: 8-bit [0x00348FAA] * -10416
+    Add source: bit 4 of [0x007101CE]
+    Add address: 8-bit [0x00348FAA] * -10416
+    Add source: bit 5 of [0x007101CE]
+    Add address: 8-bit [0x00348FAA] * -10416
+    Add source: bit 6 of [0x007101CE]
+    Add address: 8-bit [0x00348FAA] * -10416
+    Add source: bit 7 of [0x007101CE]
+    Add address: 8-bit [0x00348FAA] * -10416
+    Add source: bit 0 of [0x007101CF]
+    Add address: 8-bit [0x00348FAA] * -10416
+    Add source: bit 1 of [0x007101D0]
+    Add address: 8-bit [0x00348FAA] * -10416
+    Add source: bit 7 of [0x007101D2]
+    Add address: 8-bit [0x00348FAA] * -10416
+    Measured if: set bits in [0x007101D3] = 15
+
+==== Collection - Hands  (5 points, official, ID 394419)
+What to do: Obtain all items in the Hands category of the Collection.
+  core:
+    Add address: 8-bit [0x00348FAA] * -10416
+    Add source: bit 6 of [0x007101CF]
+    Add address: 8-bit [0x00348FAA] * -10416
+    Add source: bit 7 of [0x007101CF]
+    Add address: 8-bit [0x00348FAA] * -10416
+    Add source: bit 1 of [0x007101D5]
+    Add address: 8-bit [0x00348FAA] * -10416
+    Measured: bit 2 of [0x007101D5] = 4
+    Add address: 8-bit [0x00348FAA] * -5628
+    Or next: 32-bit [0x0048F604] = 21
+    Add address: 8-bit [0x00348FAA] * -5628
+    Or next: 32-bit [0x0048F604] = 23
+    Add address: 8-bit [0x00348FAA] * -5628
+    Or next: 32-bit [0x0048F604] = 24
+    Add address: 8-bit [0x00348FAA] * -5628
+    And next: 32-bit [0x0048F604] = 32
+    Add address: 8-bit [0x00348FAA] * -10416
+    Or next: 8-bit [0x0070F9DA] != 8
+    Add address: 8-bit [0x00348FAA] * -5628
+    Or next: 32-bit [0x0048F604] = 12
+    Add address: 8-bit [0x00348FAA] * -5628
+    Or next: 32-bit [0x0048F604] = 17
+    Add address: 8-bit [0x00348FAA] * -5628
+    Measured if: 32-bit [0x0048F604] = 14
+    Add address: 8-bit [0x00348FAA] * -5632
+    Add source: 32-bit [0x00492450] * 10000
+    Add address: 8-bit [0x00348FAA] * -5632
+    Add source: 32-bit [0x00492454] * 100
+    Add address: 8-bit [0x00348FAA] * -5632
+    Measured if: 32-bit [0x00492458] != 19900
+    Add address: 8-bit [0x00348FAA] * -10416
+    Or next: bit 6 of [0x007101CF] != last frame's bit 6 of [0x007101CF]
+    Add address: 8-bit [0x00348FAA] * -10416
+    Or next: bit 7 of [0x007101CF] != last frame's bit 7 of [0x007101CF]
+    Add address: 8-bit [0x00348FAA] * -10416
+    Or next: bit 1 of [0x007101D5] != last frame's bit 1 of [0x007101D5]
+    Add address: 8-bit [0x00348FAA] * -10416
+    Measured if: bit 2 of [0x007101D5] != last frame's bit 2 of [0x007101D5]
+    Add address: 8-bit [0x00348FAA] * -5628
+    And next: 32-bit [0x0048F604] != 12
+    Add address: 8-bit [0x00348FAA] * -5628
+    And next: 32-bit [0x0048F604] != 17
+    Add address: 8-bit [0x00348FAA] * -5628
+    Or next: 32-bit [0x0048F604] != 14
+    Add address: 8-bit [0x00348FAA] * -10416
+    Add source: bit 6 of [0x007101CF]
+    Add address: 8-bit [0x00348FAA] * -10416
+    Add source: bit 7 of [0x007101CF]
+    Add address: 8-bit [0x00348FAA] * -10416
+    Add source: bit 1 of [0x007101D5]
+    Add address: 8-bit [0x00348FAA] * -10416
+    Measured if: bit 2 of [0x007101D5] = 4
+
+==== Collection - Shoes  (10 points, official, ID 394420, missable)
+What to do: Obtain all items in the Shoes category of the Collection.
+  core:
+    Add address: 8-bit [0x00348FAA] * -10416
+    Add source: bit 7 of [0x007101D1]
+    Add address: 8-bit [0x00348FAA] * -10416
+    Add source: bit 0 of [0x007101D2]
+    Add address: 8-bit [0x00348FAA] * -10416
+    Add source: bit 1 of [0x007101D2]
+    Add address: 8-bit [0x00348FAA] * -10416
+    Add source: bit 3 of [0x007101D2]
+    Add address: 8-bit [0x00348FAA] * -10416
+    Add source: bit 7 of [0x007101D5]
+    Add address: 8-bit [0x00348FAA] * -10416
+    Add source: bit 0 of [0x007101D6]
+    Add address: 8-bit [0x00348FAA] * -10416
+    Add source: bit 6 of [0x007101D6]
+    Add address: 8-bit [0x00348FAA] * -10416
+    Add source: bit 5 of [0x007101DE]
+    Add address: 8-bit [0x00348FAA] * -10416
+    Add source: bit 6 of [0x007101DE]
+    Add address: 8-bit [0x00348FAA] * -10416
+    Add source: bit 0 of [0x007101DF]
+    Add address: 8-bit [0x00348FAA] * -10416
+    Add source: bit 1 of [0x007101DF]
+    Add address: 8-bit [0x00348FAA] * -10416
+    Add source: bit 2 of [0x007101DF]
+    Add address: 8-bit [0x00348FAA] * -10416
+    Measured: bit 3 of [0x007101DF] = 13
+    Add address: 8-bit [0x00348FAA] * -5628
+    Or next: 32-bit [0x0048F604] = 21
+    Add address: 8-bit [0x00348FAA] * -5628
+    Or next: 32-bit [0x0048F604] = 23
+    Add address: 8-bit [0x00348FAA] * -5628
+    Or next: 32-bit [0x0048F604] = 24
+    Add address: 8-bit [0x00348FAA] * -5628
+    And next: 32-bit [0x0048F604] = 32
+    Add address: 8-bit [0x00348FAA] * -10416
+    Or next: 8-bit [0x0070F9DA] != 8
+    Add address: 8-bit [0x00348FAA] * -5628
+    Or next: 32-bit [0x0048F604] = 12
+    Add address: 8-bit [0x00348FAA] * -5628
+    Or next: 32-bit [0x0048F604] = 17
+    Add address: 8-bit [0x00348FAA] * -5628
+    Measured if: 32-bit [0x0048F604] = 14
+    Add address: 8-bit [0x00348FAA] * -5632
+    Add source: 32-bit [0x00492450] * 10000
+    Add address: 8-bit [0x00348FAA] * -5632
+    Add source: 32-bit [0x00492454] * 100
+    Add address: 8-bit [0x00348FAA] * -5632
+    Measured if: 32-bit [0x00492458] != 19900
+    Add address: 8-bit [0x00348FAA] * -10416
+    Or next: bit 7 of [0x007101D1] != last frame's bit 7 of [0x007101D1]
+    Add address: 8-bit [0x00348FAA] * -10416
+    Or next: bit 0 of [0x007101D2] != last frame's bit 0 of [0x007101D2]
+    Add address: 8-bit [0x00348FAA] * -10416
+    Or next: bit 1 of [0x007101D2] != last frame's bit 1 of [0x007101D2]
+    Add address: 8-bit [0x00348FAA] * -10416
+    Or next: bit 3 of [0x007101D2] != last frame's bit 3 of [0x007101D2]
+    Add address: 8-bit [0x00348FAA] * -10416
+    Or next: bit 7 of [0x007101D5] != last frame's bit 7 of [0x007101D5]
+    Add address: 8-bit [0x00348FAA] * -10416
+    Or next: bit 0 of [0x007101D6] != last frame's bit 0 of [0x007101D6]
+    Add address: 8-bit [0x00348FAA] * -10416
+    Or next: bit 6 of [0x007101D6] != last frame's bit 6 of [0x007101D6]
+    Add address: 8-bit [0x00348FAA] * -10416
+    Or next: bit 5 of [0x007101DE] != last frame's bit 5 of [0x007101DE]
+    Add address: 8-bit [0x00348FAA] * -10416
+    Or next: bit 6 of [0x007101DE] != last frame's bit 6 of [0x007101DE]
+    Add address: 8-bit [0x00348FAA] * -10416
+    Or next: bit 0 of [0x007101DF] != last frame's bit 0 of [0x007101DF]
+    Add address: 8-bit [0x00348FAA] * -10416
+    Or next: bit 1 of [0x007101DF] != last frame's bit 1 of [0x007101DF]
+    Add address: 8-bit [0x00348FAA] * -10416
+    Or next: bit 2 of [0x007101DF] != last frame's bit 2 of [0x007101DF]
+    Add address: 8-bit [0x00348FAA] * -10416
+    Measured if: bit 3 of [0x007101DF] != last frame's bit 3 of [0x007101DF]
+    Add address: 8-bit [0x00348FAA] * -5628
+    And next: 32-bit [0x0048F604] != 12
+    Add address: 8-bit [0x00348FAA] * -5628
+    And next: 32-bit [0x0048F604] != 17
+    Add address: 8-bit [0x00348FAA] * -5628
+    Or next: 32-bit [0x0048F604] != 14
+    Add address: 8-bit [0x00348FAA] * -10416
+    Add source: bit 7 of [0x007101D1]
+    Add address: 8-bit [0x00348FAA] * -10416
+    Add source: bit 0 of [0x007101D2]
+    Add address: 8-bit [0x00348FAA] * -10416
+    Add source: bit 1 of [0x007101D2]
+    Add address: 8-bit [0x00348FAA] * -10416
+    Add source: bit 3 of [0x007101D2]
+    Add address: 8-bit [0x00348FAA] * -10416
+    Add source: bit 7 of [0x007101D5]
+    Add address: 8-bit [0x00348FAA] * -10416
+    Add source: bit 0 of [0x007101D6]
+    Add address: 8-bit [0x00348FAA] * -10416
+    Add source: bit 6 of [0x007101D6]
+    Add address: 8-bit [0x00348FAA] * -10416
+    Add source: bit 5 of [0x007101DE]
+    Add address: 8-bit [0x00348FAA] * -10416
+    Add source: bit 6 of [0x007101DE]
+    Add address: 8-bit [0x00348FAA] * -10416
+    Add source: bit 0 of [0x007101DF]
+    Add address: 8-bit [0x00348FAA] * -10416
+    Add source: bit 1 of [0x007101DF]
+    Add address: 8-bit [0x00348FAA] * -10416
+    Add source: bit 2 of [0x007101DF]
+    Add address: 8-bit [0x00348FAA] * -10416
+    Measured if: bit 3 of [0x007101DF] = 13
+
+==== Collection - Other  (10 points, official, ID 394421)
+What to do: Obtain all items in the Other category of the Collection.
+  core:
+    Add address: 8-bit [0x00348FAA] * -10416
+    Add source: bit 0 of [0x00710190]
+    Add address: 8-bit [0x00348FAA] * -10416
+    Add source: bit 4 of [0x00710197]
+    Add address: 8-bit [0x00348FAA] * -10416
+    Add source: bit 1 of [0x007101A1]
+    Add address: 8-bit [0x00348FAA] * -10416
+    Add source: bit 2 of [0x007101A1]
+    Add address: 8-bit [0x00348FAA] * -10416
+    Add source: bit 1 of [0x007101AA]
+    Add address: 8-bit [0x00348FAA] * -10416
+    Add source: bit 0 of [0x007101AD]
+    Add address: 8-bit [0x00348FAA] * -10416
+    Add source: bit 0 of [0x007101AA]
+    Add address: 8-bit [0x00348FAA] * -10416
+    Add source: bit 6 of [0x007101A0]
+    Add address: 8-bit [0x00348FAA] * -10416
+    Add source: bit 0 of [0x007101D0]
+    Add address: 8-bit [0x00348FAA] * -10416
+    Add source: bit 2 of [0x007101D0]
+    Add address: 8-bit [0x00348FAA] * -10416
+    Add source: bit 3 of [0x007101D0]
+    Add address: 8-bit [0x00348FAA] * -10416
+    Add source: bit 4 of [0x007101D0]
+    Add address: 8-bit [0x00348FAA] * -10416
+    Add source: bit 7 of [0x007101D4]
+    Add address: 8-bit [0x00348FAA] * -10416
+    Add source: bit 0 of [0x007101D5]
+    Add address: 8-bit [0x00348FAA] * -10416
+    Measured: bit 3 of [0x007101D5] = 15
+    Add address: 8-bit [0x00348FAA] * -5628
+    Or next: 32-bit [0x0048F604] = 21
+    Add address: 8-bit [0x00348FAA] * -5628
+    Or next: 32-bit [0x0048F604] = 23
+    Add address: 8-bit [0x00348FAA] * -5628
+    Or next: 32-bit [0x0048F604] = 24
+    Add address: 8-bit [0x00348FAA] * -5628
+    And next: 32-bit [0x0048F604] = 32
+    Add address: 8-bit [0x00348FAA] * -10416
+    Or next: 8-bit [0x0070F9DA] != 8
+    Add address: 8-bit [0x00348FAA] * -5628
+    Or next: 32-bit [0x0048F604] = 12
+    Add address: 8-bit [0x00348FAA] * -5628
+    Or next: 32-bit [0x0048F604] = 17
+    Add address: 8-bit [0x00348FAA] * -5628
+    Measured if: 32-bit [0x0048F604] = 14
+    Add address: 8-bit [0x00348FAA] * -5632
+    Add source: 32-bit [0x00492450] * 10000
+    Add address: 8-bit [0x00348FAA] * -5632
+    Add source: 32-bit [0x00492454] * 100
+    Add address: 8-bit [0x00348FAA] * -5632
+    Measured if: 32-bit [0x00492458] != 19900
+    Add address: 8-bit [0x00348FAA] * -10416
+    Or next: bit 0 of [0x00710190] != last frame's bit 0 of [0x00710190]
+    Add address: 8-bit [0x00348FAA] * -10416
+    Or next: bit 4 of [0x00710197] != last frame's bit 4 of [0x00710197]
+    Add address: 8-bit [0x00348FAA] * -10416
+    Or next: bit 1 of [0x007101A1] != last frame's bit 1 of [0x007101A1]
+    Add address: 8-bit [0x00348FAA] * -10416
+    Or next: bit 2 of [0x007101A1] != last frame's bit 2 of [0x007101A1]
+    Add address: 8-bit [0x00348FAA] * -10416
+    Or next: bit 1 of [0x007101AA] != last frame's bit 1 of [0x007101AA]
+    Add address: 8-bit [0x00348FAA] * -10416
+    Or next: bit 0 of [0x007101AD] != last frame's bit 0 of [0x007101AD]
+    Add address: 8-bit [0x00348FAA] * -10416
+    Or next: bit 0 of [0x007101AA] != last frame's bit 0 of [0x007101AA]
+    Add address: 8-bit [0x00348FAA] * -10416
+    Or next: bit 6 of [0x007101A0] != last frame's bit 6 of [0x007101A0]
+    Add address: 8-bit [0x00348FAA] * -10416
+    Or next: bit 0 of [0x007101D0] != last frame's bit 0 of [0x007101D0]
+    Add address: 8-bit [0x00348FAA] * -10416
+    Or next: bit 2 of [0x007101D0] != last frame's bit 2 of [0x007101D0]
+    Add address: 8-bit [0x00348FAA] * -10416
+    Or next: bit 3 of [0x007101D0] != last frame's bit 3 of [0x007101D0]
+    Add address: 8-bit [0x00348FAA] * -10416
+    Or next: bit 4 of [0x007101D0] != last frame's bit 4 of [0x007101D0]
+    Add address: 8-bit [0x00348FAA] * -10416
+    Or next: bit 7 of [0x007101D4] != last frame's bit 7 of [0x007101D4]
+    Add address: 8-bit [0x00348FAA] * -10416
+    Or next: bit 0 of [0x007101D5] != last frame's bit 0 of [0x007101D5]
+    Add address: 8-bit [0x00348FAA] * -10416
+    Measured if: bit 3 of [0x007101D5] != last frame's bit 3 of [0x007101D5]
+    Add address: 8-bit [0x00348FAA] * -5628
+    And next: 32-bit [0x0048F604] != 12
+    Add address: 8-bit [0x00348FAA] * -5628
+    And next: 32-bit [0x0048F604] != 17
+    Add address: 8-bit [0x00348FAA] * -5628
+    Or next: 32-bit [0x0048F604] != 14
+    Add address: 8-bit [0x00348FAA] * -10416
+    Add source: bit 0 of [0x00710190]
+    Add address: 8-bit [0x00348FAA] * -10416
+    Add source: bit 4 of [0x00710197]
+    Add address: 8-bit [0x00348FAA] * -10416
+    Add source: bit 1 of [0x007101A1]
+    Add address: 8-bit [0x00348FAA] * -10416
+    Add source: bit 2 of [0x007101A1]
+    Add address: 8-bit [0x00348FAA] * -10416
+    Add source: bit 1 of [0x007101AA]
+    Add address: 8-bit [0x00348FAA] * -10416
+    Add source: bit 0 of [0x007101AD]
+    Add address: 8-bit [0x00348FAA] * -10416
+    Add source: bit 0 of [0x007101AA]
+    Add address: 8-bit [0x00348FAA] * -10416
+    Add source: bit 6 of [0x007101A0]
+    Add address: 8-bit [0x00348FAA] * -10416
+    Add source: bit 0 of [0x007101D0]
+    Add address: 8-bit [0x00348FAA] * -10416
+    Add source: bit 2 of [0x007101D0]
+    Add address: 8-bit [0x00348FAA] * -10416
+    Add source: bit 3 of [0x007101D0]
+    Add address: 8-bit [0x00348FAA] * -10416
+    Add source: bit 4 of [0x007101D0]
+    Add address: 8-bit [0x00348FAA] * -10416
+    Add source: bit 7 of [0x007101D4]
+    Add address: 8-bit [0x00348FAA] * -10416
+    Add source: bit 0 of [0x007101D5]
+    Add address: 8-bit [0x00348FAA] * -10416
+    Measured if: bit 3 of [0x007101D5] = 15
+
+==== Compass Novice  (10 points, official, ID 394422)
+What to do: Obtain 20 compasses.
+  core:
+    Add address: 8-bit [0x00348FAA] * -10432
+    Add source: set bits in [0x00717440]
+    Add address: 8-bit [0x00348FAA] * -10432
+    Add source: set bits in [0x00717441]
+    Add address: 8-bit [0x00348FAA] * -10432
+    Add source: set bits in [0x00717442]
+    Add address: 8-bit [0x00348FAA] * -10432
+    Add source: set bits in [0x00717443]
+    Add address: 8-bit [0x00348FAA] * -10432
+    Add source: set bits in [0x00717444]
+    Add address: 8-bit [0x00348FAA] * -10432
+    Add source: set bits in [0x00717445]
+    Add address: 8-bit [0x00348FAA] * -10432
+    Add source: set bits in [0x00717446]
+    Add address: 8-bit [0x00348FAA] * -10432
+    Add source: set bits in [0x00717447]
+    Add address: 8-bit [0x00348FAA] * -10432
+    Measured: bit 0 of [0x00717448] = 20
+    Add address: 8-bit [0x00348FAA] * -5628
+    Or next: 32-bit [0x0048F604] = 21
+    Add address: 8-bit [0x00348FAA] * -5628
+    Or next: 32-bit [0x0048F604] = 23
+    Add address: 8-bit [0x00348FAA] * -5628
+    Or next: 32-bit [0x0048F604] = 24
+    Add address: 8-bit [0x00348FAA] * -5628
+    Measured if: 32-bit [0x0048F604] = 32
+    Add address: 8-bit [0x00348FAA] * -10416
+    Measured if: 8-bit [0x0070F9DA] != 8
+    Add address: 8-bit [0x00348FAA] * -10432
+    Or next: set bits in [0x00717440] != last frame's set bits in [0x00717440]
+    Add address: 8-bit [0x00348FAA] * -10432
+    Or next: set bits in [0x00717441] != last frame's set bits in [0x00717441]
+    Add address: 8-bit [0x00348FAA] * -10432
+    Or next: set bits in [0x00717442] != last frame's set bits in [0x00717442]
+    Add address: 8-bit [0x00348FAA] * -10432
+    Or next: set bits in [0x00717443] != last frame's set bits in [0x00717443]
+    Add address: 8-bit [0x00348FAA] * -10432
+    Or next: set bits in [0x00717444] != last frame's set bits in [0x00717444]
+    Add address: 8-bit [0x00348FAA] * -10432
+    Or next: set bits in [0x00717445] != last frame's set bits in [0x00717445]
+    Add address: 8-bit [0x00348FAA] * -10432
+    Or next: set bits in [0x00717446] != last frame's set bits in [0x00717446]
+    Add address: 8-bit [0x00348FAA] * -10432
+    Or next: set bits in [0x00717447] != last frame's set bits in [0x00717447]
+    Add address: 8-bit [0x00348FAA] * -10432
+    Measured if: set bits in [0x00717448] != last frame's set bits in [0x00717448]
+    Add address: 8-bit [0x00348FAA] * -10432
+    Add source: last frame's set bits in [0x00717440]
+    Add address: 8-bit [0x00348FAA] * -10432
+    Add source: last frame's set bits in [0x00717441]
+    Add address: 8-bit [0x00348FAA] * -10432
+    Add source: last frame's set bits in [0x00717442]
+    Add address: 8-bit [0x00348FAA] * -10432
+    Add source: last frame's set bits in [0x00717443]
+    Add address: 8-bit [0x00348FAA] * -10432
+    Add source: last frame's set bits in [0x00717444]
+    Add address: 8-bit [0x00348FAA] * -10432
+    Add source: last frame's set bits in [0x00717445]
+    Add address: 8-bit [0x00348FAA] * -10432
+    Add source: last frame's set bits in [0x00717446]
+    Add address: 8-bit [0x00348FAA] * -10432
+    Add source: last frame's set bits in [0x00717447]
+    Add address: 8-bit [0x00348FAA] * -10432
+    Measured if: last frame's bit 0 of [0x00717448] < 20
+
+==== Compass Enthusiast  (10 points, official, ID 394423)
+What to do: Obtain 40 compasses.
+  core:
+    Add address: 8-bit [0x00348FAA] * -10432
+    Add source: set bits in [0x00717440]
+    Add address: 8-bit [0x00348FAA] * -10432
+    Add source: set bits in [0x00717441]
+    Add address: 8-bit [0x00348FAA] * -10432
+    Add source: set bits in [0x00717442]
+    Add address: 8-bit [0x00348FAA] * -10432
+    Add source: set bits in [0x00717443]
+    Add address: 8-bit [0x00348FAA] * -10432
+    Add source: set bits in [0x00717444]
+    Add address: 8-bit [0x00348FAA] * -10432
+    Add source: set bits in [0x00717445]
+    Add address: 8-bit [0x00348FAA] * -10432
+    Add source: set bits in [0x00717446]
+    Add address: 8-bit [0x00348FAA] * -10432
+    Add source: set bits in [0x00717447]
+    Add address: 8-bit [0x00348FAA] * -10432
+    Measured: bit 0 of [0x00717448] = 40
+    Add address: 8-bit [0x00348FAA] * -5628
+    Or next: 32-bit [0x0048F604] = 21
+    Add address: 8-bit [0x00348FAA] * -5628
+    Or next: 32-bit [0x0048F604] = 23
+    Add address: 8-bit [0x00348FAA] * -5628
+    Or next: 32-bit [0x0048F604] = 24
+    Add address: 8-bit [0x00348FAA] * -5628
+    Measured if: 32-bit [0x0048F604] = 32
+    Add address: 8-bit [0x00348FAA] * -10416
+    Measured if: 8-bit [0x0070F9DA] != 8
+    Add address: 8-bit [0x00348FAA] * -10432
+    Or next: set bits in [0x00717440] != last frame's set bits in [0x00717440]
+    Add address: 8-bit [0x00348FAA] * -10432
+    Or next: set bits in [0x00717441] != last frame's set bits in [0x00717441]
+    Add address: 8-bit [0x00348FAA] * -10432
+    Or next: set bits in [0x00717442] != last frame's set bits in [0x00717442]
+    Add address: 8-bit [0x00348FAA] * -10432
+    Or next: set bits in [0x00717443] != last frame's set bits in [0x00717443]
+    Add address: 8-bit [0x00348FAA] * -10432
+    Or next: set bits in [0x00717444] != last frame's set bits in [0x00717444]
+    Add address: 8-bit [0x00348FAA] * -10432
+    Or next: set bits in [0x00717445] != last frame's set bits in [0x00717445]
+    Add address: 8-bit [0x00348FAA] * -10432
+    Or next: set bits in [0x00717446] != last frame's set bits in [0x00717446]
+    Add address: 8-bit [0x00348FAA] * -10432
+    Or next: set bits in [0x00717447] != last frame's set bits in [0x00717447]
+    Add address: 8-bit [0x00348FAA] * -10432
+    Measured if: set bits in [0x00717448] != last frame's set bits in [0x00717448]
+    Add address: 8-bit [0x00348FAA] * -10432
+    Add source: last frame's set bits in [0x00717440]
+    Add address: 8-bit [0x00348FAA] * -10432
+    Add source: last frame's set bits in [0x00717441]
+    Add address: 8-bit [0x00348FAA] * -10432
+    Add source: last frame's set bits in [0x00717442]
+    Add address: 8-bit [0x00348FAA] * -10432
+    Add source: last frame's set bits in [0x00717443]
+    Add address: 8-bit [0x00348FAA] * -10432
+    Add source: last frame's set bits in [0x00717444]
+    Add address: 8-bit [0x00348FAA] * -10432
+    Add source: last frame's set bits in [0x00717445]
+    Add address: 8-bit [0x00348FAA] * -10432
+    Add source: last frame's set bits in [0x00717446]
+    Add address: 8-bit [0x00348FAA] * -10432
+    Add source: last frame's set bits in [0x00717447]
+    Add address: 8-bit [0x00348FAA] * -10432
+    Measured if: last frame's bit 0 of [0x00717448] < 40
+    Add address: 8-bit [0x00348FAA] * -10432
+    Add source: set bits in [0x00717440]
+    Add address: 8-bit [0x00348FAA] * -10432
+    Add source: set bits in [0x00717441]
+    Add address: 8-bit [0x00348FAA] * -10432
+    Add source: set bits in [0x00717442]
+    Add address: 8-bit [0x00348FAA] * -10432
+    Add source: set bits in [0x00717443]
+    Add address: 8-bit [0x00348FAA] * -10432
+    Add source: set bits in [0x00717444]
+    Add address: 8-bit [0x00348FAA] * -10432
+    Add source: set bits in [0x00717445]
+    Add address: 8-bit [0x00348FAA] * -10432
+    Add source: set bits in [0x00717446]
+    Add address: 8-bit [0x00348FAA] * -10432
+    Add source: set bits in [0x00717447]
+    Add address: 8-bit [0x00348FAA] * -10432
+    Measured if: bit 0 of [0x00717448] > 20
+
+==== Compass Master  (25 points, official, ID 394424, missable)
+What to do: Obtain all 65 compasses.
+  core:
+    Add address: 8-bit [0x00348FAA] * -10432
+    Add source: set bits in [0x00717440]
+    Add address: 8-bit [0x00348FAA] * -10432
+    Add source: set bits in [0x00717441]
+    Add address: 8-bit [0x00348FAA] * -10432
+    Add source: set bits in [0x00717442]
+    Add address: 8-bit [0x00348FAA] * -10432
+    Add source: set bits in [0x00717443]
+    Add address: 8-bit [0x00348FAA] * -10432
+    Add source: set bits in [0x00717444]
+    Add address: 8-bit [0x00348FAA] * -10432
+    Add source: set bits in [0x00717445]
+    Add address: 8-bit [0x00348FAA] * -10432
+    Add source: set bits in [0x00717446]
+    Add address: 8-bit [0x00348FAA] * -10432
+    Add source: set bits in [0x00717447]
+    Add address: 8-bit [0x00348FAA] * -10432
+    Measured: bit 0 of [0x00717448] = 65
+    Add address: 8-bit [0x00348FAA] * -5628
+    Or next: 32-bit [0x0048F604] = 21
+    Add address: 8-bit [0x00348FAA] * -5628
+    Or next: 32-bit [0x0048F604] = 23
+    Add address: 8-bit [0x00348FAA] * -5628
+    Or next: 32-bit [0x0048F604] = 24
+    Add address: 8-bit [0x00348FAA] * -5628
+    Measured if: 32-bit [0x0048F604] = 32
+    Add address: 8-bit [0x00348FAA] * -10416
+    Measured if: 8-bit [0x0070F9DA] != 8
+    Add address: 8-bit [0x00348FAA] * -10432
+    Or next: set bits in [0x00717440] != last frame's set bits in [0x00717440]
+    Add address: 8-bit [0x00348FAA] * -10432
+    Or next: set bits in [0x00717441] != last frame's set bits in [0x00717441]
+    Add address: 8-bit [0x00348FAA] * -10432
+    Or next: set bits in [0x00717442] != last frame's set bits in [0x00717442]
+    Add address: 8-bit [0x00348FAA] * -10432
+    Or next: set bits in [0x00717443] != last frame's set bits in [0x00717443]
+    Add address: 8-bit [0x00348FAA] * -10432
+    Or next: set bits in [0x00717444] != last frame's set bits in [0x00717444]
+    Add address: 8-bit [0x00348FAA] * -10432
+    Or next: set bits in [0x00717445] != last frame's set bits in [0x00717445]
+    Add address: 8-bit [0x00348FAA] * -10432
+    Or next: set bits in [0x00717446] != last frame's set bits in [0x00717446]
+    Add address: 8-bit [0x00348FAA] * -10432
+    Or next: set bits in [0x00717447] != last frame's set bits in [0x00717447]
+    Add address: 8-bit [0x00348FAA] * -10432
+    Measured if: set bits in [0x00717448] != last frame's set bits in [0x00717448]
+    Add address: 8-bit [0x00348FAA] * -10432
+    Add source: last frame's set bits in [0x00717440]
+    Add address: 8-bit [0x00348FAA] * -10432
+    Add source: last frame's set bits in [0x00717441]
+    Add address: 8-bit [0x00348FAA] * -10432
+    Add source: last frame's set bits in [0x00717442]
+    Add address: 8-bit [0x00348FAA] * -10432
+    Add source: last frame's set bits in [0x00717443]
+    Add address: 8-bit [0x00348FAA] * -10432
+    Add source: last frame's set bits in [0x00717444]
+    Add address: 8-bit [0x00348FAA] * -10432
+    Add source: last frame's set bits in [0x00717445]
+    Add address: 8-bit [0x00348FAA] * -10432
+    Add source: last frame's set bits in [0x00717446]
+    Add address: 8-bit [0x00348FAA] * -10432
+    Add source: last frame's set bits in [0x00717447]
+    Add address: 8-bit [0x00348FAA] * -10432
+    Measured if: last frame's bit 0 of [0x00717448] < 65
+    Add address: 8-bit [0x00348FAA] * -10432
+    Add source: set bits in [0x00717440]
+    Add address: 8-bit [0x00348FAA] * -10432
+    Add source: set bits in [0x00717441]
+    Add address: 8-bit [0x00348FAA] * -10432
+    Add source: set bits in [0x00717442]
+    Add address: 8-bit [0x00348FAA] * -10432
+    Add source: set bits in [0x00717443]
+    Add address: 8-bit [0x00348FAA] * -10432
+    Add source: set bits in [0x00717444]
+    Add address: 8-bit [0x00348FAA] * -10432
+    Add source: set bits in [0x00717445]
+    Add address: 8-bit [0x00348FAA] * -10432
+    Add source: set bits in [0x00717446]
+    Add address: 8-bit [0x00348FAA] * -10432
+    Add source: set bits in [0x00717447]
+    Add address: 8-bit [0x00348FAA] * -10432
+    Measured if: bit 0 of [0x00717448] > 40
+
+==== Leaderboard: Joshua [Ending 1-B/C] - Fastest Time - Without dying and on Hard difficulty, complete Joshua's chapter in Free Mode and obtain Ending 1-B or 1-C as fast as possible! (not checked offline)
+==== Leaderboard: Joshua [Ending 1-A] - Fastest Time - Without dying and on Hard difficulty, complete Joshua's chapter in Free Mode and obtain Ending 1-A as fast as possible! (not checked offline)
+==== Leaderboard: Amber [Ending 2-B] - Fastest Time - Without dying and on Hard difficulty, complete Amber's chapter in Free Mode and obtain Ending 2-B as fast as possible! (not checked offline)
+==== Leaderboard: Amber [Ending 2-A] - Fastest Time - Without dying and on Hard difficulty, complete Amber's chapter in Free Mode and obtain Ending 2-A as fast as possible! (not checked offline)
+==== Leaderboard: Isaac [Ending 3-B] - Fastest Time - Without dying and on Hard difficulty, complete Isaac's chapter in Free Mode and obtain Ending 3-B as fast as possible! (not checked offline)
+==== Leaderboard: Isaac [Ending 3-A] - Fastest Time - Without dying and on Hard difficulty, complete Isaac's chapter in Free Mode and obtain Ending 3-A as fast as possible! (not checked offline)
+==== Leaderboard: Paige [Ending 4-A] - Fastest Time - Without dying and on Hard difficulty, complete Paige's chapter in Free Mode and obtain Ending 4-A as fast as possible! (not checked offline)
+==== Leaderboard: Ivan [Ending 5-B] - Fastest Time - Without dying and on Hard difficulty, complete Ivan's chapter in Free Mode and obtain Ending 5-B as fast as possible! (not checked offline)

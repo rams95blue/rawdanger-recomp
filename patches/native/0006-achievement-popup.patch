@@ -1,0 +1,190 @@
+diff --git a/host/achievements.cpp b/host/achievements.cpp
+index d729cd1..e6608f6 100644
+--- a/host/achievements.cpp
++++ b/host/achievements.cpp
+@@ -66,7 +66,7 @@ struct Achievement {
+ };
+ 
+ std::vector<Achievement> g_list;
+-std::string g_unlocks_path, g_off_path, g_note;
++std::string g_unlocks_path, g_off_path, g_note, g_note_icon, g_icons_dir;
+ std::mutex g_lock;
+ bool g_loaded = false;
+ 
+@@ -546,6 +546,8 @@ bool load(const char *set_path, const std::string &unlocks_path) {
+     std::stringstream ss;
+     ss << in.rdbuf();
+     const std::string text = ss.str();
++    const char *icons = std::getenv("PS2_ACHIEVEMENTS_ICONS");
++    g_icons_dir = icons && *icons ? icons : "";
+     const char *uo = std::getenv("PS2_ACHIEVEMENTS_UNOFFICIAL");
+     g_with_unofficial = uo && *uo == '1';
+     if (text.find("\"Achievements\"") != std::string::npos) load_json(text);
+@@ -582,6 +584,8 @@ void frame() {
+         a.unlocked = true;
+         save_unlock(a);
+         g_note = "Achievement unlocked: " + a.title + (a.points ? " (" + std::to_string(a.points) + ")" : "");
++        // its picture: PS2_ACHIEVEMENTS_ICONS/<id>.bmp (RawDangerPC.exe makes them: RetroAchievements' badges, or its own)
++        g_note_icon = g_icons_dir.empty() ? std::string() : g_icons_dir + "/" + a.id + ".bmp";
+         std::fprintf(stderr, "[achievements] unlocked %s - %s\n", a.id.c_str(), a.title.c_str());
+     }
+ }
+@@ -612,6 +616,13 @@ std::string take_note() {
+     return n;
+ }
+ 
++std::string take_note_icon() {
++    std::lock_guard<std::mutex> hold(g_lock);
++    std::string n;
++    n.swap(g_note_icon);
++    return n;
++}
++
+ bool loaded() { return g_loaded; }
+ 
+ int unlocked_count() {
+diff --git a/host/achievements.hpp b/host/achievements.hpp
+index 2931132..62179f5 100644
+--- a/host/achievements.hpp
++++ b/host/achievements.hpp
+@@ -42,6 +42,7 @@ bool load(const char *set_path, const std::string &unlocks_path);  // false: no
+ void frame();                                                         // once per video frame: check, unlock
+ std::vector<Row> rows();                                              // for the menu page
+ std::string take_note();
++std::string take_note_icon();  // the picture of the achievement just unlocked (a .bmp path; empty: none), right after take_note()
+ bool toggle(std::size_t index, std::string &note);                   // switch one on / off (kept in PS2_ACHIEVEMENTS_OFF)                                              // "Achievement unlocked: ..." once, then empty
+ bool loaded();
+ int unlocked_count();
+diff --git a/host/quickmenu.cpp b/host/quickmenu.cpp
+index 0b3c76e..f6bbec4 100644
+--- a/host/quickmenu.cpp
++++ b/host/quickmenu.cpp
+@@ -531,6 +531,45 @@ void Menu::draw_list(int window_width, int window_height, const Values &values,
+     c.text((pad + bar_pad) * s, y, s, kNote, gfx ? kTitle : kDim);
+ }
+ 
++void Menu::draw_toast(int window_width, int window_height, const std::string &header, const std::string &title,
++                      const std::vector<std::uint32_t> &icon, int icon_width, int icon_height, Picture &out) {
++    // font pixels: tape strip, then the picture (24 x 24) at the left and the two lines at its right
++    const int pad = 5, tape_h = 3, pic = 24, gap = 6;
++    const bool has_icon = !icon.empty() && icon_width > 0 && icon_height > 0;
++    const int text_chars = static_cast<int>(std::max(header.size(), title.size()));
++    const int units_w = 2 * pad + (has_icon ? pic + gap : 0) + text_chars * 6, units_h = tape_h + 2 * pad + std::max(pic, 20);
++    const int s = std::clamp(std::min(window_height / 200, window_width * 9 / 10 / units_w), 1, 6);
++    out.width = units_w * s;
++    out.height = units_h * s;
++    out.x = std::max(0, window_width - out.width - window_width / 40);   // bottom right, like a console's trophy pop-up
++    out.y = std::max(0, window_height - out.height - window_height / 20);
++    out.rgba.assign(static_cast<std::size_t>(out.width) * out.height, kPanel);
++    Canvas c{out};
++    c.tape(0, 0, out.width, tape_h * s, 3 * s);
++    const int frame = std::max(1, s / 2);
++    c.fill(0, out.height - frame, out.width, frame, kFrame);
++    c.fill(0, 0, frame, out.height, kFrame);
++    c.fill(out.width - frame, 0, frame, out.height, kFrame);
++    int x = pad * s;
++    const int top = (tape_h + pad) * s;
++    if (has_icon) {
++        // the picture, scaled to pic x pic font pixels (nearest), with a yellow border
++        const int size = pic * s;
++        c.fill(x - frame, top - frame, size + 2 * frame, size + 2 * frame, kTitle);
++        for (int j = 0; j < size; ++j)
++            for (int i = 0; i < size; ++i) {
++                const std::uint32_t px = icon[static_cast<std::size_t>(j * icon_height / size) * icon_width + i * icon_width / size];
++                const int a = static_cast<int>(px >> 24);
++                if (a == 0) continue;
++                out.rgba[static_cast<std::size_t>(top + j) * out.width + x + i] = px | 0xFF000000u;
++            }
++        x += (pic + gap) * s;
++    }
++    const int ty = top + std::max(0, (std::max(pic, 20) - 20) / 2) * s;
++    c.text(x, ty, s, header, kTitle);
++    c.text(x, ty + 11 * s, s, title, kText);
++}
++
+ void Menu::draw_note(int window_width, int window_height, const std::string &text, Picture &out) {
+     const int pad = 5;
+     const int units_w = 2 * pad + static_cast<int>(text.size()) * 6, units_h = 2 * pad + 8;
+diff --git a/host/quickmenu.hpp b/host/quickmenu.hpp
+index 245dd15..c637077 100644
+--- a/host/quickmenu.hpp
++++ b/host/quickmenu.hpp
+@@ -87,6 +87,9 @@ public:
+     void draw(int window_width, int window_height, const Values &values, Picture &out);
+     // A small panel with one line of text at the top of the window (for a few seconds after the menu is closed: "Saved", "Loaded")
+     static void draw_note(int window_width, int window_height, const std::string &text, Picture &out);
++    // rawdanger-recomp: the achievement pop-up - its picture (straight RGBA, red in the low byte; may be empty) beside two lines
++    static void draw_toast(int window_width, int window_height, const std::string &header, const std::string &title,
++                           const std::vector<std::uint32_t> &icon, int icon_width, int icon_height, Picture &out);
+ 
+ private:
+     bool open_ = false;
+diff --git a/host/window.cpp b/host/window.cpp
+index f667650..b32f926 100644
+--- a/host/window.cpp
++++ b/host/window.cpp
+@@ -168,6 +168,11 @@ bool g_sharp_locked = false;
+ // A short note drawn over the picture for a moment after the menu is closed ("Saved", "Loaded"): the menu asked for a quick save or load
+ bool g_note_wanted = false;  // a save or load was asked by the menu: the next message about it is shown over the picture
+ std::string g_note_text;  // not empty while the note is up
++// rawdanger-recomp: the achievement pop-up shown with the note (its picture, straight RGBA); empty: a plain note
++std::vector<std::uint32_t> g_toast_icon;
++int g_toast_w = 0, g_toast_h = 0;
++bool g_toast = false;
++std::string g_toast_title;
+ Uint32 g_note_until = 0;
+ bool g_overlay_on = false;  // g_menu_picture is laid over the game's picture (the menu, or the note)
+ std::uint64_t g_script_extra = 0;  // the pad script's clock goes on while the menu is open (the game's frames stand still)
+@@ -949,6 +954,8 @@ void menu_paint(bool show_again = true) {
+             v.recomp_note = g_recomp_note;
+         }
+         g_menu.draw(w, h, v, g_menu_picture);
++    } else if (g_toast) {
++        quickmenu::Menu::draw_toast(w, h, "ACHIEVEMENT UNLOCKED", g_toast_title, g_toast_icon, g_toast_w, g_toast_h, g_menu_picture);
+     } else {
+         quickmenu::Menu::draw_note(w, h, g_note_text, g_menu_picture);
+     }
+@@ -1333,6 +1340,7 @@ void show_notice() {
+             g_note_wanted = false;
+             if (!g_menu.is_open()) {
+                 g_note_text = n.text;
++                g_toast = false;
+                 g_note_until = SDL_GetTicks() + 2500;
+                 menu_paint(false);
+             }
+@@ -1346,12 +1354,34 @@ void show_notice() {
+     }
+     if (!g_note_text.empty() && static_cast<Sint32>(SDL_GetTicks() - g_note_until) >= 0) {
+         g_note_text.clear();
++        g_toast = false;
+         if (!g_menu.is_open()) menu_paint(false);
+     }
+     // rawdanger-recomp: an achievement just unlocked
+     if (const std::string a = achievements::take_note(); !a.empty() && !g_menu.is_open()) {
+         g_note_text = a;
+-        g_note_until = SDL_GetTicks() + 4500;
++        g_note_until = SDL_GetTicks() + 6000;
++        // the pop-up: the achievement's picture (a .bmp RawDangerPC.exe made) beside "ACHIEVEMENT UNLOCKED" and its name
++        g_toast = true;
++        g_toast_title = a.substr(a.find(':') == std::string::npos ? 0 : a.find(':') + 2);
++        g_toast_icon.clear();
++        g_toast_w = g_toast_h = 0;
++        if (const std::string icon = achievements::take_note_icon(); !icon.empty()) {
++            if (SDL_Surface *bmp = SDL_LoadBMP(icon.c_str())) {
++                if (SDL_Surface *rgba = SDL_ConvertSurfaceFormat(bmp, SDL_PIXELFORMAT_ABGR8888, 0)) {
++                    g_toast_w = rgba->w;
++                    g_toast_h = rgba->h;
++                    g_toast_icon.resize(static_cast<std::size_t>(g_toast_w) * g_toast_h);
++                    for (int y = 0; y < g_toast_h; ++y)
++                        std::memcpy(g_toast_icon.data() + static_cast<std::size_t>(y) * g_toast_w, static_cast<const std::uint8_t *>(rgba->pixels) + y * rgba->pitch,
++                                    static_cast<std::size_t>(g_toast_w) * 4);
++                    SDL_FreeSurface(rgba);
++                }
++                SDL_FreeSurface(bmp);
++            } else {
++                std::fprintf(stderr, "[achievements] no picture %s (%s)\n", icon.c_str(), SDL_GetError());
++            }
++        }
+         menu_paint(false);
+     }
+ }

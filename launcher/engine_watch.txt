@@ -1,0 +1,31 @@
+# What makes a change in ps2-native-recomp (upstream of engine\ps2-native-recomp) worth a look for Raw Danger.
+# Read by RawDangerPC.exe (the engine update check at start) and by `rd.py engine-check`.
+#
+# upstream = owner/repository on GitHub
+# branch   = the branch to compare with
+# rule     = area | weight | words (a regular expression, case ignored, matched in the change's title)
+#            weight: 3 = can help Raw Danger directly, 2 = likely helps, 1 = nice to know, 0 = ignored
+# skip     = changes whose title matches are ignored (games lists, CI, tests)
+# A change counts once, in the first area whose words match (the order below matters).
+# "Significant" = at least one weight-3 change, or 8 points in all.
+
+upstream = exoteric33/ps2-native-recomp
+branch = main
+
+skip = ^Merge (pull request|branch|upstream)
+skip = ^README\b|games that run|\bplays (well|a third|through)
+skip = ^(Build|Run|Bring) .*\b(CI|checks|test)\b
+skip = ^Test(s)? |^Expect |\bin CI\b
+
+rule = Films (the opening and the chapter films) | 3 | \bfilm|video decoder|\bIPU\b|\bMPEG|\bPSS\b|macroblock
+rule = Sound and voices | 3 | \bsound|\bSPU|\baudio|\bADMA|\bvoice|\bmixer
+rule = Speed | 3 | faster|\bspeed|stutter|hitch|\bpace\b|picture pace|cost of|\bcut the cost|in batches|\bring\b|AVX2|tile helper|submit thread|draw program|skip whole turns|only the new
+rule = Crashes, hangs and wrong behaviour | 3 | \bfix|crash|\bhang|freez|\bwait|interrupt|\bRPC\b|wake-up|lost branch|delay.slot|exactly as|instruction.cache|rematch|out-of-RAM|bound code
+rule = Textures (roadmap: original/HD textures) | 3 | texture|\bHD\b|override
+rule = Vector units (the 3D) | 2 | \bVU[01]?\b|vector program|\bEFU\b|WAITP|vurecomp
+rule = Translator (the game's code) | 2 | translat|recomp\b|\bEE\b|ee-live|codegen|\bJALR\b
+rule = Disc images | 2 | \bCHD\b|chdunpack|disc image|\.chd|single-file pack|PS2PACK
+rule = Pictures and drawing | 2 | \bdraw|\bdepth|\bGS\b|\bscaled|\bpixel|palette
+rule = Controls | 2 | controller|\bpad\b|\bstick|\bkeys?\b
+rule = Problem reports and logs | 1 | \bF9\b|problem report|log head|\blog\b
+rule = Their app (we use RawDangerPC.exe instead) | 0 | \bapp\b|home screen|games list|scroll bar|Make one file|build screen

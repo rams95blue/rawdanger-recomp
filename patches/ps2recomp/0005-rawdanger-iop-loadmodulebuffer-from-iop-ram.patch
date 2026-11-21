@@ -1,0 +1,82 @@
+diff --git a/ps2xIOP/src/emulator/iop_emulator.cpp b/ps2xIOP/src/emulator/iop_emulator.cpp
+index e5f63a9..2ae0862 100644
+--- a/ps2xIOP/src/emulator/iop_emulator.cpp
++++ b/ps2xIOP/src/emulator/iop_emulator.cpp
+@@ -652,13 +652,74 @@ namespace ps2x::iop::detail
+             return loadImage(std::string(path), image, arguments, argumentSize);
+         }
+ 
++        // sceSifLoadModuleBuffer() takes an IOP address on real hardware: games
++        // DMA the IRX into IOP RAM first (sceSifSetDma) and pass that address
++        // (Raw Danger does this for all 14 of its IOP\\IOP.DAT modules). Keep the
++        // EE-RAM path first for existing callers, then fall back to IOP RAM.
++        bool readElfFromIopRam(uint32_t address, std::vector<uint8_t> &bytes) const
++        {
++            uint8_t header[52] = {};
++            if (!memory.readRam(address, header, sizeof(header)))
++                return false;
++            if (header[0] != 0x7Fu || header[1] != 'E' || header[2] != 'L' || header[3] != 'F' ||
++                header[4] != 1u || header[5] != 1u)
++                return false;
++            auto u16 = [&](size_t o) { return static_cast<uint32_t>(header[o] | (header[o + 1] << 8)); };
++            auto u32 = [](const uint8_t *p) { return static_cast<uint32_t>(p[0] | (p[1] << 8) | (p[2] << 16) | (static_cast<uint32_t>(p[3]) << 24)); };
++            const uint32_t phoff = u32(header + 28), shoff = u32(header + 32);
++            const uint32_t phentsize = u16(42), phnum = u16(44), shentsize = u16(46), shnum = u16(48);
++            uint64_t required = sizeof(header);
++            required = std::max<uint64_t>(required, static_cast<uint64_t>(phoff) + static_cast<uint64_t>(phentsize) * phnum);
++            required = std::max<uint64_t>(required, static_cast<uint64_t>(shoff) + static_cast<uint64_t>(shentsize) * shnum);
++            constexpr uint64_t kMaxIrxImage = 2u * 1024u * 1024u; // all of IOP RAM
++            if (required > kMaxIrxImage)
++                return false;
++            bytes.resize(static_cast<size_t>(required));
++            if (!memory.readRam(address, bytes.data(), bytes.size()))
++                return false;
++            if (shnum != 0u && shentsize >= 40u)
++            {
++                for (uint32_t i = 0; i < shnum; ++i)
++                {
++                    const uint8_t *sh = bytes.data() + shoff + static_cast<size_t>(i) * shentsize;
++                    const uint32_t type = u32(sh + 4), offset = u32(sh + 16), size = u32(sh + 20);
++                    if (type != 8u) // SHT_NOBITS
++                        required = std::max<uint64_t>(required, static_cast<uint64_t>(offset) + size);
++                }
++            }
++            if (phnum != 0u && phentsize >= 32u)
++            {
++                for (uint32_t i = 0; i < phnum; ++i)
++                {
++                    const uint8_t *ph = bytes.data() + phoff + static_cast<size_t>(i) * phentsize;
++                    required = std::max<uint64_t>(required, static_cast<uint64_t>(u32(ph + 4)) + u32(ph + 16));
++                }
++            }
++            if (required > kMaxIrxImage)
++                return false;
++            bytes.resize(static_cast<size_t>(required));
++            return memory.readRam(address, bytes.data(), bytes.size());
++        }
++
+         ModuleLoadResult loadModuleBuffer(uint32_t guestAddress, const void *arguments, uint32_t argumentSize)
+         {
+             std::vector<uint8_t> image;
+-            if (!IopModuleLoader::readElfFromGuest(host, guestAddress, image))
+-                return {true, -1, -1};
+             std::ostringstream tag;
+-            tag << "buffer@0x" << std::hex << guestAddress;
++            if (IopModuleLoader::readElfFromGuest(host, guestAddress, image))
++            {
++                tag << "buffer@0x" << std::hex << guestAddress;
++            }
++            else if (readElfFromIopRam(guestAddress, image))
++            {
++                tag << "iop-buffer@0x" << std::hex << guestAddress;
++            }
++            else
++            {
++                std::ostringstream msg;
++                msg << "[IOP] sceSifLoadModuleBuffer: no IRX ELF at 0x" << std::hex << guestAddress << " (EE or IOP RAM)";
++                log(LogLevel::Warning, msg.str());
++                return {true, -1, -1};
++            }
+             return loadImage(tag.str(), image, arguments, argumentSize);
+         }
+ 

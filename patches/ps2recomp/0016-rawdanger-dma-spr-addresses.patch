@@ -1,0 +1,170 @@
+diff --git a/ps2xRuntime/src/lib/Kernel/Stubs/Helpers/Support.h b/ps2xRuntime/src/lib/Kernel/Stubs/Helpers/Support.h
+index 5da0f5d..948aefc 100644
+--- a/ps2xRuntime/src/lib/Kernel/Stubs/Helpers/Support.h
++++ b/ps2xRuntime/src/lib/Kernel/Stubs/Helpers/Support.h
+@@ -1262,6 +1262,10 @@ namespace
+ 
+     uint32_t toDmaPhys(uint32_t addr)
+     {
++        // A scratchpad pointer (0x70000000-0x70003FFF) stays a scratchpad address;
++        // masking it with 0x1FFFFFFF turned it into 0x1000xxxx (EE I/O registers).
++        if (addr >= PS2_SCRATCHPAD_BASE && addr < PS2_SCRATCHPAD_BASE + PS2_SCRATCHPAD_SIZE)
++            return addr;
+         if ((addr & 0x80000000u) != 0)
+         {
+             uint32_t lower = addr & 0x7FFFFFFFu;
+diff --git a/ps2xRuntime/src/lib/ps2_memory.cpp b/ps2xRuntime/src/lib/ps2_memory.cpp
+index 37b6a4d..35da80e 100644
+--- a/ps2xRuntime/src/lib/ps2_memory.cpp
++++ b/ps2xRuntime/src/lib/ps2_memory.cpp
+@@ -201,13 +201,32 @@ namespace
+         uint32_t upper = 0;
+     };
+ 
++    // DMAC addresses (Dn_MADR, Dn_TADR, Dn_ASR0/1 and the ADDR field of a DMAtag) are
++    // 31-bit with bit 31 = SPR: set means the address is in the 16 KB scratchpad
++    // (offset = addr & 0x3FFF). Map those to the scratchpad window at 0x70000000 so
++    // isScratchpad()/translateAddress() see them; anything else is left as it was.
++    inline uint32_t dmacAddress(uint32_t raw)
++    {
++        if ((raw & 0x80000000u) != 0u)
++            return PS2_SCRATCHPAD_BASE | (raw & (PS2_SCRATCHPAD_SIZE - 1u));
++        return raw;
++    }
++
++    // Inverse, for values written back to TADR/ASR registers.
++    inline uint32_t dmacRegisterValue(uint32_t addr)
++    {
++        if (addr >= PS2_SCRATCHPAD_BASE && addr < PS2_SCRATCHPAD_BASE + PS2_SCRATCHPAD_SIZE)
++            return 0x80000000u | (addr - PS2_SCRATCHPAD_BASE);
++        return addr;
++    }
++
+     inline DmaTagView decodeDmaTag(uint64_t tag)
+     {
+         DmaTagView out{};
+         out.qwc = static_cast<uint16_t>(tag & 0xFFFFu);
+         out.id = static_cast<uint8_t>((tag >> 28u) & 0x7u);
+         out.irq = ((tag >> 31u) & 0x1ull) != 0ull;
+-        out.addr = static_cast<uint32_t>((tag >> 32u) & 0x7FFFFFFFu);
++        out.addr = dmacAddress(static_cast<uint32_t>(tag >> 32u));
+         out.upper = static_cast<uint32_t>((tag >> 16u) & 0xFFFFu);
+         return out;
+     }
+@@ -1302,7 +1321,7 @@ bool PS2Memory::writeIORegister(uint32_t address, uint32_t value)
+             }
+ 
+             const uint32_t channelBase = address & 0xFFFFFF00;
+-            const uint32_t madr = m_ioRegisters[channelBase + 0x10];
++            const uint32_t madr = dmacAddress(m_ioRegisters[channelBase + 0x10]);
+             const uint32_t qwc = m_ioRegisters[channelBase + 0x20];
+             m_dmaStartCount.fetch_add(1, std::memory_order_relaxed);
+ 
+@@ -1339,9 +1358,9 @@ bool PS2Memory::writeIORegister(uint32_t address, uint32_t value)
+                 }
+                 else if (mode == 1)
+                 {
+-                    uint32_t tagAddr = m_ioRegisters[channelBase + 0x30];
+-                    uint32_t asr0 = m_ioRegisters[channelBase + 0x40];
+-                    uint32_t asr1 = m_ioRegisters[channelBase + 0x50];
++                    uint32_t tagAddr = dmacAddress(m_ioRegisters[channelBase + 0x30]);
++                    uint32_t asr0 = dmacAddress(m_ioRegisters[channelBase + 0x40]);
++                    uint32_t asr1 = dmacAddress(m_ioRegisters[channelBase + 0x50]);
+                     uint32_t asp = (chcr >> 4) & 0x3u;
+                     const bool tieEnabled = (chcr & (1u << 7)) != 0u;
+                     const int kMaxChainTags = 4096;
+@@ -1438,7 +1457,8 @@ bool PS2Memory::writeIORegister(uint32_t address, uint32_t value)
+                         uint16_t tagQwc = static_cast<uint16_t>(tag & 0xFFFF);
+                         uint32_t id = static_cast<uint32_t>((tag >> 28) & 0x7);
+                         const bool irq = ((tag >> 31) & 0x1ull) != 0ull;
+-                        uint32_t addr = static_cast<uint32_t>((tag >> 32) & 0x7FFFFFFF);
++                        // Bit 31 of ADDR is SPR (data/next tag in scratchpad), not part of the address.
++                        uint32_t addr = dmacAddress(static_cast<uint32_t>(tag >> 32));
+                         lastTagUpper = static_cast<uint32_t>((tag >> 16) & 0xFFFFu);
+                         ++tagsProcessed;
+ 
+@@ -1521,9 +1541,9 @@ bool PS2Memory::writeIORegister(uint32_t address, uint32_t value)
+                             break;
+                     }
+ 
+-                    m_ioRegisters[channelBase + 0x30] = tagAddr;
+-                    m_ioRegisters[channelBase + 0x40] = asr0;
+-                    m_ioRegisters[channelBase + 0x50] = asr1;
++                    m_ioRegisters[channelBase + 0x30] = dmacRegisterValue(tagAddr);
++                    m_ioRegisters[channelBase + 0x40] = dmacRegisterValue(asr0);
++                    m_ioRegisters[channelBase + 0x50] = dmacRegisterValue(asr1);
+                     chcr = (chcr & ~(0x3u << 4)) | ((asp & 0x3u) << 4);
+                     chcr = (chcr & 0x0000FFFFu) | (lastTagUpper << 16);
+                     m_ioRegisters[channelBase + 0x00] = chcr;
+@@ -2003,6 +2023,7 @@ void PS2Memory::processGIFPacket(const uint8_t *data, uint32_t sizeBytes)
+ 
+ bool PS2Memory::tryProcessNativeGifImageUploadChain(GS &gs, uint32_t tadr, uint32_t chcr)
+ {
++    tadr = dmacAddress(tadr); // TADR bit 31 = SPR
+     static constexpr uint32_t GIF_CHANNEL = 0x1000A000u;
+     static constexpr uint32_t D_STAT = 0x1000E010u;
+     static constexpr uint32_t D_CTRL = 0x1000E000u;
+@@ -2195,6 +2216,7 @@ bool PS2Memory::tryProcessNativeGifImageUploadChain(GS &gs, uint32_t tadr, uint3
+ 
+ bool PS2Memory::tryProcessNativeGifPackedChain(GS &gs, uint32_t tadr, uint32_t chcr)
+ {
++    tadr = dmacAddress(tadr); // TADR bit 31 = SPR
+     static constexpr uint32_t GIF_CHANNEL = 0x1000A000u;
+     static constexpr uint32_t D_STAT = 0x1000E010u;
+     static constexpr uint32_t D_CTRL = 0x1000E000u;
+diff --git a/ps2xTest/src/ps2_memory_tests.cpp b/ps2xTest/src/ps2_memory_tests.cpp
+index de7c6d4..4dec652 100644
+--- a/ps2xTest/src/ps2_memory_tests.cpp
++++ b/ps2xTest/src/ps2_memory_tests.cpp
+@@ -1469,6 +1469,51 @@ void register_ps2_memory_tests()
+                      "compact VIF1 chain should clear the STR bit after drain");
+         });
+ 
++        tc.Run("VIF1 DMA chain REF tag with the SPR bit reads its data from scratchpad", [](TestCase &t)
++        {
++            PS2Memory mem;
++            t.IsTrue(mem.initialize(), "PS2Memory initialize should succeed");
++
++            constexpr uint32_t kVif1Ch = 0x10009000u;
++            constexpr uint32_t kTag = 0x00026000u;
++            constexpr uint32_t kSprOffset = 0x40u;
++
++            uint8_t *rdram = mem.getRDRAM();
++            uint8_t *spr = mem.getScratchpad();
++            std::memset(rdram + kTag, 0, 32u);
++            // Raw Danger builds object matrices in scratchpad and REFs them from a chain in
++            // RAM: DMAtag ADDR = 0x80000000 | offset (bit 31 = SPR). The same offset in RAM
++            // holds something else, which is what reached VU1 before.
++            for (uint32_t i = 0; i < 16u; ++i)
++            {
++                spr[kSprOffset + i] = static_cast<uint8_t>(0xA0u + i);
++                rdram[kSprOffset + i] = 0x11u;
++            }
++
++            const uint64_t refTag = 1ull | (3ull << 28) | (static_cast<uint64_t>(0x80000000u | kSprOffset) << 32);
++            std::memcpy(rdram + kTag, &refTag, sizeof(refTag));
++            const uint32_t directCmd = makeVifCmd(0x50u, 0u, 1u);
++            std::memcpy(rdram + kTag + 12u, &directCmd, sizeof(directCmd));
++            const uint64_t endTag = makeDmaTag(0u, 7u, 0u, false);
++            std::memcpy(rdram + kTag + 16u, &endTag, sizeof(endTag));
++
++            std::vector<std::vector<uint8_t>> captured;
++            mem.setGifPacketCallback([&](const uint8_t *data, uint32_t sizeBytes)
++            {
++                captured.emplace_back(data, data + sizeBytes);
++            });
++
++            t.IsTrue(mem.writeIORegister(kVif1Ch + 0x30u, kTag), "write VIF1 TADR should succeed");
++            t.IsTrue(mem.writeIORegister(kVif1Ch + 0x00u, 0x144u), "write VIF1 CHCR STR|CHAIN|TTE should succeed");
++            mem.processPendingTransfers();
++
++            t.Equals(captured.size(), static_cast<size_t>(1u), "the REF payload should reach the GIF as one packet");
++            bool fromSpr = !captured.empty() && captured[0].size() == 16u;
++            for (uint32_t i = 0; fromSpr && i < 16u; ++i)
++                fromSpr = captured[0][i] == static_cast<uint8_t>(0xA0u + i);
++            t.IsTrue(fromSpr, "REF data with ADDR bit 31 set must come from scratchpad, not from RAM at the same offset");
++        });
++
+         tc.Run("VIF1 DMA chain preserves compact tag high bytes when qwc is zero", [](TestCase &t)
+         {
+             PS2Memory mem;

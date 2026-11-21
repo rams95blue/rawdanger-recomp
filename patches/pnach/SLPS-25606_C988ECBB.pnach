@@ -1,0 +1,16 @@
+gametitle=Zettai Zetsumei Toshi 2 (Japan) SLPS-25606 - widescreen + rawdanger-recomp fixes for ps2-native-recomp
+
+// Same use as the US file: copy over isos\patches\SLPS-25606_C988ECBB.pnach, tick "Fast loading fix" in Choose extras..., Build.
+// The fast loading fix site was found by matching the US code (US 0x11B2B8 = JP 0x11B248); not yet run on the JP disc.
+
+[Widescreen 16:9]
+gsaspectratio=16:9
+description=Widescreen 16:9 (PCSX2 community patch, Little Giant)
+patch=1,EE,001CF198,word,00A52823
+patch=1,EE,0048AB28,word,3F400000
+patch=1,EE,003A7C60,word,43E00000
+patch=1,EE,003A7C80,word,43E00000
+
+[Fast loading fix]
+description=Needed on ps2-native-recomp: keeps the loading screen's fade running after a fast map load (see the US file). 0x0011B248: jal 0x2C6DE0 (fade reset, original 0x0C0B1B78) -> nop
+patch=1,EE,0011B248,word,00000000

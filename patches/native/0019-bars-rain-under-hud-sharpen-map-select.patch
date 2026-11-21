@@ -1,0 +1,647 @@
+From e74bea6d8f71ff7048be072b6e34d59bebdea9fd Mon Sep 17 00:00:00 2001
+From: rams95 <rams95@users.noreply.github.com>
+Date: Thu, 19 Nov 2026 20:32:38 +0000
+Subject: [PATCH] 0019-bars-rain-under-hud-sharpen-map-select.patch
+
+Cutscene black bars can be left out (the 3D under them is whole; the subtitles keep a light shade): Settings > Picture,
+keys.ini black_bars. The rain on the lens stays under the game's HUD, texts and bars: the GS notes the boxes of the 2D
+drawn after the game's full-screen passes (or at the front of the depth range) and the blit skips the drops there.
+Contrast-adaptive sharpening of the picture (off/low/medium/high, medium by default). F6 held fast-forwards, F7 opens the
+developers' map select left on the disc (PS2_DEBUG_SCENES), the card check at start answers itself (PS2_AUTO_CROSS).
+F1-F9 are the program's keys.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01QNLFPekqhcU2dj7B3Utmea
+---
+ host/keymap.cpp               |  25 +++++-
+ host/keymap.hpp               |   4 +
+ host/lens_rain.cpp            |   5 +-
+ host/quickmenu.cpp            |  18 +++--
+ host/quickmenu.hpp            |   4 +
+ host/window.cpp               |  85 ++++++++++++++++++++-
+ runtime/include/ps2/video.hpp |   5 ++
+ runtime/src/gs/gpu/blit.wgsl  |  34 ++++++++-
+ runtime/src/gs/gpu/gpu.cpp    |  11 ++-
+ runtime/src/gs/gs.cpp         | 138 ++++++++++++++++++++++++++++++++++
+ 10 files changed, 316 insertions(+), 13 deletions(-)
+
+diff --git a/host/keymap.cpp b/host/keymap.cpp
+index f5c2c31..74beae6 100644
+--- a/host/keymap.cpp
++++ b/host/keymap.cpp
+@@ -170,6 +170,11 @@ std::string with_mouse_invert(const std::string &file_text, int invert) {
+     static const char *const kNames[4] = {"off", "x", "y", "both"};
+     return with_line(file_text, "mouseinvert", std::string("mouse_invert = ") + kNames[invert & 3]);
+ }
++std::string with_sharpen(const std::string &file_text, int level) {
++    static const char *const kNames[4] = {"off", "low", "medium", "high"};
++    return with_line(file_text, "sharpen", std::string("sharpen = ") + kNames[std::clamp(level, 0, 3)]);
++}
++std::string with_black_bars(const std::string &file_text, int on) { return with_line(file_text, "blackbars", std::string("black_bars = ") + (on ? "on" : "off")); }
+ std::string with_key_prompts(const std::string &file_text, int on) { return with_line(file_text, "keyprompts", std::string("key_prompts = ") + (on ? "on" : "off")); }
+ std::string short_input_name(int input) {
+     switch (input) {
+@@ -230,7 +235,9 @@ std::string with_pause_unfocused(const std::string &file_text, int on) { return
+ std::string with_sharp_2d(const std::string &file_text, int sharp) { return with_line(file_text, "sharp2d", std::string("sharp_2d = ") + sharp_2d_word(sharp)); }
+ 
+ bool is_reserved(int input) {
+-    return input == SDL_SCANCODE_F1 || input == SDL_SCANCODE_F2 || input == SDL_SCANCODE_F5 || input == SDL_SCANCODE_F8 || input == SDL_SCANCODE_F9 || input == SDL_SCANCODE_F11;
++    // F1 menu, F2 look, F3 game options, F4 achievements, F5 / F8 quick save / load, F6 fast forward (held), F7 map select,
++    // F9 report, F11 full screen
++    return (input >= SDL_SCANCODE_F1 && input <= SDL_SCANCODE_F9) || input == SDL_SCANCODE_F11;
+ }
+ 
+ Config defaults() {
+@@ -383,6 +390,22 @@ void parse(const std::string &text, Config &config, std::vector<std::string> &pr
+             else bad("mouse_look is on or off, ignored");
+             continue;
+         }
++        if (name == "sharpen") {
++            const std::string v = squash(value);
++            if (v == "off" || v == "0") config.sharpen = 0;
++            else if (v == "low" || v == "1") config.sharpen = 1;
++            else if (v == "medium" || v == "2" || v == "on") config.sharpen = 2;
++            else if (v == "high" || v == "3") config.sharpen = 3;
++            else bad("sharpen is off, low, medium or high, ignored");
++            continue;
++        }
++        if (name == "blackbars") {
++            const std::string v = squash(value);
++            if (v == "on" || v == "1") config.black_bars = 1;
++            else if (v == "off" || v == "0") config.black_bars = 0;
++            else bad("black_bars is on or off, ignored");
++            continue;
++        }
+         if (name == "keyprompts") {
+             const std::string v = squash(value);
+             if (v == "on" || v == "1") config.key_prompts = 1;
+diff --git a/host/keymap.hpp b/host/keymap.hpp
+index 838b8b9..730922f 100644
+--- a/host/keymap.hpp
++++ b/host/keymap.hpp
+@@ -44,6 +44,8 @@ struct Config {
+                                // launcher's Japanese skin); -1 = from the game's language (PS2_LANGUAGE / PS2_MENU_SKIN)
+     int reverb = 1;            // rawdanger-recomp: the sound chip's reverb (0 off)
+     int key_prompts = 1;
++    int black_bars = 1;
++    int sharpen = 2;           // rawdanger-recomp: contrast-adaptive sharpening of the picture: 0 off, 1 low, 2 medium, 3 high        // rawdanger-recomp: the cutscenes' black bars (0: left out, the picture fills the screen)
+     int mouse_look = 1;
+     double look_speed = 2.0;   // rawdanger-recomp: how far the mouse look turns (0.2 to 4)        // rawdanger-recomp: the mouse turns the camera while playing (PS2_MOUSE_LOOK_* from the launcher); 0 off       // rawdanger-recomp: the game's texts show the keys instead of the PlayStation symbols (0: the symbols)
+     int window_w = 0, window_h = 0;  // rawdanger-recomp: the window's size from the menu's presets (0: the default)
+@@ -71,6 +73,8 @@ std::string with_integer_scale(const std::string &file_text, int on);
+ std::string with_menu_skin(const std::string &file_text, int skin);
+ std::string with_reverb(const std::string &file_text, int on);
+ std::string with_key_prompts(const std::string &file_text, int on);
++std::string with_black_bars(const std::string &file_text, int on);
++std::string with_sharpen(const std::string &file_text, int level);
+ std::string with_mouse_look(const std::string &file_text, int on);
+ std::string with_mouse_speed(const std::string &file_text, double speed);
+ std::string with_mouse_invert(const std::string &file_text, int invert);
+diff --git a/host/lens_rain.cpp b/host/lens_rain.cpp
+index 03afeb5..c5ec48c 100644
+--- a/host/lens_rain.cpp
++++ b/host/lens_rain.cpp
+@@ -120,7 +120,10 @@ void spawn(float strength) {
+ 
+ }  // namespace
+ 
+-void set_level(int level) { g_level = std::clamp(level, 0, 2); }
++void set_level(int level) {
++    g_level = std::clamp(level, 0, 2);
++    ps2::set_ui_boxes(g_level > 0);   // the drops stay under the game's HUD and texts
++}
+ int level() { return g_level; }
+ bool knows_when() {
+     if (!g_parsed) parse_env();
+diff --git a/host/quickmenu.cpp b/host/quickmenu.cpp
+index 859a2b7..b69b3b3 100644
+--- a/host/quickmenu.cpp
++++ b/host/quickmenu.cpp
+@@ -118,14 +118,14 @@ constexpr const char *kKeys[kEntries] = {"F1", "F5", "F8", "F3", "F4", "", ""};
+ constexpr const char *kTabNames[Menu::kTabs] = {"DISPLAY", "PICTURE", "SOUND", "CONTROLS", "GAME"};
+ constexpr Command kDisplay[] = {Command::scale, Command::window_size, Command::fullscreen, Command::widescreen, Command::integer_scale, Command::pause_unfocused, Command::menu_skin, Command::back};
+ constexpr const char *kDisplayKeys[] = {"", "", "F11", "", "", "", "", "Esc"};
+-constexpr Command kPicture[] = {Command::look, Command::antialias, Command::sharp_2d, Command::game_blur, Command::lens_rain, Command::back};
+-constexpr const char *kPictureKeys[] = {"F2", "", "", "", "", "Esc"};
++constexpr Command kPicture[] = {Command::look, Command::antialias, Command::sharpen, Command::sharp_2d, Command::game_blur, Command::black_bars, Command::lens_rain, Command::back};
++constexpr const char *kPictureKeys[] = {"F2", "", "", "", "", "", "", "Esc"};
+ constexpr Command kSound[] = {Command::master_volume, Command::reverb, Command::back};
+ constexpr const char *kSoundKeys[] = {"", "", "Esc"};
+ constexpr Command kControls[] = {Command::change_keys, Command::mouse_look, Command::mouse_speed, Command::mouse_invert_x, Command::mouse_invert, Command::key_prompts, Command::back};
+ constexpr const char *kControlsKeys[] = {"", "", "", "", "", "", "Esc"};
+ struct TabList { const Command *commands; const char *const *keys; int n; };
+-constexpr TabList kTabLists[Menu::kTabs - 1] = {{kDisplay, kDisplayKeys, 8}, {kPicture, kPictureKeys, 6}, {kSound, kSoundKeys, 3}, {kControls, kControlsKeys, 7}};
++constexpr TabList kTabLists[Menu::kTabs - 1] = {{kDisplay, kDisplayKeys, 8}, {kPicture, kPictureKeys, 8}, {kSound, kSoundKeys, 3}, {kControls, kControlsKeys, 7}};
+ constexpr int kVisibleRows = 11;  // lines of the keys page shown at once; the page scrolls
+ constexpr int kKeysPageChars = 58;
+ 
+@@ -361,6 +361,11 @@ std::string entry_text(Command c, const Values &v, bool quit_armed) {
+     case Command::key_prompts:
+         if (v.key_prompts < 0) return "Buttons in the game's texts: PlayStation (no key pictures here)";
+         return std::string("Buttons in the game's texts:  < ") + (v.key_prompts ? "your keys" : "PlayStation symbols") + " >";
++    case Command::sharpen: {
++        static const char *const kLevels[] = {"off", "low", "medium", "high"};
++        return std::string("Sharpen the picture:  < ") + kLevels[std::clamp(v.sharpen, 0, 3)] + " >";
++    }
++    case Command::black_bars: return std::string("Cutscene black bars:  < ") + (v.black_bars ? "shown" : "removed") + " >";
+     case Command::reverb: return std::string("Reverb (rooms, tunnels):  < ") + (v.reverb ? "on" : "off") + " >";
+     case Command::widescreen: return v.widescreen < 0 ? "Widescreen: not in this game" : std::string("Widescreen 16:9:  < ") + (v.widescreen ? "on" : "off") + " >";
+     case Command::pause_unfocused: return std::string("Pause in the background:  < ") + (v.pause_unfocused ? "on" : "off") + " >";
+@@ -403,7 +408,8 @@ std::string entry_text(Command c, const Values &v, bool quit_armed) {
+     case Command::quit: return quit_armed ? "Quit to desktop?  Enter / Cross again" : "Quit to desktop";
+     case Command::language:
+         if (v.language_other.empty())
+-            return "Language: " + (v.language_now.empty() ? std::string("this version only") : v.language_now) + "  (build the other disc for more)";
++            return "Language: " + (v.language_now.empty() ? std::string("this version only") : v.language_now) +
++                   (v.language_now == "English" ? "  (Japanese: add the JP disc in the launcher)" : v.language_now == "Japanese" ? "  (English: add the US disc in the launcher)" : "");
+         return quit_armed ? "Restart in " + v.language_other + "?  Save in the game first.  Enter / Cross again"
+                           : "Language: " + v.language_now + "  > play in " + v.language_other + " (restarts, saves carried over)";
+     default: return "";
+@@ -585,7 +591,7 @@ Command Menu::side() const {
+     const Command c = kTabLists[tab_].commands[selected_];
+     return c == Command::look || c == Command::scale || c == Command::sharp_2d || c == Command::fullscreen || c == Command::widescreen || c == Command::pause_unfocused ||
+                    c == Command::master_volume || c == Command::integer_scale || c == Command::lens_rain || c == Command::antialias || c == Command::menu_skin ||
+-                   c == Command::window_size || c == Command::game_blur || c == Command::reverb || c == Command::key_prompts || c == Command::mouse_look ||
++                   c == Command::window_size || c == Command::game_blur || c == Command::reverb || c == Command::key_prompts || c == Command::mouse_look || c == Command::black_bars || c == Command::sharpen ||
+                    c == Command::mouse_speed || c == Command::mouse_invert || c == Command::mouse_invert_x
+                ? c : Command::none;
+ }
+@@ -621,7 +627,7 @@ bool Menu::select_at(int x, int y) {
+ 
+ void Menu::draw_keys(int window_width, int window_height, const Values &values, Picture &out) {
+     static const std::string kTitleText = "Change keys - the game waits", kHint = "Enter / click: change a key     Esc / Circle: back",
+-                             kFixed = "Not usable: F1 F2 F3 F5 F6 F8 F9 F11 (the program's)", kCapture = "Press a key or mouse button... (Esc: cancel)";
++                             kFixed = "Not usable: F1 to F9, F11 (the program's)", kCapture = "Press a key or mouse button... (Esc: cancel)";
+     key_rows_ = static_cast<int>(values.key_rows.size());
+     fit();
+     const int n = key_rows_, shown = std::min(n, kVisibleRows);
+diff --git a/host/quickmenu.hpp b/host/quickmenu.hpp
+index 41cfd4d..22e01e7 100644
+--- a/host/quickmenu.hpp
++++ b/host/quickmenu.hpp
+@@ -41,6 +41,8 @@ enum class Command {
+     window_size,   // Settings > Display: the window's size (presets; windowed only)
+     game_blur,     // Settings > Picture: the game's own full-screen blur (its "No post-processing filter" option, inverted)
+     reverb,        // Settings > Sound: the sound chip's reverb (echo of rooms and tunnels)
++    sharpen,       // Settings > Picture: contrast-adaptive sharpening (off / low / medium / high)
++    black_bars,    // Settings > Picture: the cutscenes' black bars shown or left out
+     key_prompts,   // Settings > Controls: the game's texts show the keys (key caps) or the PlayStation symbols
+     mouse_look,    // Settings > Controls: the mouse turns the camera while playing
+     mouse_speed,   // Settings > Controls: how far the camera turns for a move of the mouse
+@@ -74,6 +76,8 @@ struct Values {
+     int game_blur = -1;            // the game's blur: -1 this build has no switch for it, 0 off, 1 on (as on the console)
+     bool reverb = true;
+     int key_prompts = -1;
++    bool black_bars = true;
++    int sharpen = 2;
+     int mouse_look = -1;           // -1: this game has no mouse look (PS2_MOUSE_LOOK_YAW), 0 off, 1 on
+     double mouse_speed = 1.0;
+     bool mouse_invert_y = false, mouse_invert_x = false;          // -1: this game has no prompt font (PS2_PROMPT_FONT_KEY), 0 symbols, 1 keys
+diff --git a/host/window.cpp b/host/window.cpp
+index 47b25bd..ba8f346 100644
+--- a/host/window.cpp
++++ b/host/window.cpp
+@@ -231,6 +231,30 @@ void send_key_prompts();  // rawdanger-recomp: the keys for the game's font (bel
+ std::uint32_t video_bits();
+ std::atomic<int> g_master_volume{100};  // rawdanger-recomp: keys.ini master_volume (%), read by the sound device's thread
+ std::vector<std::size_t> g_recomp_row_section;  // the Game options page's lines -> recomp::sections() (widescreen is on the Graphics page)
++// rawdanger-recomp: the developers' menus left on the disc. PS2_DEBUG_SCENES="ADDRESS;DEBUG;MAPSEL": the game's next-scene word
++// (Raw Danger: 0x48F48C, read by its scene switch at 0x16ED80; 0x48F488 is the scene it runs) and the numbers of its scenes
++// DEBSEL (40, the debug menu: map select, player move, flags, fog, info, item, sound test...) and MAP SEL (41); 0 leaves one out.
++// The retail disc lacks the debug menu's font (its lines come out as stray pictures), so the launcher offers the map select only
++// ("0x48F48C;0;41"). Opened from Settings > Game (lines at the end) or F7 (map select; Shift+F7 the debug menu when offered).
++// In the map select: up / down the line, left / right the value, Cross loads the map at that gate.
++constexpr std::size_t kDebugRow = static_cast<std::size_t>(-2), kMapSelRow = static_cast<std::size_t>(-3);
++struct DebugScenes { std::uint32_t address = 0, debug = 0, mapsel = 0; bool set = false; };
++const DebugScenes &debug_scenes() {
++    static const DebugScenes d = [] {
++        DebugScenes r;
++        const char *v = std::getenv("PS2_DEBUG_SCENES");
++        if (!v || !*v) return r;
++        char *end = nullptr;
++        r.address = static_cast<std::uint32_t>(std::strtoul(v, &end, 0));
++        if (end && *end == ';') r.debug = static_cast<std::uint32_t>(std::strtoul(end + 1, &end, 0));
++        if (end && *end == ';') r.mapsel = static_cast<std::uint32_t>(std::strtoul(end + 1, &end, 0));
++        r.set = r.address != 0 && (r.debug != 0 || r.mapsel != 0);
++        return r;
++    }();
++    return d;
++}
++void open_debug_scene(bool map_select);  // below
++void set_notice(const std::string &text);
+ std::string g_keys_path;
+ std::filesystem::file_time_type g_keys_time{};
+ int g_mouse_sum_x = 0, g_mouse_sum_y = 0;
+@@ -261,7 +285,9 @@ int g_last_dx = 0, g_last_dy = -1;  // the last direction the walk keys gave, fo
+ // The picture look (F2): how the picture is enlarged and smoothed for the window (display only, the game and the saved pictures do not
+ // change). The choice sits in keys.ini ('look = ...'); PS2_LOOK=0..7 or a look word overrides it for a run and is not written.
+ int g_look = keymap::kDefaultLook;
+-std::uint32_t video_bits() { return static_cast<std::uint32_t>(g_look) | (g_keys.integer_scale ? 8u : 0u) | (g_keys.smaa ? 16u : 0u); }
++std::uint32_t video_bits() {
++    return static_cast<std::uint32_t>(g_look) | (g_keys.integer_scale ? 8u : 0u) | (g_keys.smaa ? 16u : 0u) | (static_cast<std::uint32_t>(std::clamp(g_keys.sharpen, 0, 3)) << 5);
++}
+ bool g_look_forced = false;
+ 
+ // The title shows the speed; for a few seconds after F5, F8 or F9 a message is put in front of it.
+@@ -727,6 +753,7 @@ void load_keys() {
+         if (g_keys.smaa) ps2::set_smaa_quality(static_cast<unsigned>(g_keys.smaa));
+         send_key_prompts();
+     }
++    ps2::set_hide_bars(!g_keys.black_bars);
+     g_master_volume = std::clamp(g_keys.master_volume, 0, 100);
+     lens_rain::set_level(g_keys.lens_rain);
+     if (!g_look_forced && config.look >= 0) g_look = config.look;
+@@ -1147,6 +1174,21 @@ void poll_port(int port) {
+         if (quickmenu::game_font_loaded()) quickmenu::set_skin(2);
+         menu_paint();
+     }
++    // rawdanger-recomp: the memory-card check at start answers itself. PS2_AUTO_CROSS="ADDRESS=VALUE" (Raw Danger: the scene word
++    // 0x48F488 = 3, MCCHECK): while the game is there, Cross is tapped for it (a tenth of a second in every three), so the
++    // "Starting the game without using System data" notice of a new card goes on by itself; with system data on the card the
++    // check never waits for a button anyway.
++    if (port == 0 && !g_menu.is_open()) {
++        static const auto spec = [] {
++            std::pair<std::uint32_t, std::uint32_t> r{0, 0};
++            if (const char *v = std::getenv("PS2_AUTO_CROSS"); v && *v) {
++                unsigned long a = 0, w = 0;
++                if (std::sscanf(v, "%lx=%lu", &a, &w) == 2) r = {static_cast<std::uint32_t>(a), static_cast<std::uint32_t>(w)};
++            }
++            return r;
++        }();
++        if (spec.first && ps2::ld32(spec.first) == spec.second && (SDL_GetTicks() / 100) % 3 == 0) pressed |= kCross;
++    }
+     if (g_menu.is_open()) g_block_input[port] = true;
+     if (g_block_input[port]) {
+         if (!pressed) g_block_input[port] = false;  // all let go: from the next pass on the game gets this port again
+@@ -1282,6 +1324,8 @@ void menu_paint(bool show_again) {
+         if (const int blur = blur_section(); blur >= 0) v.game_blur = recomp::sections()[static_cast<std::size_t>(blur)].on ? 0 : 1;
+         v.reverb = ps2::reverb();
+         v.key_prompts = std::getenv("PS2_PROMPT_FONT_KEY") ? g_keys.key_prompts : -1;
++        v.black_bars = g_keys.black_bars != 0;
++        v.sharpen = g_keys.sharpen;
+         parse_mouse_look();
+         v.mouse_look = g_look_yaw.set ? g_keys.mouse_look : -1;
+         v.mouse_speed = g_keys.look_speed;
+@@ -1325,6 +1369,17 @@ void menu_paint(bool show_again) {
+                 row.state = !sec.live ? "built in" : sec.on ? "on" : "off";
+                 v.recomp_rows.push_back(row);
+             }
++            if (debug_scenes().set) {
++                for (const std::size_t kind : {kDebugRow, kMapSelRow}) {
++                    if ((kind == kMapSelRow && !debug_scenes().mapsel) || (kind == kDebugRow && !debug_scenes().debug)) continue;
++                    g_recomp_row_section.push_back(kind);
++                    quickmenu::Values::RecompRow row;
++                    row.label = kind == kDebugRow ? "Developers' debug menu (on the disc; Shift+F7)" : "Developers' map select (on the disc; F7)";
++                    row.live = true;
++                    row.state = "open";
++                    v.recomp_rows.push_back(row);
++                }
++            }
+             g_menu.set_recomp_rows(static_cast<int>(v.recomp_rows.size()));
+             v.recomp_note = g_recomp_note;
+         }
+@@ -1428,6 +1483,14 @@ void close_menu(const char *why) {
+ 
+ void close_menu_if_open(const char *why) { close_menu(why); }
+ 
++void open_debug_scene(bool map_select) {
++    const DebugScenes &d = debug_scenes();
++    if (!d.set || (map_select && !d.mapsel) || (!map_select && !d.debug)) return;
++    if (g_menu.is_open()) close_menu(map_select ? "Map select" : "Debug menu");
++    ps2::st32(d.address, map_select ? d.mapsel : d.debug);
++    set_notice(map_select ? "Map select: up/down a line, left/right its value, Cross loads the map" : "The developers' debug menu");
++}
++
+ void set_notice(const std::string &text) {
+     g_notice_text = text;
+     g_notice_until = SDL_GetTicks() + 5000;
+@@ -1611,6 +1674,20 @@ void menu_command(quickmenu::Command c, int step) {
+         g_keys.mouse_invert ^= 2;
+         rewrite_keys_file([](const std::string &t) { return keymap::with_mouse_invert(t, g_keys.mouse_invert); }, "mouse up and down");
+         break;
++    case Command::sharpen: {
++        g_keys.sharpen = (g_keys.sharpen + step + 4) % 4;
++        ps2::set_video_options(video_bits());
++        rewrite_keys_file([](const std::string &t) { return keymap::with_sharpen(t, g_keys.sharpen); }, "sharpen");
++        static const char *const kLevels[] = {"off", "low", "medium", "high"};
++        set_notice(std::string("Sharpen: ") + kLevels[g_keys.sharpen]);
++        break;
++    }
++    case Command::black_bars:
++        g_keys.black_bars = g_keys.black_bars ? 0 : 1;
++        ps2::set_hide_bars(!g_keys.black_bars);
++        rewrite_keys_file([](const std::string &t) { return keymap::with_black_bars(t, g_keys.black_bars); }, "cutscene bars");
++        set_notice(g_keys.black_bars ? "Cutscene black bars shown" : "Cutscene black bars removed");
++        break;
+     case Command::key_prompts:
+         if (!std::getenv("PS2_PROMPT_FONT_KEY")) break;
+         g_keys.key_prompts = g_keys.key_prompts ? 0 : 1;
+@@ -1666,6 +1743,10 @@ void menu_command(quickmenu::Command c, int step) {
+     case Command::recomp_toggle: {
+         const bool wide = ps2::g_options.widescreen;
+         const std::size_t row = static_cast<std::size_t>(g_menu.recomp_row());
++        if (row < g_recomp_row_section.size() && (g_recomp_row_section[row] == kDebugRow || g_recomp_row_section[row] == kMapSelRow)) {
++            open_debug_scene(g_recomp_row_section[row] == kMapSelRow);
++            return;
++        }
+         if (row < g_recomp_row_section.size()) recomp::toggle(g_recomp_row_section[row], g_recomp_note), sync_jp_textures();
+         if (wide != ps2::g_options.widescreen) { g_tex_w = 0; fit_window_to_shape(); }  // the SDL picture takes the new shape at the next frame
+         break;
+@@ -2025,6 +2106,8 @@ void poll() {
+             if (e.key.keysym.scancode == SDL_SCANCODE_F5) ps2::quick_request(ps2::QuickKey::save);
+             else if (e.key.keysym.scancode == SDL_SCANCODE_F8) ps2::quick_request(ps2::QuickKey::load);
+             else if (e.key.keysym.scancode == SDL_SCANCODE_F9) ps2::quick_request(ps2::QuickKey::report);
++            if (e.key.keysym.scancode == SDL_SCANCODE_F7 && !e.key.repeat && !g_menu.is_open() && debug_scenes().set)
++                open_debug_scene(!(e.key.keysym.mod & KMOD_SHIFT) || !debug_scenes().debug);
+             // rawdanger-recomp: F6 held: the game as fast as it can go (cutscenes, talk, walks it has no skip for); let go: normal
+             if (e.key.keysym.scancode == SDL_SCANCODE_F6 && !e.key.repeat && !g_menu.is_open()) {
+                 g_fast_forward = true;
+diff --git a/runtime/include/ps2/video.hpp b/runtime/include/ps2/video.hpp
+index 45361dc..ccee2f2 100644
+--- a/runtime/include/ps2/video.hpp
++++ b/runtime/include/ps2/video.hpp
+@@ -25,6 +25,11 @@ void set_smaa_quality(unsigned quality);
+ void set_sharp_2d(unsigned sharp);
+ // rawdanger-recomp: the Japanese release's pictures (texture overrides under jp/) on or off, at once
+ void set_jp_textures(bool on);
++// rawdanger-recomp: leave out the black bars of the cutscenes (full-width untextured black sprites at the top and bottom edge);
++// the subtitles then sit over the picture
++void set_hide_bars(bool on);
++// rawdanger-recomp: note where the game's 2D lies (HUD, texts) so the rain on the lens stays under it (on while drops fall)
++void set_ui_boxes(bool on);
+ // rawdanger-recomp: the keys shown instead of the PlayStation symbols in the game's font (cross, circle, square, triangle; short
+ // names of 1 to 3 letters, "" keeps the symbol); see gpu.cpp, draw_prompt_caps
+ void set_button_prompts(const std::string labels[4]);
+diff --git a/runtime/src/gs/gpu/blit.wgsl b/runtime/src/gs/gpu/blit.wgsl
+index 9463051..902453a 100644
+--- a/runtime/src/gs/gpu/blit.wgsl
++++ b/runtime/src/gs/gpu/blit.wgsl
+@@ -31,8 +31,9 @@ struct Lens {
+     count: u32,
+     mist: f32,
+     clock: f32,
+-    pad0: u32,
++    ui_count: u32,
+     drops: array<LensDrop, 64>,
++    ui: array<vec4<f32>, 32>,   // the game's HUD and texts (x0, y0, x1, y1 over the picture): the rain stays under them
+ }
+ @group(0) @binding(2) var<uniform> lens: Lens;
+ 
+@@ -342,6 +343,33 @@ fn lens_mist(uv: vec2<f32>, picture: vec3<f32>) -> vec3<f32> {
+     return mix(picture, fogged, clamp(lens.mist, 0.0, 1.0) * (0.2 + 0.8 * edge) * 0.65);
+ }
+ 
++// rawdanger-recomp: contrast-adaptive sharpening (options bits 5-6: 0 off, 1 low, 2 medium, 3 high). The picture against the
++// mean of its four neighbours one source pixel away, pushed apart by an amount that shrinks where the neighbourhood already has
++// strong contrast (no halos on hard edges, more on soft detail), kept inside the neighbourhood's range. Written for this project.
++fn sharpen(uv: vec2<f32>, c: vec3<f32>, level: u32) -> vec3<f32> {
++    let px = vec2<f32>(1.0 / max(f32(blit.width), 1.0), 1.0 / max(f32(blit.height), 1.0));
++    let n = scene(clamp(uv - vec2<f32>(0.0, px.y), vec2<f32>(0.0), vec2<f32>(1.0)));
++    let s = scene(clamp(uv + vec2<f32>(0.0, px.y), vec2<f32>(0.0), vec2<f32>(1.0)));
++    let w = scene(clamp(uv - vec2<f32>(px.x, 0.0), vec2<f32>(0.0), vec2<f32>(1.0)));
++    let e = scene(clamp(uv + vec2<f32>(px.x, 0.0), vec2<f32>(0.0), vec2<f32>(1.0)));
++    let mn = min(c, min(min(n, s), min(w, e)));
++    let mx = max(c, max(max(n, s), max(w, e)));
++    let room = clamp(min(mn, vec3<f32>(1.0) - mx) / max(mx, vec3<f32>(0.0001)), vec3<f32>(0.0), vec3<f32>(1.0));
++    let strength = select(select(1.2, 0.8, level == 2u), 0.45, level == 1u);
++    let k = sqrt(room) * strength;
++    let detail = c - (n + s + w + e) * 0.25;
++    return clamp(c + detail * k, mn, mx);
++}
++
++fn over_ui(uv: vec2<f32>) -> bool {
++    let n = min(lens.ui_count, 32u);
++    for (var i = 0u; i < n; i = i + 1u) {
++        let b = lens.ui[i];
++        if (uv.x >= b.x && uv.y >= b.y && uv.x <= b.z && uv.y <= b.w) { return true; }
++    }
++    return false;
++}
++
+ fn drops_over(uv: vec2<f32>, picture: vec3<f32>) -> vec3<f32> {
+     var c = picture;
+     if (lens.mist > 0.01) { c = lens_mist(uv, c); }
+@@ -401,7 +429,9 @@ fn fs(in: VertexOut) -> @location(0) vec4<f32> {
+             c = scene(in.uv);
+         }
+         if ((blit.options & 1u) != 0u) { c = edge_aa(in.uv, c); }
++        let sharpen_level = (blit.options >> 5u) & 3u;
++        if (sharpen_level != 0u) { c = sharpen(in.uv, c, sharpen_level); }
+     }
+-    if (lens.count > 0u || lens.mist > 0.01) { c = drops_over(in.uv, c); }
++    if ((lens.count > 0u || lens.mist > 0.01) && !over_ui(in.uv)) { c = drops_over(in.uv, c); }
+     return vec4<f32>(clamp(c, vec3<f32>(0.0), vec3<f32>(1.0)), 1.0);
+ }
+diff --git a/runtime/src/gs/gpu/gpu.cpp b/runtime/src/gs/gpu/gpu.cpp
+index 9ac1e9b..0c95a9e 100644
+--- a/runtime/src/gs/gpu/gpu.cpp
++++ b/runtime/src/gs/gpu/gpu.cpp
+@@ -50,6 +50,7 @@ namespace ps2::gs {
+ void swizzle_tables(std::vector<std::uint32_t> &out);
+ }
+ 
++namespace ps2::gs { unsigned ui_boxes(float *out); }  // rawdanger-recomp: gs.cpp
+ namespace ps2::gs::gpu {
+ 
+ std::vector<unsigned char> smaa_tables();  // smaa_tables.cpp (rawdanger-recomp)
+@@ -96,9 +97,9 @@ WGPUBindGroup g_blit_group = nullptr;
+ WGPUBuffer g_blit_params = nullptr;
+ // rawdanger-recomp: rain drops on the lens (ps2::set_lens_drops, host/lens_rain.cpp), drawn by blit.wgsl over the picture
+ WGPUBuffer g_lens_params = nullptr;
+-constexpr std::uint32_t kLensDrops = 64, kLensBytes = 16 + kLensDrops * 32;
++constexpr std::uint32_t kLensDrops = 64, kLensUi = 32, kLensBytes = 16 + kLensDrops * 32 + kLensUi * 16;
+ std::mutex g_lens_mutex;
+-float g_lens[4 + kLensDrops * 8] = {};
++float g_lens[4 + kLensDrops * 8 + kLensUi * 4] = {};
+ std::uint32_t g_view_rows = 448;  // the console picture's rows (both fields), for whole-number scaling
+ // rawdanger-recomp: SMAA 1x on the console picture (video option bit 4; smaa.wgsl), run in the same submit as the picture,
+ // before it is enlarged to the window
+@@ -156,6 +157,12 @@ void picture_view(float sw, float sh, float &vw, float &vh) {
+ 
+ void write_lens() {
+     std::lock_guard<std::mutex> lock(g_lens_mutex);
++    // rawdanger-recomp: the boxes of the game's 2D (gs.cpp, ui): the drops stay under them
++    std::uint32_t boxes = 0;
++    std::uint32_t drops = 0;
++    std::memcpy(&drops, &g_lens[0], 4);
++    if (drops || g_lens[1] > 0.01f) boxes = ps2::gs::ui_boxes(&g_lens[4 + kLensDrops * 8]);
++    std::memcpy(&g_lens[3], &boxes, 4);
+     wgpuQueueWriteBuffer(g_queue, g_lens_params, 0, g_lens, kLensBytes);
+ }
+ WGPUBuffer g_vram = nullptr, g_tables = nullptr, g_params = nullptr, g_data = nullptr, g_clut = nullptr, g_scratch = nullptr, g_readback = nullptr, g_decoded = nullptr;
+diff --git a/runtime/src/gs/gs.cpp b/runtime/src/gs/gs.cpp
+index d5793f4..ffb41a5 100644
+--- a/runtime/src/gs/gs.cpp
++++ b/runtime/src/gs/gs.cpp
+@@ -758,12 +758,143 @@ void transfer(const State &s, std::uint64_t dir) {
+ 
+ }
+ 
++// rawdanger-recomp: the cutscenes' black bars (Raw Danger draws them as two untextured opaque black sprites the width of the
++// screen, 0-64 and 368-448 of 448): left out when set_hide_bars is on.
++std::atomic<bool> g_hide_bars{[] { const char *v = std::getenv("PS2_HIDE_BARS"); return v && *v == '1'; }()};
++// 0: not a bar, 1: the top bar, 2: the bottom bar (the subtitles' place)
++[[gnu::noinline]] static int cinema_bar(const State &s) {
++    std::uint64_t attr = s.prim;
++    if (!(s.prmodecont & 1u)) attr = (s.prim & 7u) | (s.prmode & ~7ull);
++    if (attr & 0x10u) return 0;   // textured
++    const Vertex &a = s.queue[0], &b = s.queue[1];
++    if (b.r | b.g | b.b) return 0;
++    if (b.a < 0x80) return 0;
++    const Context &c = s.ctx[(attr >> 9) & 1u];
++    const int ofx = static_cast<int>(c.xyoffset & 0xFFFFu), ofy = static_cast<int>((c.xyoffset >> 32) & 0xFFFFu);
++    const int x0 = (static_cast<int>(std::min(a.x, b.x)) - ofx) >> 4, x1 = (static_cast<int>(std::max(a.x, b.x)) - ofx) >> 4;
++    const int y0 = (static_cast<int>(std::min(a.y, b.y)) - ofy) >> 4, y1 = (static_cast<int>(std::max(a.y, b.y)) - ofy) >> 4;
++    if (x0 > 0 || x1 < 512) return 0;
++    if (y0 <= 0 && y1 >= 16 && y1 <= 120) return 1;
++    if (y1 >= 400 && y0 >= 300 && y0 <= 432) return (attr & 0x40u) ? 2 : 1;   // blended: kept as a light shade under the subtitles
++    return 0;
++}
++
++// rawdanger-recomp: where the game's 2D lies on the picture (its HUD, texts, subtitles, the cutscenes' bars), for the rain on
++// the lens to stay under it (blit.wgsl, ui boxes). The game draws its 2D as sprites at the front of the depth range (z of
++// 0xFFFF0000 and up); its full-screen passes (the blur strips, fades) are left out by size. Sprites next to each other are
++// joined into one box; a picture's boxes are handed over at the next vertical blank that follows draws (the game draws one
++// picture every 3 blanks, so the boxes of the last picture stay until the next one).
++namespace ui {
++constexpr int kMax = 32;
++int g_box[kMax][4];
++int g_n = 0;
++std::mutex g_mutex;
++float g_out[kMax * 4];
++unsigned g_out_n = 0;
++std::atomic<bool> g_on{false};
++
++// A picture of the game: full-screen strips (a copy of the last picture), its 3D, full-screen strips again (colour and blur),
++// its 2D, then the vertical blanks it waits for. So what is drawn after the last strips until a blank is the 2D; it is handed
++// over at the next picture's first strip if nothing was drawn in between (a blank in the middle of the 3D is not the end).
++bool g_after_post = false;   // strips were drawn: what follows is collected
++int g_held_n = 0;            // what was collected up to the last blank, waiting for the next strip
++int g_held[kMax][4];
++int g_blanks_without_strips = 0;
++
++void push(int x0, int y0, int x1, int y1) {
++    if (g_n > 0) {
++        int *l = g_box[g_n - 1];
++        if (x0 <= l[2] + 6 && x1 >= l[0] - 6 && y0 <= l[3] + 6 && y1 >= l[1] - 6) {
++            const int nx0 = std::min(l[0], x0), ny0 = std::min(l[1], y0), nx1 = std::max(l[2], x1), ny1 = std::max(l[3], y1);
++            if ((nx1 - nx0) * (ny1 - ny0) > 640 * 448 / 4) return;   // joined it would cover too much: not the HUD
++            l[0] = nx0, l[1] = ny0, l[2] = nx1, l[3] = ny1;
++            return;
++        }
++    }
++    if (g_n == kMax) return;
++    g_box[g_n][0] = x0, g_box[g_n][1] = y0, g_box[g_n][2] = x1, g_box[g_n][3] = y1;
++    ++g_n;
++}
++
++// every primitive while the rain is on: its box when it is part of the game's 2D
++[[gnu::noinline]] void add(const State &s, int needed) {
++    std::uint64_t attr = s.prim;
++    if (!(s.prmodecont & 1u)) attr = (s.prim & 7u) | (s.prmode & ~7ull);
++    const Context &c = s.ctx[(attr >> 9) & 1u];
++    if (((c.frame >> 16) & 0x3Fu) != 10u) return;   // not the 640-wide picture (the game's smaller work pictures)
++    const int ofx = static_cast<int>(c.xyoffset & 0xFFFFu), ofy = static_cast<int>((c.xyoffset >> 32) & 0xFFFFu);
++    int x0 = 1 << 30, y0 = 1 << 30, x1 = -(1 << 30), y1 = -(1 << 30);
++    for (int i = 0; i < needed; ++i) {
++        const int x = (static_cast<int>(s.queue[i].x) - ofx) >> 4, y = (static_cast<int>(s.queue[i].y) - ofy) >> 4;
++        x0 = std::min(x0, x), x1 = std::max(x1, x), y0 = std::min(y0, y), y1 = std::max(y1, y);
++    }
++    const Vertex &last = s.queue[needed - 1];
++    // a strip of a full-screen pass (the game's colour and blur passes): the 3D under it is done, its 2D comes next
++    if ((s.prim & 7u) == 6u && y0 <= 0 && y1 >= 440) {
++        if (g_held_n && !g_n) {
++            std::lock_guard<std::mutex> lock(g_mutex);
++            for (int i = 0; i < g_held_n; ++i) {
++                g_out[i * 4 + 0] = g_held[i][0] / 640.0f, g_out[i * 4 + 1] = g_held[i][1] / 448.0f;
++                g_out[i * 4 + 2] = g_held[i][2] / 640.0f, g_out[i * 4 + 3] = g_held[i][3] / 448.0f;
++            }
++            g_out_n = static_cast<unsigned>(g_held_n);
++        }
++        g_held_n = 0;
++        g_n = 0;
++        g_after_post = true;
++        g_blanks_without_strips = 0;
++        return;
++    }
++    x0 = std::max(x0, 0), y0 = std::max(y0, 0), x1 = std::min(x1, 640), y1 = std::min(y1, 448);
++    if (x1 <= x0 || y1 <= y0) return;
++    if (y1 - y0 > 240 || (x1 - x0) * (y1 - y0) > 640 * 448 / 4) return;   // a full-screen fade, not a piece of the HUD
++    if (!(attr & 0x10u) && (last.r | last.g | last.b) == 0 && last.a < 0x60) return;  // a light shade (the bars when removed)
++    // after the full-screen passes everything is 2D (the compass is a small 3D model); before them only the front of the depth
++    // range is (the HUD of pictures without those passes)
++    if (!g_after_post && last.z < 0xFFFF0000u) return;
++    push(x0, y0, x1, y1);
++}
++
++void vblank() {
++    if (g_after_post && ++g_blanks_without_strips < 8) {
++        if (g_n) {
++            std::memcpy(g_held, g_box, sizeof(int) * 4 * static_cast<std::size_t>(g_n));
++            g_held_n = g_n;
++            g_n = 0;
++        }
++        return;
++    }
++    // pictures without full-screen strips (or none for a while): the front of the depth range only, handed over at once
++    if (g_after_post) g_after_post = false, g_n = 0, g_held_n = 0;
++    if (!g_n) return;
++    std::lock_guard<std::mutex> lock(g_mutex);
++    for (int i = 0; i < g_n; ++i) {
++        g_out[i * 4 + 0] = g_box[i][0] / 640.0f, g_out[i * 4 + 1] = g_box[i][1] / 448.0f;
++        g_out[i * 4 + 2] = g_box[i][2] / 640.0f, g_out[i * 4 + 3] = g_box[i][3] / 448.0f;
++    }
++    g_out_n = static_cast<unsigned>(g_n);
++    g_n = 0;
++}
++}
++
++unsigned ui_boxes(float *out) {
++    std::lock_guard<std::mutex> lock(ui::g_mutex);
++    std::memcpy(out, ui::g_out, ui::g_out_n * 16u);
++    return ui::g_out_n;
++}
++
+ // Inlined into the PACKED run (write_packed_run): as a call of its own it cost the ship about 0.15 ms of the drawing thread a frame.
+ [[gnu::always_inline]] static inline void kick(bool draw) {
+     State &s = g_state;
+     const std::uint32_t prim = static_cast<std::uint32_t>(s.prim) & 7u;
+     const int needed = prim == 0 ? 1 : (prim == 1 || prim == 2 || prim == 6) ? 2 : prim == 7 ? 1 : 3;
+     if (s.count < needed) return;
++    if (draw && prim == 6 && g_hide_bars.load(std::memory_order_relaxed)) [[unlikely]] {
++        const int bar = cinema_bar(s);
++        if (bar == 1) draw = false;
++        else if (bar == 2) s.queue[0].a = s.queue[1].a = 0x30;   // 3/8 dark: the subtitles stay readable
++    }
++    if (draw && ui::g_on.load(std::memory_order_relaxed)) [[unlikely]] ui::add(s, needed);
+     if (draw) {
+         if (!trace::g_any || trace::draw(s, needed)) {
+             if (cpu_raster()) raster::draw(s, s.queue, needed);
+@@ -1570,6 +1701,7 @@ void vblank(bool start) {
+         raise(8);
+         if (queue::active()) queue::post(queue::kVblank, static_cast<std::uint32_t>(frame_count()), 0, nullptr, 0);
+         else {
++            ui::vblank();
+             trace::frame_start(frame_count());
+ #ifdef PS2_GPU
+             if (gpu_on()) gpu::flush();
+@@ -1783,6 +1915,7 @@ Rendered render_pending(const std::function<void(const DisplayRegs &)> &on_prese
+         case queue::kReset: render_reset(); break;
+         case queue::kSoftReset: soft_reset(); break;
+         case queue::kVblank:
++            ui::vblank();
+             trace::frame_start(h.arg0);
+ #ifdef PS2_GPU
+             if (gpu_on()) gpu::flush();
+@@ -2024,3 +2157,8 @@ void state(ps2::state::Stream &s) {
+ }
+ 
+ }
++
++namespace ps2 {
++void set_hide_bars(bool on) { ps2::gs::g_hide_bars.store(on, std::memory_order_relaxed); }
++void set_ui_boxes(bool on) { ps2::gs::ui::g_on.store(on, std::memory_order_relaxed); }
++}
+-- 
+2.43.0
+

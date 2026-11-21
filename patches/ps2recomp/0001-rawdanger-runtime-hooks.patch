@@ -1,0 +1,166 @@
+diff --git a/ps2xRuntime/include/ps2x_hooks.h b/ps2xRuntime/include/ps2x_hooks.h
+new file mode 100644
+index 0000000..84f3c75
+--- /dev/null
++++ b/ps2xRuntime/include/ps2x_hooks.h
+@@ -0,0 +1,55 @@
++#pragma once
++
++// Game-module hooks (added by the Raw Danger recomp project patch).
++// Header-only so no build-system change is needed. A game override installs
++// these from its apply callback; the runtime consults them on CD access.
++
++#include <cstddef>
++#include <cstdint>
++#include <filesystem>
++#include <string>
++
++namespace ps2x_hooks
++{
++    // Return true if the hook filled dst (byteCount bytes) for this LBN range.
++    using CdSectorReadFn = bool (*)(uint32_t lbn, uint32_t sectors, uint8_t *dst, size_t byteCount, void *user);
++
++    // Called when a cdrom0: path is resolved to a host file. Return true and set
++    // out to serve a different host file (e.g. a Japanese voice archive).
++    using CdHostPathFn = bool (*)(const std::string &ps2Path, const std::filesystem::path &resolved,
++                                  std::filesystem::path &out, void *user);
++
++    struct Hooks
++    {
++        CdSectorReadFn cdSectorRead = nullptr;
++        void *cdSectorReadUser = nullptr;
++        CdHostPathFn cdHostPath = nullptr;
++        void *cdHostPathUser = nullptr;
++        // Host display aspect ratio for the presented frame (e.g. 4/3 or 16/9).
++        // 0 keeps the runtime default (square-pixel scaling of the framebuffer).
++        float presentAspect = 0.0f;
++    };
++
++    inline Hooks &hooks()
++    {
++        static Hooks instance;
++        return instance;
++    }
++
++    inline void setCdSectorReadHook(CdSectorReadFn fn, void *user)
++    {
++        hooks().cdSectorRead = fn;
++        hooks().cdSectorReadUser = user;
++    }
++
++    inline void setPresentAspect(float aspect)
++    {
++        hooks().presentAspect = aspect;
++    }
++
++    inline void setCdHostPathHook(CdHostPathFn fn, void *user)
++    {
++        hooks().cdHostPath = fn;
++        hooks().cdHostPathUser = user;
++    }
++}
+diff --git a/ps2xRuntime/src/lib/Kernel/Stubs/Helpers/Support.h b/ps2xRuntime/src/lib/Kernel/Stubs/Helpers/Support.h
+index b1bb6d8..5da0f5d 100644
+--- a/ps2xRuntime/src/lib/Kernel/Stubs/Helpers/Support.h
++++ b/ps2xRuntime/src/lib/Kernel/Stubs/Helpers/Support.h
+@@ -1,4 +1,5 @@
+ #include <algorithm>
++#include "ps2x_hooks.h"
+ #include <cctype>
+ 
+ namespace
+@@ -379,6 +380,19 @@ namespace
+             }
+         }
+ 
++        {
++            const ps2x_hooks::Hooks &hooks = ps2x_hooks::hooks();
++            std::filesystem::path redirected;
++            if (hooks.cdHostPath && hooks.cdHostPath(ps2Path, path, redirected, hooks.cdHostPathUser))
++            {
++                std::error_code redirectEc;
++                if (std::filesystem::is_regular_file(redirected, redirectEc) && !redirectEc)
++                {
++                    path = redirected;
++                }
++            }
++        }
++
+         const uint64_t sizeBytes = std::filesystem::file_size(path, ec);
+         if (ec)
+         {
+@@ -434,6 +448,15 @@ namespace
+ 
+     bool readCdSectors(uint32_t lbn, uint32_t sectors, uint8_t *dst, size_t byteCount)
+     {
++        {
++            const ps2x_hooks::Hooks &hooks = ps2x_hooks::hooks();
++            if (hooks.cdSectorRead && hooks.cdSectorRead(lbn, sectors, dst, byteCount, hooks.cdSectorReadUser))
++            {
++                g_lastCdError = 0;
++                return true;
++            }
++        }
++
+         for (const auto &[key, entry] : g_cdFilesByKey)
+         {
+             const uint32_t endLbn = entry.baseLbn + entry.sectors;
+diff --git a/ps2xRuntime/src/lib/ps2_runtime.cpp b/ps2xRuntime/src/lib/ps2_runtime.cpp
+index 45cb9d2..028e45f 100644
+--- a/ps2xRuntime/src/lib/ps2_runtime.cpp
++++ b/ps2xRuntime/src/lib/ps2_runtime.cpp
+@@ -1,4 +1,5 @@
+ #include "ps2_runtime.h"
++#include "ps2x_hooks.h"
+ #include "ps2_log.h"
+ #include "ps2_stubs.h"
+ #include "ps2_syscalls.h"
+@@ -2430,9 +2431,19 @@ void PS2Runtime::run()
+         const float srcHeight = static_cast<float>(std::max<uint32_t>(1u, presentHeight));
+         const float screenWidth = static_cast<float>(GetScreenWidth());
+         const float screenHeight = static_cast<float>(GetScreenHeight());
+-        const float scale = std::min(screenWidth / srcWidth, screenHeight / srcHeight);
+-        const float dstWidth = srcWidth * scale;
+-        const float dstHeight = srcHeight * scale;
++        float dstWidth = 0.0f;
++        float dstHeight = 0.0f;
++        if (const float aspect = ps2x_hooks::hooks().presentAspect; aspect > 0.0f)
++        {
++            dstWidth = std::min(screenWidth, screenHeight * aspect);
++            dstHeight = dstWidth / aspect;
++        }
++        else
++        {
++            const float scale = std::min(screenWidth / srcWidth, screenHeight / srcHeight);
++            dstWidth = srcWidth * scale;
++            dstHeight = srcHeight * scale;
++        }
+         const Rectangle srcRect{0.0f, 0.0f, srcWidth, srcHeight};
+         const Rectangle dstRect{
+             (screenWidth - dstWidth) * 0.5f,
+diff --git a/ps2xRuntime/src/lib/ps2_vfs.cpp b/ps2xRuntime/src/lib/ps2_vfs.cpp
+index aff25e6..bd1ce4d 100644
+--- a/ps2xRuntime/src/lib/ps2_vfs.cpp
++++ b/ps2xRuntime/src/lib/ps2_vfs.cpp
+@@ -1,4 +1,5 @@
+ #include "runtime/ps2_vfs.h"
++#include "ps2x_hooks.h"
+ 
+ #include "runtime/ps2_memory.h"
+ #include "runtime/ps2_rom_device.h"
+@@ -298,6 +299,15 @@ bool PS2Vfs::resolveHostPath(std::string_view path, const PS2VfsMounts &mounts,
+     if (base.empty() || !safeRelativePath(parsed.path, relative))
+         return false;
+     result = (base / relative).lexically_normal();
++    if (parsed.device == ps2x::iop::Ps2PathDevice::Cdrom)
++    {
++        const ps2x_hooks::Hooks &hooks = ps2x_hooks::hooks();
++        std::filesystem::path redirected;
++        if (hooks.cdHostPath && hooks.cdHostPath(std::string(path), result, redirected, hooks.cdHostPathUser))
++        {
++            result = redirected.lexically_normal();
++        }
++    }
+     return true;
+ }
+ 

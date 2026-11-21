@@ -1,0 +1,144 @@
+From 37d8ac4ea3c2da25f6efe10def8713fa17064a74 Mon Sep 17 00:00:00 2001
+From: rawdanger-recomp <rawdanger-recomp@users.noreply.github.com>
+Date: Wed, 18 Nov 2026 23:44:23 +0000
+Subject: [PATCH] 0011-disc-remap-slots.patch
+
+---
+ host/recomp_options.cpp      | 15 +++++++++++----
+ host/recomp_options.hpp      |  3 +++
+ runtime/include/ps2/disc.hpp |  3 +++
+ runtime/src/disc.cpp         | 36 ++++++++++++++++++++++++++----------
+ 4 files changed, 43 insertions(+), 14 deletions(-)
+
+diff --git a/host/recomp_options.cpp b/host/recomp_options.cpp
+index 2d0b872..5cb012f 100644
+--- a/host/recomp_options.cpp
++++ b/host/recomp_options.cpp
+@@ -53,6 +53,13 @@ void save() {
+     w << out.str();
+ }
+ 
++// each section with a remap gets its own slot (its place in the file), so the voices and the texture options work together
++void apply_remap(const Section &s) {
++    if (!s.remap_count) return;
++    const int slot = static_cast<int>(&s - g_sections.data()) % ps2::disc::kRemapSlots;
++    ps2::disc::set_remap_slot(slot, s.remap_from, s.remap_to, s.remap_count, s.remap_when_on ? s.on : !s.on);
++}
++
+ }  // namespace
+ 
+ bool loaded() { return g_loaded; }
+@@ -86,9 +93,9 @@ bool load(const char *path) {
+         else if (k == "live") cur->live = v == "1";
+         else if (k == "on") cur->on = v != "0";
+         else if (k == "aspect") cur->aspect169 = v == "16:9";
+-        else if (k == "remap_off") {
++        else if (k == "remap_off" || k == "remap_on") {
+             unsigned f = 0, t = 0, n = 0;
+-            if (std::sscanf(v.c_str(), "%u %u %u", &f, &t, &n) == 3) { cur->remap_from = f; cur->remap_to = t; cur->remap_count = n; }
++            if (std::sscanf(v.c_str(), "%u %u %u", &f, &t, &n) == 3) { cur->remap_from = f; cur->remap_to = t; cur->remap_count = n; cur->remap_when_on = k == "remap_on"; }
+         }
+         else if (k == "word") {
+             Word w;
+@@ -118,7 +125,7 @@ void apply_startup() {
+             if (!listed) ps2::g_options.patches.push_back(ps2::Patch{1, 4, w.address, s.on ? w.patched : w.original});
+         }
+         if (s.aspect169) ps2::g_options.widescreen = s.on;
+-        if (s.remap_count) ps2::disc::set_remap(s.remap_from, s.remap_to, s.remap_count, !s.on);
++        apply_remap(s);
+         std::fprintf(stderr, "[recomp] %s: %s\n", s.label.c_str(), s.on ? "on" : "off");
+     }
+ }
+@@ -133,7 +140,7 @@ bool toggle(std::size_t index, std::string &note) {
+     s.on = !s.on;
+     set_words(s, s.on);
+     if (s.aspect169) ps2::g_options.widescreen = s.on;
+-    if (s.remap_count) ps2::disc::set_remap(s.remap_from, s.remap_to, s.remap_count, !s.on);
++    apply_remap(s);
+     save();
+     note = s.label + (s.on ? ": on" : ": off");
+     std::fprintf(stderr, "[recomp] %s switched %s in the game\n", s.label.c_str(), s.on ? "on" : "off");
+diff --git a/host/recomp_options.hpp b/host/recomp_options.hpp
+index c05fe28..9e8e16f 100644
+--- a/host/recomp_options.hpp
++++ b/host/recomp_options.hpp
+@@ -31,6 +31,9 @@ struct Section {
+     // remap_off = FROM TO COUNT: while the option is off, disc reads of sectors FROM.. come from TO.. (the Enhanced Edition's
+     // voices: on = Japanese, the area STR.DAT points to; off = English, the same layout further on)
+     std::uint32_t remap_from = 0, remap_to = 0, remap_count = 0;
++    // remap_on = FROM TO COUNT: the same, while the option is on (the Enhanced Edition's Japanese textures: the disc's index
++    // points to the US copies, read from the Japanese copies' area while the option is on)
++    bool remap_when_on = false;
+ };
+ 
+ bool load(const char *path);                // false when there is no file (then the menu page says so)
+diff --git a/runtime/include/ps2/disc.hpp b/runtime/include/ps2/disc.hpp
+index 2e4c936..0f27e67 100644
+--- a/runtime/include/ps2/disc.hpp
++++ b/runtime/include/ps2/disc.hpp
+@@ -27,6 +27,9 @@ bool read(std::uint32_t sector, std::uint32_t count, void *out);
+ // rawdanger-recomp: reads of [from, from + count) come from [to, to + count) while on (the Enhanced Edition's voice
+ // language: two voice areas with the same layout). One mapping; set_remap(..., false) turns it off.
+ void set_remap(std::uint32_t from, std::uint32_t to, std::uint32_t count, bool on);
++// rawdanger-recomp: several remaps at once (slot 0 is set_remap's): the Enhanced Edition's voices and its texture options
++constexpr int kRemapSlots = 8;
++void set_remap_slot(int slot, std::uint32_t from, std::uint32_t to, std::uint32_t count, bool on);
+ bool ready(std::uint32_t sector, std::uint32_t count);
+ std::optional<Entry> find(const std::string &path);  // layer 0's file system first, as cdvdman's sceCdSearchFile
+ std::optional<Entry> find(const std::string &path, int layer);  // sceCdLayerSearchFile: layer 1's entry when it has one
+diff --git a/runtime/src/disc.cpp b/runtime/src/disc.cpp
+index 4945112..ee6d9a3 100644
+--- a/runtime/src/disc.cpp
++++ b/runtime/src/disc.cpp
+@@ -180,22 +180,38 @@ bool open(const std::string &name, std::uint64_t size, Reader reader, Probe prob
+ bool is_open() { return static_cast<bool>(g_reader); }
+ 
+ namespace {
+-std::atomic<bool> g_remap_on{false};
+-std::atomic<std::uint32_t> g_remap_from{0}, g_remap_to{0}, g_remap_count{0};
++struct Remap {
++    std::atomic<bool> on{false};
++    std::atomic<std::uint32_t> from{0}, to{0}, count{0};
++};
++Remap g_remaps[kRemapSlots];
++std::atomic<bool> g_any_remap{false};
+ }  // namespace
+ 
+-void set_remap(std::uint32_t from, std::uint32_t to, std::uint32_t count, bool on) {
+-    g_remap_from = from;
+-    g_remap_to = to;
+-    g_remap_count = count;
+-    g_remap_on = on && count > 0;
++void set_remap_slot(int slot, std::uint32_t from, std::uint32_t to, std::uint32_t count, bool on) {
++    if (slot < 0 || slot >= kRemapSlots) return;
++    Remap &r = g_remaps[slot];
++    r.on = false;
++    r.from = from;
++    r.to = to;
++    r.count = count;
++    r.on = on && count > 0;
++    bool any = false;
++    for (const Remap &x : g_remaps) any = any || x.on.load();
++    g_any_remap = any;
+ }
+ 
++void set_remap(std::uint32_t from, std::uint32_t to, std::uint32_t count, bool on) { set_remap_slot(0, from, to, count, on); }
++
+ bool read(std::uint32_t sector, std::uint32_t count, void *out) {
+     if (!g_reader) return false;
+-    if (g_remap_on.load(std::memory_order_relaxed)) {
+-        const std::uint32_t from = g_remap_from, n = g_remap_count;
+-        if (sector >= from && sector < from + n) sector = sector - from + g_remap_to;  // a read never spans the two areas' edge in practice
++    if (g_any_remap.load(std::memory_order_relaxed)) {
++        for (const Remap &r : g_remaps) {
++            if (!r.on.load(std::memory_order_relaxed)) continue;
++            const std::uint32_t from = r.from, n = r.count;
++            // a read never spans an area's edge in practice (each file lies inside one area)
++            if (sector >= from && sector < from + n) { sector = sector - from + r.to; break; }
++        }
+     }
+     const cost::Timer time_it(cost::kDisc);
+     const std::size_t want = static_cast<std::size_t>(count) * kSector;
+-- 
+2.43.0
+

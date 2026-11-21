@@ -1,0 +1,8 @@
+gametitle=Raw Danger! (USA) SLUS-21501 - developer extras (need patches/native/0001 in ps2-native-recomp)
+
+[Game debug print]
+description=The game's own printf (0x2C6240, empty in retail) calls syscall 0x7D, which the patched runtime prints as [game fN] lines. Without the runtime patch every call logs "unhandled syscall 0x7D": do not use it then.
+patch=1,EE,002C6240,word,2403007D
+patch=1,EE,002C6244,word,0000000C
+patch=1,EE,002C6248,word,03E00008
+patch=1,EE,002C624C,word,00000000

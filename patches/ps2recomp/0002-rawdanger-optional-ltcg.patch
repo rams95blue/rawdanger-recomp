@@ -1,0 +1,52 @@
+diff --git a/ps2xRuntime/cmake/ReleaseMode.cmake b/ps2xRuntime/cmake/ReleaseMode.cmake
+index 92ef0d5..9b74b40 100644
+--- a/ps2xRuntime/cmake/ReleaseMode.cmake
++++ b/ps2xRuntime/cmake/ReleaseMode.cmake
+@@ -2,6 +2,10 @@ include(CheckIPOSupported)
+ 
+ check_ipo_supported(RESULT IPO_SUPPORTED OUTPUT IPO_ERROR)
+ 
++# Whole-program optimization (/GL + /LTCG, IPO). Needs enormous memory when a
++# large recompiled game is linked into ps2EntryRunner (MSVC C1002 / LNK1257).
++option(PS2X_ENABLE_LTCG "Enable whole-program optimization (/GL, /LTCG, IPO) in Release" ON)
++
+ function(EnableFastReleaseMode TargetName)
+     message("> Enabling optimization for: ${TargetName}")
+     if(MSVC)
+@@ -10,7 +14,6 @@ function(EnableFastReleaseMode TargetName)
+                 /O2 # speed
+                 /Ob2 # inline aggressively
+                 /Oi # intrinsics
+-                /GL # whole program opt
+                 /Gy # function-level linking
+                 /Gw # global data in COMDAT
+                 /GF # string pooling
+@@ -23,18 +26,26 @@ function(EnableFastReleaseMode TargetName)
+             >
+         )
+ 
++        if(PS2X_ENABLE_LTCG)
++            target_compile_options(${TargetName} PRIVATE $<$<CONFIG:Release>:/GL>) # whole program opt
++        endif()
++
+         if(TARGET ${TargetName})
+             target_link_options(${TargetName} PRIVATE
+                 $<$<CONFIG:Release>:
+-                    /LTCG # link-time code generation
+                     /OPT:REF # remove unreferenced
+                     /OPT:ICF # fold identical COMDATs
+                 >
+             )
++            if(PS2X_ENABLE_LTCG)
++                target_link_options(${TargetName} PRIVATE $<$<CONFIG:Release>:/LTCG>) # link-time code generation
++            endif()
+         endif()
+     endif()
+ 
+-    if(IPO_SUPPORTED)
++    if(NOT PS2X_ENABLE_LTCG)
++        message("> Whole-program optimization disabled for: ${TargetName}")
++    elseif(IPO_SUPPORTED)
+         set_property(TARGET ${TargetName} PROPERTY INTERPROCEDURAL_OPTIMIZATION_RELEASE TRUE)
+     else()
+         message(WARNING "Interprocedural optimization not supported: ${ipo_error}")

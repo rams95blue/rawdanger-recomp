@@ -1,0 +1,761 @@
+From fc0234cfc554e94c4b89b735de7b8d445fe5ff2b Mon Sep 17 00:00:00 2001
+From: rams95 <rams95@users.noreply.github.com>
+Date: Thu, 19 Nov 2026 12:24:17 +0000
+Subject: [PATCH] 0016-native-options-mouse-look.patch
+
+The game's Options screen (PS2_NATIVE_MENU=ADDRESS=VALUE): a sign says Select opens the PC settings, which open in the look of
+that screen with the game's own font (PS2_MENU_FONT, made by tools/rd_prompts.py); Back returns to the game. The same look is a
+third menu look (keys.ini menu_skin = game).
+Mouse look (PS2_MOUSE_LOOK_YAW / _PITCH / _WHEN): the right stick is pushed just enough and the game's camera angle and height
+are read back every frame, so the camera turns as far as the mouse moved; Settings > Controls: mouse look, speed, invert.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01QNLFPekqhcU2dj7B3Utmea
+---
+ host/keymap.cpp    |  22 ++++-
+ host/keymap.hpp    |   6 +-
+ host/quickmenu.cpp | 168 ++++++++++++++++++++++++++++++++++---
+ host/quickmenu.hpp |  21 ++++-
+ host/window.cpp    | 204 +++++++++++++++++++++++++++++++++++++++++++--
+ 5 files changed, 400 insertions(+), 21 deletions(-)
+
+diff --git a/host/keymap.cpp b/host/keymap.cpp
+index 2939369..8e10761 100644
+--- a/host/keymap.cpp
++++ b/host/keymap.cpp
+@@ -160,6 +160,16 @@ std::string with_line(const std::string &file_text, const std::string &name, con
+ std::string with_look(const std::string &file_text, int look) { return with_line(file_text, "look", std::string("look = ") + look_word(look)); }
+ 
+ std::string with_scale(const std::string &file_text, int scale) { return with_line(file_text, "scale", "scale = " + (scale == kScaleAuto ? std::string("auto") : std::to_string(scale))); }
++std::string with_mouse_look(const std::string &file_text, int on) { return with_line(file_text, "mouselook", std::string("mouse_look = ") + (on ? "on" : "off")); }
++std::string with_mouse_speed(const std::string &file_text, double speed) {
++    char text[48];
++    std::snprintf(text, sizeof text, "mouse_speed = %.2g", speed);
++    return with_line(file_text, "mousespeed", text);
++}
++std::string with_mouse_invert(const std::string &file_text, int invert) {
++    static const char *const kNames[4] = {"off", "x", "y", "both"};
++    return with_line(file_text, "mouseinvert", std::string("mouse_invert = ") + kNames[invert & 3]);
++}
+ std::string with_key_prompts(const std::string &file_text, int on) { return with_line(file_text, "keyprompts", std::string("key_prompts = ") + (on ? "on" : "off")); }
+ std::string short_input_name(int input) {
+     switch (input) {
+@@ -202,7 +212,7 @@ std::string with_reverb(const std::string &file_text, int on) { return with_line
+ std::string with_window_size(const std::string &file_text, int w, int h) {
+     return with_line(file_text, "windowsize", "window_size = " + std::to_string(w) + "x" + std::to_string(h));
+ }
+-std::string with_menu_skin(const std::string &file_text, int skin) { return with_line(file_text, "menuskin", std::string("menu_skin = ") + (skin == 1 ? "japanese" : "hazard")); }
++std::string with_menu_skin(const std::string &file_text, int skin) { return with_line(file_text, "menuskin", std::string("menu_skin = ") + (skin == 2 ? "game" : skin == 1 ? "japanese" : "hazard")); }
+ std::string with_integer_scale(const std::string &file_text, int on) { return with_line(file_text, "integerscale", "integer_scale = " + std::to_string(on ? 1 : 0)); }
+ std::string with_lens_rain(const std::string &file_text, int level) { return with_line(file_text, "lensrain", "lens_rain = " + std::to_string(level)); }
+ std::string with_smaa(const std::string &file_text, int on) { return with_line(file_text, "smaa", "smaa = " + std::to_string(on ? 1 : 0)); }
+@@ -353,6 +363,13 @@ void parse(const std::string &text, Config &config, std::vector<std::string> &pr
+             else bad("smaa is on or off, ignored");
+             continue;
+         }
++        if (name == "mouselook") {
++            const std::string v = squash(value);
++            if (v == "on" || v == "1") config.mouse_look = 1;
++            else if (v == "off" || v == "0") config.mouse_look = 0;
++            else bad("mouse_look is on or off, ignored");
++            continue;
++        }
+         if (name == "keyprompts") {
+             const std::string v = squash(value);
+             if (v == "on" || v == "1") config.key_prompts = 1;
+@@ -377,7 +394,8 @@ void parse(const std::string &text, Config &config, std::vector<std::string> &pr
+             const std::string v = squash(value);
+             if (v == "hazard" || v == "0") config.menu_skin = 0;
+             else if (v == "japanese" || v == "jp" || v == "1") config.menu_skin = 1;
+-            else bad("menu_skin is hazard or japanese, ignored");
++            else if (v == "game" || v == "options" || v == "2") config.menu_skin = 2;
++            else bad("menu_skin is hazard, japanese or game, ignored");
+             continue;
+         }
+         if (name == "integerscale" || name == "lensrain") {
+diff --git a/host/keymap.hpp b/host/keymap.hpp
+index 302fb2d..fac2324 100644
+--- a/host/keymap.hpp
++++ b/host/keymap.hpp
+@@ -43,7 +43,8 @@ struct Config {
+     int menu_skin = -1;        // rawdanger-recomp: the F1 menu's look: 0 hazard (yellow on black), 1 Japanese (blue on white, the
+                                // launcher's Japanese skin); -1 = from the game's language (PS2_LANGUAGE / PS2_MENU_SKIN)
+     int reverb = 1;            // rawdanger-recomp: the sound chip's reverb (0 off)
+-    int key_prompts = 1;       // rawdanger-recomp: the game's texts show the keys instead of the PlayStation symbols (0: the symbols)
++    int key_prompts = 1;
++    int mouse_look = 1;        // rawdanger-recomp: the mouse turns the camera while playing (PS2_MOUSE_LOOK_* from the launcher); 0 off       // rawdanger-recomp: the game's texts show the keys instead of the PlayStation symbols (0: the symbols)
+     int window_w = 0, window_h = 0;  // rawdanger-recomp: the window's size from the menu's presets (0: the default)
+     int integer_scale = 0;     // rawdanger-recomp: the picture is enlarged by whole numbers only (every console pixel row the same height)
+     int lens_rain = 0;         // rawdanger-recomp: rain drops on the lens while playing: 0 off, 1 light, 2 heavy
+@@ -69,6 +70,9 @@ std::string with_integer_scale(const std::string &file_text, int on);
+ std::string with_menu_skin(const std::string &file_text, int skin);
+ std::string with_reverb(const std::string &file_text, int on);
+ std::string with_key_prompts(const std::string &file_text, int on);
++std::string with_mouse_look(const std::string &file_text, int on);
++std::string with_mouse_speed(const std::string &file_text, double speed);
++std::string with_mouse_invert(const std::string &file_text, int invert);
+ // rawdanger-recomp: a key's name in at most 3 capitals for the caps drawn in the game's font ("E", "SP", "ML", "F10")
+ std::string short_input_name(int input);
+ std::string with_window_size(const std::string &file_text, int w, int h);   // the 'menu_skin' line: hazard / japanese
+diff --git a/host/quickmenu.cpp b/host/quickmenu.cpp
+index 4775fae..388eacf 100644
+--- a/host/quickmenu.cpp
++++ b/host/quickmenu.cpp
+@@ -2,6 +2,7 @@
+ 
+ #include <algorithm>
+ #include <cmath>
++#include <cstdio>
+ #include <cstring>
+ 
+ namespace quickmenu {
+@@ -121,10 +122,10 @@ constexpr Command kPicture[] = {Command::look, Command::antialias, Command::shar
+ constexpr const char *kPictureKeys[] = {"F2", "", "", "", "", "Esc"};
+ constexpr Command kSound[] = {Command::master_volume, Command::reverb, Command::back};
+ constexpr const char *kSoundKeys[] = {"", "", "Esc"};
+-constexpr Command kControls[] = {Command::change_keys, Command::key_prompts, Command::keys, Command::back};
+-constexpr const char *kControlsKeys[] = {"", "", "", "Esc"};
++constexpr Command kControls[] = {Command::change_keys, Command::mouse_look, Command::mouse_speed, Command::mouse_invert, Command::key_prompts, Command::keys, Command::back};
++constexpr const char *kControlsKeys[] = {"", "", "", "", "", "", "Esc"};
+ struct TabList { const Command *commands; const char *const *keys; int n; };
+-constexpr TabList kTabLists[Menu::kTabs - 1] = {{kDisplay, kDisplayKeys, 8}, {kPicture, kPictureKeys, 6}, {kSound, kSoundKeys, 3}, {kControls, kControlsKeys, 4}};
++constexpr TabList kTabLists[Menu::kTabs - 1] = {{kDisplay, kDisplayKeys, 8}, {kPicture, kPictureKeys, 6}, {kSound, kSoundKeys, 3}, {kControls, kControlsKeys, 7}};
+ constexpr int kVisibleRows = 11;  // lines of the keys page shown at once; the page scrolls
+ constexpr int kKeysPageChars = 58;
+ 
+@@ -139,10 +140,82 @@ std::uint32_t kPanel = rgba(14, 13, 10, 226), kFrame = rgba(120, 104, 40, 255),
+               kTape2 = rgba(18, 16, 10, 255), kAlarm = rgba(214, 40, 30, 255);
+ int g_skin = 0;
+ 
++// the game's font (skin 2): coverage of the 384 x 384 font picture; ASCII 0x20-0x7E in cells of 24 x 24 from row 2, 16 a row
++struct GameFont {
++    int w = 0, h = 0;
++    std::vector<std::uint8_t> a;
++    int x0[95] = {}, x1[95] = {};
++    bool ok = false;
++} g_font;
++
++// one font pixel `s` of the menu is about two pixels of the game's font: its capitals (15 pixels) are 7 font pixels tall, as the
++// menu's own letters are
++inline float game_font_k(int s) { return s * 0.47f; }
++
++int game_text_width(int s, const std::string &line) {
++    const float k = game_font_k(s);
++    float x = 0;
++    for (unsigned char ch : line) {
++        const int c = (ch >= 32 && ch <= 126 ? ch : '?') - 32;
++        x += (g_font.x1[c] - g_font.x0[c] + 1) * k + s * 0.96f;
++    }
++    return static_cast<int>(x + 0.5f);
++}
++
++void game_text(Picture &p, int x, int y, int s, const std::string &line, std::uint32_t color) {
++    const float k = game_font_k(s), inv = 1.0f / k;
++    float pen = static_cast<float>(x);
++    const int top = 4;   // the font's capitals start 4 pixels into their cell
++    for (unsigned char ch : line) {
++        const int c = (ch >= 32 && ch <= 126 ? ch : '?') - 32;
++        const int cx = (c % 16) * 24 + g_font.x0[c], cy = (2 + c / 16) * 24 + top, gw = g_font.x1[c] - g_font.x0[c] + 1, gh = 19;
++        const int tw = static_cast<int>(gw * k + 1.0f), th = static_cast<int>(gh * k + 1.0f), tx0 = static_cast<int>(pen);
++        for (int ty = 0; ty < th; ++ty)
++            for (int tx = 0; tx < tw; ++tx) {
++                // the source pixels under this one, averaged (the font is made smaller)
++                const float sx0 = tx * inv, sy0 = ty * inv, sx1 = std::min<float>(static_cast<float>(gw), (tx + 1) * inv),
++                            sy1 = std::min<float>(static_cast<float>(gh), (ty + 1) * inv);
++                float sum = 0, area = 0;
++                for (int sy = static_cast<int>(sy0); sy < static_cast<int>(std::ceil(sy1)); ++sy)
++                    for (int sx = static_cast<int>(sx0); sx < static_cast<int>(std::ceil(sx1)); ++sx) {
++                        const float ox = std::min<float>(sx + 1.0f, sx1) - std::max<float>(static_cast<float>(sx), sx0),
++                                    oy = std::min<float>(sy + 1.0f, sy1) - std::max<float>(static_cast<float>(sy), sy0);
++                        if (ox <= 0 || oy <= 0) continue;
++                        sum += g_font.a[static_cast<std::size_t>(cy + sy) * g_font.w + cx + sx] * ox * oy;
++                        area += ox * oy;
++                    }
++                if (area <= 0) continue;
++                const float cov = std::min(1.0f, sum / area / 255.0f * 1.15f);
++                if (cov < 0.02f) continue;
++                const int px = tx0 + tx, py = y + ty;
++                if (px < 0 || py < 0 || px >= p.width || py >= p.height) continue;
++                std::uint32_t &d = p.rgba[static_cast<std::size_t>(py) * p.width + px];
++                const auto mix = [&](int sh) {
++                    const float a = static_cast<float>((color >> sh) & 255u), b = static_cast<float>((d >> sh) & 255u);
++                    return static_cast<std::uint32_t>(a * cov + b * (1 - cov) + 0.5f) << sh;
++                };
++                d = mix(0) | mix(8) | mix(16) | (std::max(d >> 24, static_cast<std::uint32_t>(cov * static_cast<float>(color >> 24))) << 24);
++            }
++        pen += gw * k + s * 0.96f;
++    }
++}
++
+ struct Canvas {
+     Picture &p;
+     // hazard tape: diagonal yellow and black bands, `band` pixels wide
+     void tape(int x, int y, int w, int h, int band) {
++        if (g_skin == 2) {
++            // the game's header strip: dark to steel blue from left to right, with a faint grid
++            for (int j = std::max(0, y); j < std::min(p.height, y + h); ++j)
++                for (int i = std::max(0, x); i < std::min(p.width, x + w); ++i) {
++                    const float f = w > 1 ? static_cast<float>(i - x) / (w - 1) : 0.f;
++                    const bool grid = ((i - x) % std::max(3, band * 2) == 0) || ((j - y) % std::max(3, band) == 0);
++                    const auto lerp = [f](int a, int b) { return static_cast<int>(a + (b - a) * f); };
++                    const int g = grid ? 18 : 0;
++                    p.rgba[static_cast<std::size_t>(j) * p.width + i] = rgba(lerp(14, 60) + g, lerp(30, 96) + g, lerp(48, 140) + g, 255);
++                }
++            return;
++        }
+         for (int j = std::max(0, y); j < std::min(p.height, y + h); ++j)
+             for (int i = std::max(0, x); i < std::min(p.width, x + w); ++i)
+                 p.rgba[static_cast<std::size_t>(j) * p.width + i] = ((i + j) / std::max(1, band)) % 2 ? kTape2 : kTape1;
+@@ -189,6 +262,10 @@ struct Canvas {
+             }
+     }
+     void text(int x, int y, int s, const std::string &line, std::uint32_t color) {
++        if (g_skin == 2 && g_font.ok) {
++            game_text(p, x, y, s, line, color);
++            return;
++        }
+         for (unsigned char c : line) {
+             const char *glyph = kFont[(c >= 32 && c <= 126 ? c : '?') - 32];
+             for (int row = 0; row < 8; ++row)
+@@ -201,9 +278,46 @@ struct Canvas {
+ 
+ }  // namespace
+ 
++bool load_game_font(const std::string &path) {
++    std::FILE *f = std::fopen(path.c_str(), "rb");
++    if (!f) return false;
++    char magic[4] = {};
++    std::uint32_t w = 0, h = 0;
++    bool good = std::fread(magic, 1, 4, f) == 4 && std::memcmp(magic, "RDF1", 4) == 0 && std::fread(&w, 4, 1, f) == 1 && std::fread(&h, 4, 1, f) == 1 && w >= 384 &&
++                h >= 288 && w <= 4096 && h <= 4096;
++    if (good) {
++        g_font.a.resize(static_cast<std::size_t>(w) * h);
++        good = std::fread(g_font.a.data(), 1, g_font.a.size(), f) == g_font.a.size();
++    }
++    std::fclose(f);
++    if (!good) return false;
++    g_font.w = static_cast<int>(w);
++    g_font.h = static_cast<int>(h);
++    for (int c = 0; c < 95; ++c) {
++        const int cx = (c % 16) * 24, cy = (2 + c / 16) * 24;
++        int lo = 24, hi = -1;
++        for (int y = 0; y < 24; ++y)
++            for (int x = 0; x < 24; ++x)
++                if (g_font.a[static_cast<std::size_t>(cy + y) * w + cx + x] > 40) lo = std::min(lo, x), hi = std::max(hi, x);
++        if (hi < lo) lo = 0, hi = 5;   // the space
++        g_font.x0[c] = lo;
++        g_font.x1[c] = hi;
++    }
++    g_font.ok = true;
++    return true;
++}
++
++bool game_font_loaded() { return g_font.ok; }
++
+ void set_skin(int skin) {
+-    g_skin = skin == 1 ? 1 : 0;
+-    if (g_skin == 1) {
++    g_skin = skin == 1 || skin == 2 ? skin : 0;
++    if (g_skin == 2) {
++        // Raw Danger's Options screen: navy, thin pale-blue lines, white words, a steel-blue bar on the chosen line
++        kPanel = rgba(10, 22, 44, 240);    kFrame = rgba(150, 178, 214, 255); kTitle = rgba(236, 242, 252, 255);
++        kText = rgba(214, 226, 244, 255);  kBar = rgba(52, 104, 162, 245);   kBarText = rgba(255, 255, 255, 255);
++        kDim = rgba(112, 134, 168, 255);   kBarDim = rgba(190, 212, 240, 255); kTape1 = rgba(56, 100, 150, 255);
++        kTape2 = rgba(16, 34, 60, 255);    kAlarm = rgba(110, 190, 240, 255);
++    } else if (g_skin == 1) {
+         // the launcher's Japanese skin (Theme in launcher\Launcher.cs): white-blue paper, navy text, blue bars and tape
+         kPanel = rgba(246, 250, 254, 248); kFrame = rgba(150, 184, 226, 255); kTitle = rgba(18, 86, 196, 255);
+         kText = rgba(14, 30, 64, 255);     kBar = rgba(18, 86, 196, 250);    kBarText = rgba(255, 255, 255, 255);
+@@ -232,6 +346,15 @@ std::string entry_text(Command c, const Values &v, bool quit_armed) {
+     case Command::game_blur:
+         if (v.game_blur < 0) return "Game's blur filter: as built (no switch)";
+         return std::string("Game's blur filter:  < ") + (v.game_blur ? "on (as on the console)" : "off (sharper)") + " >";
++    case Command::mouse_look:
++        if (v.mouse_look < 0) return "Mouse look: not in this game";
++        return std::string("Mouse look (camera):  < ") + (v.mouse_look ? "on" : "off") + " >";
++    case Command::mouse_speed: {
++        char text[64];
++        std::snprintf(text, sizeof text, "Mouse speed:  < %.1f >", v.mouse_speed);
++        return text;
++    }
++    case Command::mouse_invert: return std::string("Mouse up and down:  < ") + (v.mouse_invert_y ? "inverted" : "normal") + " >";
+     case Command::key_prompts:
+         if (v.key_prompts < 0) return "Buttons in the game's texts: PlayStation (no key pictures here)";
+         return std::string("Buttons in the game's texts:  < ") + (v.key_prompts ? "your keys" : "PlayStation symbols") + " >";
+@@ -251,7 +374,7 @@ std::string entry_text(Command c, const Values &v, bool quit_armed) {
+         return std::string("Anti-aliasing:  < ") + kAa[std::clamp(v.antialias, 0, 2)] + " >";
+     }
+     case Command::integer_scale: return std::string("Whole-number scaling:  < ") + (v.integer_scale ? "on" : "off") + " >";
+-    case Command::menu_skin: return std::string("Menu look:  < ") + (v.menu_skin == 1 ? "Japanese (blue on white)" : "hazard (yellow on black)") + " >";
++    case Command::menu_skin: return std::string("Menu look:  < ") + (v.menu_skin == 2 ? "the game's Options screen" : v.menu_skin == 1 ? "Japanese (blue on white)" : "hazard (yellow on black)") + " >";
+     case Command::lens_rain: {
+         static const char *const kRain[] = {"off", "light", "heavy"};
+         return std::string("Rain on the lens:  < ") + kRain[std::clamp(v.lens_rain, 0, 2)] + " >" + (v.lens_rain && !v.lens_rain_known ? "  (also on menus)" : "");
+@@ -336,6 +459,7 @@ void Menu::fit() {
+ 
+ bool Menu::back() {
+     if (page_ == Page::main) return false;
++    if (native_ && page_ == Page::graphics) return false;   // opened from the game's Options screen: back to the game
+     if (page_ == Page::keys && keys_from_settings_) {
+         // back to Settings > Controls, on Change keys
+         keys_from_settings_ = false;
+@@ -355,6 +479,7 @@ bool Menu::back() {
+ 
+ void Menu::open() {
+     open_ = true;
++    native_ = false;
+     quit_armed_ = false;
+     page_ = Page::main;
+     capturing_ = false;
+@@ -405,7 +530,7 @@ Command Menu::choose() {
+             return Command::none;
+         }
+         const Command g = kTabLists[tab_].commands[selected_];
+-        if (g == Command::back) { back(); return Command::none; }
++        if (g == Command::back) { if (native_ && page_ == Page::graphics) return Command::resume; back(); return Command::none; }
+         if (g == Command::change_keys) {
+             keys_from_settings_ = true;
+             page_ = Page::keys;
+@@ -457,7 +582,8 @@ Command Menu::side() const {
+     const Command c = kTabLists[tab_].commands[selected_];
+     return c == Command::look || c == Command::scale || c == Command::sharp_2d || c == Command::fullscreen || c == Command::widescreen || c == Command::pause_unfocused ||
+                    c == Command::master_volume || c == Command::integer_scale || c == Command::lens_rain || c == Command::antialias || c == Command::menu_skin ||
+-                   c == Command::window_size || c == Command::game_blur || c == Command::reverb || c == Command::key_prompts
++                   c == Command::window_size || c == Command::game_blur || c == Command::reverb || c == Command::key_prompts || c == Command::mouse_look ||
++                   c == Command::mouse_speed || c == Command::mouse_invert
+                ? c : Command::none;
+ }
+ 
+@@ -729,7 +855,7 @@ void Menu::draw_list(int window_width, int window_height, const Values &values,
+     const char *const *keys = gfx ? kTabLists[tab_].keys : kKeys;
+     std::string game = values.title.empty() ? "PAUSED" : values.title;
+     for (char &ch : game) ch = static_cast<char>(ch >= 'a' && ch <= 'z' ? ch - 32 : ch);
+-    const std::string kTitleText = gfx ? "SETTINGS" : game + " - PAUSED";
++    const std::string kTitleText = gfx ? (native_ ? "PC SETTINGS" : "SETTINGS") : game + " - PAUSED";
+     const std::string kHint = gfx ? "Left / Right: change   Tab / Q / E / L1 / R1: tabs   Esc: back" : "Enter / Cross: OK     F1 / Esc / Circle: resume";
+     const std::string kNote = gfx ? (values.scale_next != values.scale_now || values.sharp_next != values.sharp_now ? "Resolution and text filter: used at the next start" : "Saved in keys.ini next to the game")
+                                   : "rawdanger-recomp";
+@@ -790,7 +916,8 @@ void Menu::draw_list(int window_width, int window_height, const Values &values,
+         const bool quit = commands[i] == Command::quit;
+         if (lit) c.fill(pad * s, y, out.width - 2 * pad * s, bar_h * s, quit ? kAlarm : kBar);
+         const bool unusable = (commands[i] == Command::widescreen && values.widescreen < 0) || (commands[i] == Command::language && values.language_other.empty()) ||
+-                              (commands[i] == Command::game_blur && values.game_blur < 0) || (commands[i] == Command::key_prompts && values.key_prompts < 0);
++                              (commands[i] == Command::game_blur && values.game_blur < 0) || (commands[i] == Command::key_prompts && values.key_prompts < 0) ||
++                              (commands[i] == Command::mouse_look && values.mouse_look < 0);
+         c.text((pad + bar_pad) * s, y + 3 * s, s, lines[i], lit ? (quit ? kText : kBarText) : unusable ? kDim : kText);
+         const std::string key = keys[i];
+         c.text(out.width - (pad + bar_pad) * s - static_cast<int>(key.size()) * 6 * s + s, y + 3 * s, s, key, lit ? (quit ? kText : kBarDim) : kDim);
+@@ -862,4 +989,25 @@ void Menu::draw_note(int window_width, int window_height, const std::string &tex
+     c.text(pad * s, pad * s, s, text, kTitle);
+ }
+ 
++// rawdanger-recomp: over the game's Options screen, at the bottom left: which button opens the PC settings, in the game's look
++void Menu::draw_native_hint(int window_width, int window_height, const std::string &text, Picture &out) {
++    const int was = g_skin;
++    set_skin(2);
++    const int pad = 4;
++    const int s = std::clamp(window_height / 300, 1, 6);
++    const int text_w = g_font.ok ? game_text_width(s, text) : static_cast<int>(text.size()) * 6 * s;
++    out.width = text_w + 2 * pad * s + 12 * s;
++    out.height = (2 * pad + 8) * s;
++    out.x = std::max(0, window_width - out.width - window_width / 40);   // bottom right: the game's own hint line is in the middle
++    out.y = std::max(0, window_height - out.height - window_height / 30);
++    out.rgba.assign(static_cast<std::size_t>(out.width) * out.height, kPanel);
++    Canvas c{out};
++    const int line = std::max(1, s / 2);
++    c.box(0, 0, out.width, out.height, line, kFrame);
++    // the game's mark before a hint: a small light square
++    c.fill(pad * s, (pad + 2) * s, 4 * s, 4 * s, kAlarm);
++    c.text(pad * s + 8 * s, pad * s, s, text, kTitle);
++    set_skin(was);
++}
++
+ }  // namespace quickmenu
+diff --git a/host/quickmenu.hpp b/host/quickmenu.hpp
+index d71551f..25d4985 100644
+--- a/host/quickmenu.hpp
++++ b/host/quickmenu.hpp
+@@ -15,6 +15,10 @@ namespace quickmenu {
+ // rawdanger-recomp: the menu's look. 0: hazard tape, yellow on black (the launcher's English skin); 1: Japanese, blue on white
+ // (the launcher's Japanese skin). Takes effect at the next paint.
+ void set_skin(int skin);
++// rawdanger-recomp: the game's own font for the "game" skin (2: the look of Raw Danger's Options screen). The file is the font's
++// coverage, 8 bits a pixel, after a 12-byte head ("RDF1", width, height); tools\rd_prompts.py writes it. False when not there.
++bool load_game_font(const std::string &path);
++bool game_font_loaded();
+ int skin();
+ 
+ enum class Command {
+@@ -38,6 +42,9 @@ enum class Command {
+     game_blur,     // Settings > Picture: the game's own full-screen blur (its "No post-processing filter" option, inverted)
+     reverb,        // Settings > Sound: the sound chip's reverb (echo of rooms and tunnels)
+     key_prompts,   // Settings > Controls: the game's texts show the keys (key caps) or the PlayStation symbols
++    mouse_look,    // Settings > Controls: the mouse turns the camera while playing
++    mouse_speed,   // Settings > Controls: how far the camera turns for a move of the mouse
++    mouse_invert,  // Settings > Controls: the mouse's up and down the other way round
+     language,      // rawdanger-recomp: restart the game in its other language (the launcher's other build; asked once, like Quit)
+     back           // a page's Back line
+ };
+@@ -65,7 +72,10 @@ struct Values {
+     std::string window_size;       // "1600 x 900", or "full screen"
+     int game_blur = -1;            // the game's blur: -1 this build has no switch for it, 0 off, 1 on (as on the console)
+     bool reverb = true;
+-    int key_prompts = -1;          // -1: this game has no prompt font (PS2_PROMPT_FONT_KEY), 0 symbols, 1 keys
++    int key_prompts = -1;
++    int mouse_look = -1;           // -1: this game has no mouse look (PS2_MOUSE_LOOK_YAW), 0 off, 1 on
++    double mouse_speed = 1.0;
++    bool mouse_invert_y = false;          // -1: this game has no prompt font (PS2_PROMPT_FONT_KEY), 0 symbols, 1 keys
+     // the keys page: one row per button (label and its keys, in the order of keys.ini) and a message line (what the last change did)
+     struct KeyRow {
+         std::string label, keys;
+@@ -98,6 +108,12 @@ class Menu {
+ public:
+     bool is_open() const { return open_; }
+     void open();
++    // rawdanger-recomp: Settings opened from the game's own Options screen (Select there): drawn in the game's look, and Back or
++    // Esc on it gives the game back at once
++    void open_native() { open(); native_ = true; page_ = Page::graphics; tab_ = 0; selected_ = 0; top_ = 0; }
++    bool native() const { return native_; }
++    // the small sign over the game's Options screen that says which button opens these settings
++    static void draw_native_hint(int window_width, int window_height, const std::string &text, Picture &out);
+     void close() { open_ = false; }
+     void move(int delta);                      // up (-1) and down (+1), round at the ends
+     Command choose();                          // Enter, Cross, a click: what the highlighted entry does (Quit asks once: the first time it only arms itself)
+@@ -140,7 +156,8 @@ private:
+     int tab_ = 0;
+     bool keys_from_settings_ = false;      // the keys page was opened from Settings > Controls: Back returns there
+     int tab_x_[kTabs + 1] = {}, tab_y_ = 0, tab_h_ = 0;
+-    int settings_s_ = 0, settings_w_ = 0, settings_h_ = 0;   // the Settings panel's last size, so the Game tab has the same panel   // where the last drawing put the tabs (window pixels), for the mouse
++    int settings_s_ = 0, settings_w_ = 0, settings_h_ = 0;
++    bool native_ = false;   // the Settings panel's last size, so the Game tab has the same panel   // where the last drawing put the tabs (window pixels), for the mouse
+     void draw_list(int window_width, int window_height, const Values &values, Picture &out);
+     int recomp_rows_ = 0;
+     void draw_recomp(int window_width, int window_height, const Values &values, Picture &out);
+diff --git a/host/window.cpp b/host/window.cpp
+index 9fff291..fe560e0 100644
+--- a/host/window.cpp
++++ b/host/window.cpp
+@@ -55,6 +55,7 @@
+ #include "keymap.hpp"
+ #include "quickmenu.hpp"
+ #include "ps2/crash.hpp"
++#include "ps2/memory.hpp"
+ #include "ps2/hitch.hpp"
+ #include "ps2/os.hpp"
+ #include "ps2/video.hpp"
+@@ -122,6 +123,28 @@ void window_stage(const char *name) {
+ // gets the focus back after the file changed). The arrow keys are the D-pad only: they used to push the left stick as well, and
+ // a menu that reads both moved two entries for one press.
+ keymap::Config g_keys = keymap::defaults();
++// rawdanger-recomp: the game's own Options screen (PS2_NATIVE_MENU="ADDRESS=VALUE", Raw Danger's scene word 0x48F488 = 16):
++// while it is on, a sign at the bottom left says Select opens the PC settings, drawn in the game's look
++std::uint32_t g_native_address = 0, g_native_value = 0;
++bool g_native_set = false, g_native_hint = false;
++int g_skin_chosen = 0;
++void open_menu(const char *why);
++void menu_paint(bool show_again = true);   // the menu's look chosen in keys.ini (the native page borrows the game's look while it is open)
++bool native_scene() {
++    static bool parsed = false;
++    if (!parsed) {
++        parsed = true;
++        if (const char *w = std::getenv("PS2_NATIVE_MENU"); w && *w) {
++            unsigned long a = 0, v = 0;
++            if (std::sscanf(w, "%li=%li", reinterpret_cast<long *>(&a), reinterpret_cast<long *>(&v)) == 2) {
++                g_native_address = static_cast<std::uint32_t>(a);
++                g_native_value = static_cast<std::uint32_t>(v);
++                g_native_set = true;
++            }
++        }
++    }
++    return g_native_set && ps2::ld32(g_native_address) == g_native_value;
++}
+ void send_key_prompts();  // rawdanger-recomp: the keys for the game's font (below)
+ // the picture options for the GPU: the look (bits 0-2) and whole-number scaling (bit 3, rawdanger-recomp)
+ std::uint32_t video_bits();
+@@ -129,7 +152,24 @@ std::atomic<int> g_master_volume{100};  // rawdanger-recomp: keys.ini master_vol
+ std::vector<std::size_t> g_recomp_row_section;  // the Game options page's lines -> recomp::sections() (widescreen is on the Graphics page)
+ std::string g_keys_path;
+ std::filesystem::file_time_type g_keys_time{};
+-int g_mouse_sum_x = 0, g_mouse_sum_y = 0;  // mouse counts since the last sample (only while the mouse pushes a stick)
++int g_mouse_sum_x = 0, g_mouse_sum_y = 0;
++// rawdanger-recomp: mouse look. The camera turns as far as the mouse moved: the right stick is pushed just enough, and the game's own
++// camera angle is read back every frame so what it has turned already comes off what is still to turn (closed loop). The launcher
++// names the words: PS2_MOUSE_LOOK_YAW="ADDRESS,RATE,DEADZONE" (an angle in radians that wraps; RATE: radians per game step for
++// each unit of stick past DEADZONE, of 127), PS2_MOUSE_LOOK_PITCH="ADDRESS,RATE,DEADZONE,LOW,HIGH" (a value kept between LOW and
++// HIGH), PS2_MOUSE_LOOK_WHEN="ADDRESS=VALUE" (only while that word holds VALUE: playing).
++struct LookAxis {
++    std::uint32_t address = 0;
++    float rate = 0, dead = 0, lo = 0, hi = 0;
++    bool angle = false, set = false, have_prev = false;
++    float prev = 0;
++    double pending = 0;   // still to turn, in the direction a push of the stick to 255 turns
++    int sign = 1;         // +1: a push to 255 makes the word bigger; -1: smaller
++};
++LookAxis g_look_yaw, g_look_pitch;
++std::uint32_t g_look_when_address = 0, g_look_when_value = 0;
++bool g_look_parsed = false, g_look_when_set = false;
++double g_look_dx = 0, g_look_dy = 0;   // mouse counts since the last frame (relative mode)  // mouse counts since the last sample (only while the mouse pushes a stick)
+ Uint32 g_mouse_sample = 0;
+ double g_mouse_vx = 0.0, g_mouse_vy = 0.0;  // counts per millisecond, smoothed
+ Uint32 g_wheel_up_until = 0, g_wheel_down_until = 0;
+@@ -546,9 +586,10 @@ void play_pad_script() {
+ 
+ // --- the key file and the key card ---
+ 
++bool mouse_look_on();
+ void apply_mouse_mode() {
+     // a mouse that pushes a stick needs the pointer locked in the window, else it runs into the window's edge
+-    const bool want = g_window && g_keys.mouse_stick != 0 && !g_menu.is_open() && (SDL_GetWindowFlags(g_window) & SDL_WINDOW_INPUT_FOCUS);
++    const bool want = g_window && (g_keys.mouse_stick != 0 || mouse_look_on()) && !g_menu.is_open() && (SDL_GetWindowFlags(g_window) & SDL_WINDOW_INPUT_FOCUS);
+     if ((SDL_GetRelativeMouseMode() == SDL_TRUE) != want) SDL_SetRelativeMouseMode(want ? SDL_TRUE : SDL_FALSE);
+     g_mouse_sum_x = g_mouse_sum_y = 0;
+     g_mouse_vx = g_mouse_vy = 0.0;
+@@ -592,6 +633,13 @@ void load_keys() {
+             skin = (want && (std::string(want) == "japanese" || std::string(want) == "1")) || (!want && lang && std::string(lang) == "Japanese") ? 1 : 0;
+         }
+         quickmenu::set_skin(skin);
++        g_skin_chosen = skin;
++        static bool font_tried = false;
++        if (!font_tried) {
++            font_tried = true;
++            if (const char *font = std::getenv("PS2_MENU_FONT"); font && *font)
++                std::fprintf(stderr, "[menu] the game's font for the Options look: %s\n", quickmenu::load_game_font(font) ? font : "not readable, the menu's own letters");
++        }
+         ps2::set_reverb(g_keys.reverb != 0);
+         send_key_prompts();
+     }
+@@ -757,6 +805,83 @@ void push_stick(int dx, int dy, std::uint8_t &x, std::uint8_t &y) {
+ }
+ 
+ // the mouse as a stick: how fast it moves, sampled every 16 ms (the window thread runs more often than the game's frames)
++void parse_mouse_look() {
++    if (g_look_parsed) return;
++    g_look_parsed = true;
++    if (const char *y = std::getenv("PS2_MOUSE_LOOK_YAW"); y && *y) {
++        unsigned long a = 0;
++        if (std::sscanf(y, "%lx,%f,%f", &a, &g_look_yaw.rate, &g_look_yaw.dead) == 3 && g_look_yaw.rate > 0) {
++            g_look_yaw.address = static_cast<std::uint32_t>(a);
++            g_look_yaw.angle = true;
++            g_look_yaw.sign = -1;   // Raw Danger: right (255) makes the angle smaller
++            g_look_yaw.set = true;
++        }
++    }
++    if (const char *p = std::getenv("PS2_MOUSE_LOOK_PITCH"); p && *p) {
++        unsigned long a = 0;
++        if (std::sscanf(p, "%lx,%f,%f,%f,%f", &a, &g_look_pitch.rate, &g_look_pitch.dead, &g_look_pitch.lo, &g_look_pitch.hi) == 5 && g_look_pitch.rate > 0) {
++            g_look_pitch.address = static_cast<std::uint32_t>(a);
++            g_look_pitch.set = true;
++        }
++    }
++    if (const char *w = std::getenv("PS2_MOUSE_LOOK_WHEN"); w && *w) {
++        unsigned long a = 0, v = 0;
++        if (std::sscanf(w, "%lx=%lu", &a, &v) == 2) {
++            g_look_when_address = static_cast<std::uint32_t>(a);
++            g_look_when_value = static_cast<std::uint32_t>(v);
++            g_look_when_set = true;
++        }
++    }
++    if (g_look_yaw.set)
++        std::fprintf(stderr, "[mouse] mouse look: the camera angle at 0x%08X%s; keys.ini mouse_look = on/off, mouse_speed, mouse_invert\n", g_look_yaw.address,
++                     g_look_pitch.set ? " and its height" : "");
++}
++
++bool mouse_look_on() {
++    parse_mouse_look();
++    if (!g_look_yaw.set || !g_keys.mouse_look || g_menu.is_open() || !g_window || !(SDL_GetWindowFlags(g_window) & SDL_WINDOW_INPUT_FOCUS)) return false;
++    return !g_look_when_set || ps2::ld32(g_look_when_address) == g_look_when_value;
++}
++
++float ram_float(std::uint32_t address) {
++    const std::uint32_t w = ps2::ld32(address);
++    float f;
++    std::memcpy(&f, &w, 4);
++    return f;
++}
++
++// one axis of the mouse look: `counts` of mouse movement in, the stick's value out (0x80 when nothing is left to turn)
++std::uint8_t look_axis(LookAxis &a, double counts, double per_count) {
++    if (!a.set) return 0x80;
++    const float now = ram_float(a.address);
++    if (!std::isfinite(now)) return 0x80;
++    if (a.have_prev) {
++        double moved = now - a.prev;
++        if (a.angle) {
++            while (moved > 3.14159265) moved -= 6.28318531;
++            while (moved < -3.14159265) moved += 6.28318531;
++        }
++        a.pending -= a.sign * moved;
++    }
++    a.prev = now;
++    a.have_prev = true;
++    a.pending += counts * per_count;
++    const double most = a.rate * (127.0 - a.dead);   // the most the game turns in one of its steps
++    a.pending = std::clamp(a.pending, -most * 8.0, most * 8.0);   // a fast flick is caught up within about half a second
++    if (!a.angle) {
++        if ((now >= a.hi - 1e-3f && a.sign * a.pending > 0) || (now <= a.lo + 1e-3f && a.sign * a.pending < 0)) a.pending = 0;   // at the end of its travel
++    }
++    if (std::fabs(a.pending) < a.rate * 0.6) return 0x80;
++    const double push = a.dead + std::min(std::fabs(a.pending), most) / a.rate;
++    return static_cast<std::uint8_t>(std::clamp(128.0 + std::copysign(push, a.pending), 0.0, 255.0));
++}
++
++void mouse_look_reset() {
++    g_look_yaw.pending = g_look_pitch.pending = 0;
++    g_look_yaw.have_prev = g_look_pitch.have_prev = false;
++    g_look_dx = g_look_dy = 0;
++}
++
+ void mouse_stick_value(std::uint8_t &x, std::uint8_t &y) {
+     const Uint32 now = SDL_GetTicks();
+     const Uint32 dt = now - g_mouse_sample;
+@@ -831,6 +956,24 @@ void read_keyboard(std::uint16_t &pressed, std::uint8_t &lx, std::uint8_t &ly, s
+         const bool walking = ldx || ldy;
+         push_stick(walking ? ldx : g_last_dx, walking ? ldy : g_last_dy, rx, ry);
+     }
++    // rawdanger-recomp: mouse look while playing (the pointer is caught in the window then, and free again in menus)
++    {
++        static bool was = false;
++        const bool on = mouse_look_on();
++        if (on != was) {
++            was = on;
++            mouse_look_reset();
++            apply_mouse_mode();
++        }
++        if (on) {
++            const double speed = g_keys.mouse_speed;
++            const double dx = (g_keys.mouse_invert & 1) ? -g_look_dx : g_look_dx, dy = (g_keys.mouse_invert & 2) ? -g_look_dy : g_look_dy;
++            g_look_dx = g_look_dy = 0;
++            const std::uint8_t sx = look_axis(g_look_yaw, dx, 0.0028 * speed), sy = look_axis(g_look_pitch, dy, 0.012 * speed);
++            if (rx == 0x80) rx = sx;
++            if (ry == 0x80) ry = sy;
++        }
++    }
+     if (g_keys.mouse_stick) {
+         std::uint8_t mx = 0x80, my = 0x80;
+         mouse_stick_value(mx, my);
+@@ -884,6 +1027,13 @@ void poll_port(int port) {
+         stick(pad, SDL_CONTROLLER_AXIS_LEFTX, SDL_CONTROLLER_AXIS_LEFTY, lx, ly);
+         stick(pad, SDL_CONTROLLER_AXIS_RIGHTX, SDL_CONTROLLER_AXIS_RIGHTY, rx, ry);
+     }
++    // rawdanger-recomp: Select on the game's Options screen opens the PC settings in the game's look (the game does not get it)
++    if (port == 0 && (pressed & kSelect) && !g_menu.is_open() && native_scene()) {
++        open_menu("Select on the game's Options screen");
++        g_menu.open_native();
++        if (quickmenu::game_font_loaded()) quickmenu::set_skin(2);
++        menu_paint();
++    }
+     if (g_menu.is_open()) g_block_input[port] = true;
+     if (g_block_input[port]) {
+         if (!pressed) g_block_input[port] = false;  // all let go: from the next pass on the game gets this port again
+@@ -968,9 +1118,9 @@ void window_pixels(int &w, int &h) {
+ }
+ 
+ // Makes the panel (the menu, or the note after it) for the window's size and hands it to the one who draws (or takes it away).
+-void menu_paint(bool show_again = true) {
++void menu_paint(bool show_again) {
+     if (show_again) g_menu_redraw = true;
+-    g_overlay_on = g_menu.is_open() || !g_note_text.empty();
++    g_overlay_on = g_menu.is_open() || !g_note_text.empty() || g_native_hint;
+     if (!g_overlay_on) {
+ #ifdef PS2_GPU
+         if (g_gpu_present) ps2::gs::gpu::set_overlay(nullptr, 0, 0, 0, 0);
+@@ -1019,6 +1169,10 @@ void menu_paint(bool show_again = true) {
+         if (const int blur = blur_section(); blur >= 0) v.game_blur = recomp::sections()[static_cast<std::size_t>(blur)].on ? 0 : 1;
+         v.reverb = ps2::reverb();
+         v.key_prompts = std::getenv("PS2_PROMPT_FONT_KEY") ? g_keys.key_prompts : -1;
++        parse_mouse_look();
++        v.mouse_look = g_look_yaw.set ? g_keys.mouse_look : -1;
++        v.mouse_speed = g_keys.mouse_speed;
++        v.mouse_invert_y = (g_keys.mouse_invert & 2) != 0;
+         if (g_menu.on_keys_page()) {
+             for (int a = 0; a < keymap::kChangeableCount; ++a) v.key_rows.push_back({keymap::action_label(a), keymap::keys_text(g_keys, a)});
+             v.key_note = g_key_note;
+@@ -1061,6 +1215,10 @@ void menu_paint(bool show_again = true) {
+             v.recomp_note = g_recomp_note;
+         }
+         g_menu.draw(w, h, v, g_menu_picture);
++    } else if (g_note_text.empty() && g_native_hint) {
++        std::string key = "SELECT";
++        if (!g_keys.inputs[keymap::Select].empty()) key += " / " + keymap::input_name(g_keys.inputs[keymap::Select].front());
++        quickmenu::Menu::draw_native_hint(w, h, key + "   PC settings", g_menu_picture);
+     } else if (g_toast) {
+         quickmenu::Menu::draw_toast(w, h, "ACHIEVEMENT UNLOCKED", g_toast_title, g_toast_icon, g_toast_w, g_toast_h, g_menu_picture);
+     } else {
+@@ -1134,6 +1292,7 @@ void open_menu(const char *why) {
+ }
+ 
+ void close_menu(const char *why) {
++    if (g_menu.native()) quickmenu::set_skin(g_skin_chosen);   // the game's look was borrowed for this page only
+     if (!g_menu.is_open()) return;
+     g_menu.close();
+     g_block_input[0] = g_block_input[1] = true;
+@@ -1305,6 +1464,26 @@ void menu_command(quickmenu::Command c, int step) {
+         set_notice(on ? "Game's blur filter: on (as on the console)" : "Game's blur filter: off (sharper picture)");
+         break;
+     }
++    case Command::mouse_look:
++        parse_mouse_look();
++        if (!g_look_yaw.set) break;
++        g_keys.mouse_look = g_keys.mouse_look ? 0 : 1;
++        rewrite_keys_file([](const std::string &t) { return keymap::with_mouse_look(t, g_keys.mouse_look); }, "mouse look");
++        set_notice(g_keys.mouse_look ? "Mouse look on: the mouse turns the camera while you play" : "Mouse look off");
++        break;
++    case Command::mouse_speed: {
++        // 0.2 to 4 in steps of 0.2 (Left / Right), round at the ends
++        double v = std::round(g_keys.mouse_speed * 5.0) / 5.0 + (step < 0 ? -0.2 : 0.2);
++        if (v > 4.01) v = 0.2;
++        if (v < 0.19) v = 4.0;
++        g_keys.mouse_speed = v;
++        rewrite_keys_file([](const std::string &t) { return keymap::with_mouse_speed(t, g_keys.mouse_speed); }, "mouse speed");
++        break;
++    }
++    case Command::mouse_invert:
++        g_keys.mouse_invert ^= 2;
++        rewrite_keys_file([](const std::string &t) { return keymap::with_mouse_invert(t, g_keys.mouse_invert); }, "mouse up and down");
++        break;
+     case Command::key_prompts:
+         if (!std::getenv("PS2_PROMPT_FONT_KEY")) break;
+         g_keys.key_prompts = g_keys.key_prompts ? 0 : 1;
+@@ -1319,10 +1498,12 @@ void menu_command(quickmenu::Command c, int step) {
+         set_notice(g_keys.reverb ? "Reverb: on (rooms and tunnels echo)" : "Reverb: off (dry sound)");
+         break;
+     case Command::menu_skin:
+-        g_keys.menu_skin = quickmenu::skin() ? 0 : 1;
++        // hazard -> Japanese -> the game's Options look (when the game's font is there) -> hazard
++        g_keys.menu_skin = (quickmenu::skin() + 1) % (quickmenu::game_font_loaded() ? 3 : 2);
+         quickmenu::set_skin(g_keys.menu_skin);
++        g_skin_chosen = g_keys.menu_skin;
+         rewrite_keys_file([](const std::string &t) { return keymap::with_menu_skin(t, g_keys.menu_skin); }, "menu look");
+-        set_notice(g_keys.menu_skin ? "Menu look: Japanese (blue on white)" : "Menu look: hazard (yellow on black)");
++        set_notice(g_keys.menu_skin == 2 ? "Menu look: Raw Danger's Options screen" : g_keys.menu_skin ? "Menu look: Japanese (blue on white)" : "Menu look: hazard (yellow on black)");
+         break;
+     case Command::integer_scale:
+         g_keys.integer_scale = g_keys.integer_scale ? 0 : 1;
+@@ -1724,6 +1905,10 @@ void poll() {
+             }
+             apply_mouse_mode();
+         }
++        if (e.type == SDL_MOUSEMOTION && SDL_GetRelativeMouseMode()) {
++            g_look_dx += e.motion.xrel;
++            g_look_dy += e.motion.yrel;
++        }
+         if (e.type == SDL_MOUSEMOTION && g_keys.mouse_stick) {
+             g_mouse_sum_x += e.motion.xrel;
+             g_mouse_sum_y += e.motion.yrel;
+@@ -1743,6 +1928,13 @@ void poll() {
+     poll_port(0);
+     poll_port(1);
+     show_notice();
++    {
++        const bool want = !g_menu.is_open() && g_note_text.empty() && native_scene();
++        if (want != g_native_hint) {
++            g_native_hint = want;
++            menu_paint(false);
++        }
++    }
+     if (g_menu_redraw) menu_show_again();
+     if (ps2::hitch::on() && ps2::hitch::ms_since(after_events) > ps2::hitch::threshold_ms() / 3)
+         std::fprintf(stderr, "[hitch] reading the controllers and the notice took %.1f ms%s", ps2::hitch::ms_since(after_events), "\n");
+-- 
+2.43.0
+

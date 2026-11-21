@@ -1,0 +1,295 @@
+From 3c12281d8fa7f5cce8e5b5b42c051dfdd1068d48 Mon Sep 17 00:00:00 2001
+From: rawdanger-recomp <rawdanger-recomp@users.noreply.github.com>
+Date: Fri, 20 Nov 2026 14:45:31 +0000
+Subject: [PATCH] 0023-game-colour-filter-one-pass
+
+Raw Danger's colour filter (its brightness tint and depth haze: after the bloom, the frame walked one 64 x 32 page at a time,
+about 2,800 small draws a frame each reading what the one before wrote) recognised in the GS stream and done in one pass:
+the walk's draws are left out, their palettes and blend weights noted as they pass, and one formula runs over the frame
+(software renderer: rdfilter::finish in gs.cpp; GPU: the game_filter pass in gs.wgsl, every sample at any internal
+resolution). Checked against the game's own draws: the same picture to the last bit (software renderer, and the GPU at 1x
+and 2x). GPU runs a frame 2,065 -> 105; 300 frames at 1x 78 s -> 37.6 s (35.6 s with the filter off). PS2_GAME_FILTER_PASS=1.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01QNLFPekqhcU2dj7B3Utmea
+---
+ runtime/src/gs/gpu/gpu.cpp |  29 +++++++-
+ runtime/src/gs/gpu/gpu.hpp |   1 +
+ runtime/src/gs/gpu/gs.wgsl |  45 +++++++++++++
+ runtime/src/gs/gs.cpp      | 131 +++++++++++++++++++++++++++++++++++++
+ 4 files changed, 204 insertions(+), 2 deletions(-)
+
+diff --git a/runtime/src/gs/gpu/gpu.cpp b/runtime/src/gs/gpu/gpu.cpp
+index c8c0dbd..a56358f 100644
+--- a/runtime/src/gs/gpu/gpu.cpp
++++ b/runtime/src/gs/gpu/gpu.cpp
+@@ -58,8 +58,8 @@ std::vector<unsigned char> smaa_tables();  // smaa_tables.cpp (rawdanger-recomp)
+ 
+ namespace {
+ 
+-enum Pipeline { kUpload, kCopyRead, kCopyWrite, kLoadClut, kDisplay, kRaster, kResolve, kSnapshot, kDecode, kPipelines };
+-const char *const kEntryPoints[kPipelines] = {"upload", "copy_read", "copy_write", "load_clut", "display", "raster", "resolve", "snapshot", "decode"};
++enum Pipeline { kUpload, kCopyRead, kCopyWrite, kLoadClut, kDisplay, kRaster, kResolve, kSnapshot, kDecode, kGameFilter, kPipelines };
++const char *const kEntryPoints[kPipelines] = {"upload", "copy_read", "copy_write", "load_clut", "display", "raster", "resolve", "snapshot", "decode", "game_filter"};
+ 
+ constexpr std::uint32_t kParamStride = 256;
+ constexpr std::uint32_t kClutSlots = 2048;
+@@ -4719,6 +4719,31 @@ void local_copy(const State &s) {
+     dispatch_linear(kCopyWrite, w * h * g_scale * g_scale, write);
+ }
+ 
++// rawdanger-recomp: Raw Danger's colour filter as one pass over the frame (gs.cpp rdfilter: p = frame bp, bw, width, height, depth
++// bp, depth psm, brightness palette, three weights, the two depth palettes, the four palettes of the writes)
++void game_filter(const std::uint32_t *p) {
++    g_why = kWhyCopy;
++    flush_all();
++    g_why = kWhyFlush;
++    const int w = static_cast<int>(p[2]), h = static_cast<int>(p[3]);
++    const Range frame = pages(p[0], p[1], 0x00, 0, 0, w - 1, h - 1);
++    if (g_live) {
++        const Range depth = pages(p[4], p[1], p[5], 0, 0, w - 1, h - 1);
++        hw::live_position(static_cast<std::uint32_t>(g_commands.size()));
++        hw::live_reader(depth.lo, depth.hi);
++        hw::live_reader(frame.lo, frame.hi);
++        for (int k = 6; k < 16; ++k)
++            if (k < 7 || k > 9) hw::live_reader(p[k] * 256u, p[k] * 256u + 1024u);
++        hw::live_writer(frame.lo, frame.hi);
++        hw::pal_write(p[0], p[1], 0x00, 0, 0, w - 1, h - 1);
++    }
++    if (hwcache::g_on) hwcache::write_region(p[0], p[1], 0x00, 0, 0, w - 1, h - 1, hwcache::kCopy);
++    mark_rendered(frame);
++    if (g_dec_on) stamp_pages(frame, true);
++    dispatch_linear(kGameFilter, static_cast<std::uint32_t>(w * h) * g_scale * g_scale,
++                    push_params({p[0], p[1], p[2], p[3], p[4], p[5], p[6], p[7], p[8], p[9], p[10], p[11], p[12], p[13], p[14], p[15]}));
++}
++
+ void load_clut(std::uint64_t tex0, std::uint64_t texclut) {
+     flush_image();
+     if (g_clut_loads + 2 >= kClutSlots) {
+diff --git a/runtime/src/gs/gpu/gpu.hpp b/runtime/src/gs/gpu/gpu.hpp
+index 71c862c..ea4a9d2 100644
+--- a/runtime/src/gs/gpu/gpu.hpp
++++ b/runtime/src/gs/gpu/gpu.hpp
+@@ -31,6 +31,7 @@ void draw(const State &s, const Vertex *v, int count);
+ void image_begin(const State &s);
+ void image_data(const std::uint8_t *data, std::size_t bytes);
+ void local_copy(const State &s);
++void game_filter(const std::uint32_t *p);   // rawdanger-recomp: the game's colour filter in one pass (gs.cpp rdfilter; 16 words)
+ void load_clut(std::uint64_t tex0, std::uint64_t texclut);
+ void flush();
+ void texflush();
+diff --git a/runtime/src/gs/gpu/gs.wgsl b/runtime/src/gs/gpu/gs.wgsl
+index 84cb0e3..6615c68 100644
+--- a/runtime/src/gs/gpu/gs.wgsl
++++ b/runtime/src/gs/gpu/gs.wgsl
+@@ -376,6 +376,51 @@ fn copy_write(@builtin(global_invocation_id) gid: vec3<u32>) {
+     write_sample(prm(2u), prm(0u), prm(1u), (prm(3u) + x) & 0x7FFu, (prm(4u) + y) & 0x7FFu, k, scratch[src_at]);
+ }
+ 
++// rawdanger-recomp: Raw Danger's colour filter in one pass (gs.cpp, rdfilter: the formula and how it was checked). Params: 0 frame
++// bp, 1 bw, 2 width, 3 height, 4 depth bp, 5 depth psm, 6 brightness palette, 7-9 its weights (B, G, R), 10 / 11 the depth
++// palettes, 12-15 the palettes of the four writes. Palettes: 256 entries of 32 bits, CSM1, read from sample 0.
++fn rd_entry(cbp: u32, i: u32) -> u32 {
++    let j = (i & 0xE7u) | ((i & 8u) << 1u) | ((i & 0x10u) >> 1u);
++    return read_pixel(0u, cbp, 1u, j % 16u, j / 16u);
++}
++
++fn rd_g(v: u32) -> i32 {
++    return i32((v >> 8u) & 255u);
++}
++
++@compute @workgroup_size(64)
++fn game_filter(@builtin(global_invocation_id) gid: vec3<u32>) {
++    let i = gid.x + gid.y * 64u * 1024u;
++    let n = SCALE * SCALE;
++    let w = prm(2u);
++    if (i >= w * prm(3u) * n) {
++        return;
++    }
++    let k = i % n;
++    let x = (i / n) % w;
++    let y = (i / n) / w;
++    let fl = locate(0u, prm(0u), prm(1u), x, y);
++    let c = load_at(fl, k);
++    let z = read_sample(prm(5u), prm(4u), prm(1u), x, y, k);
++    var l = 0;
++    l = min(255, l + ((rd_g(rd_entry(prm(6u), (c >> 16u) & 255u)) * i32(prm(7u))) >> 7u));
++    l = min(255, l + ((rd_g(rd_entry(prm(6u), (c >> 8u) & 255u)) * i32(prm(8u))) >> 7u));
++    l = min(255, l + ((rd_g(rd_entry(prm(6u), c & 255u)) * i32(prm(9u))) >> 7u));
++    let d = u32(min(255, rd_g(rd_entry(prm(10u), (z >> 16u) & 255u)) + rd_g(rd_entry(prm(11u), (z >> 8u) & 255u))));
++    let a1 = i32(rd_entry(prm(12u), d) >> 24u);
++    let a2 = rd_entry(prm(14u), d) >> 24u;
++    let s1 = rd_entry(prm(13u), u32(l));
++    let s2 = rd_entry(prm(15u), u32(l));
++    var out = a2 << 24u;
++    for (var b = 0u; b < 3u; b = b + 1u) {
++        let xv = i32((c >> (8u * b)) & 255u);
++        let x1 = clamp(((i32((s1 >> (8u * b)) & 255u) - xv) * a1 >> 7u) + xv, 0, 255);
++        let x2 = clamp(((i32((s2 >> (8u * b)) & 255u) * i32(a2)) >> 7u) + x1, 0, 255);
++        out = out | (u32(x2) << (8u * b));
++    }
++    store(fl, k, out);
++}
++
+ // The colour palette load `k` of record `r` reads from graphics memory.
+ fn clut_read(r: u32, k: u32) -> u32 {
+     let cbp = data[r + 2u];
+diff --git a/runtime/src/gs/gs.cpp b/runtime/src/gs/gs.cpp
+index 3df34ba..d0d3d49 100644
+--- a/runtime/src/gs/gs.cpp
++++ b/runtime/src/gs/gs.cpp
+@@ -897,6 +897,131 @@ unsigned ui_boxes(float *out) {
+     return y0 >= 300 || y1 <= 120;
+ }
+ 
++// rawdanger-recomp: Raw Danger's colour filter in one pass (PS2_GAME_FILTER_PASS=1; docs/GRAPHICS.md, "The game's colour filter").
++// After its bloom the game walks the finished frame one 64 x 32 page at a time: per page about twenty small draws into 64-wide
++// scratch buffers (the page's depth and colour copied as 16-bit, read back byte by byte through palettes, added up) and four
++// writes back through more palettes. Worked out from them, and checked against the game's own result to the last bit on every
++// pixel (software renderer, a whole gameplay frame):
++//   L  = brightness: P_luma[B].g * w0 >> 7, + P_luma[G].g * w1 >> 7, + P_luma[R].g * w2 >> 7 (each sum held at 255)
++//   d  = min(255, P_dset[z byte 2].g + P_dadd[z byte 1].g)                     (the depth, through two palettes)
++//   c1 = c + ((P_mix[L].c - c) * P_mixa[d].a >> 7)                             (towards a curve of the brightness)
++//   c2 = min(255, c1 + (P_add[L].c * P_adda[d].a >> 7)), alpha P_adda[d].a     (the haze, by depth)
++// About 2,800 draws a frame, each reading what the one before wrote (2,065 GPU runs a frame instead of about 100): here they are
++// left out, their palettes and weights noted as they pass (the game builds the palettes each frame from its scene presets), and
++// the formula runs once over the frame at the end of the walk (every sample at any internal resolution).
++namespace rdfilter {
++const bool g_on = [] { const char *v = std::getenv("PS2_GAME_FILTER_PASS"); return v && *v == '1'; }();
++struct Walk {
++    bool active = false;
++    std::uint32_t zbp = 0, zpsm = 0x30, luma = 0, dset = 0, dadd = 0, fin[4] = {}, first_page = 0, pages = 0;
++    std::uint32_t weights[3] = {};
++    int nweights = 0, nfin = 0;
++    std::uint32_t alpha_writes = 0;
++} g_walk;
++std::uint32_t g_last_bp[8] = {}, g_last_bw[8] = {};   // the widths of the last few buffers drawn into (the frame's is not in the walk)
++int g_last_n = 0;
++
++std::uint32_t entry(std::uint32_t cbp, std::uint32_t i) {   // palette entry i of a 256-entry 32-bit palette stored at cbp (CSM1)
++    const std::uint32_t j = (i & 0xE7u) | ((i & 8u) << 1) | ((i & 0x10u) >> 1);
++    return read_pixel(0x00, cbp, 1, j % 16u, j / 16u);
++}
++
++// the formula on one pixel (shared with the GPU pass in gs.wgsl, game_filter)
++std::uint32_t apply(const Walk &w, std::uint32_t c, std::uint32_t z, const std::uint32_t *luma, const std::uint32_t *dset, const std::uint32_t *dadd,
++                    const std::uint32_t *const *fin) {
++    const auto g = [](std::uint32_t v) { return static_cast<int>((v >> 8) & 255u); };
++    const int ch[3] = {static_cast<int>((c >> 16) & 255u), static_cast<int>((c >> 8) & 255u), static_cast<int>(c & 255u)};   // B, G, R
++    int L = 0;
++    for (int k = 0; k < 3; ++k) L = std::min(255, L + ((g(luma[ch[k]]) * static_cast<int>(w.weights[k])) >> 7));
++    const int d = std::min(255, g(dset[(z >> 16) & 255u]) + g(dadd[(z >> 8) & 255u]));
++    const int a1 = static_cast<int>(fin[0][d] >> 24), a2 = static_cast<int>(fin[2][d] >> 24);
++    std::uint32_t out = static_cast<std::uint32_t>(a2) << 24;
++    for (int k = 0; k < 3; ++k) {
++        const int x = static_cast<int>((c >> (8 * k)) & 255u);
++        const int s1 = static_cast<int>((fin[1][L] >> (8 * k)) & 255u), s2 = static_cast<int>((fin[3][L] >> (8 * k)) & 255u);
++        const int x1 = std::clamp(((s1 - x) * a1 >> 7) + x, 0, 255);
++        const int x2 = std::clamp(((s2 * a2) >> 7) + x1, 0, 255);
++        out |= static_cast<std::uint32_t>(x2) << (8 * k);
++    }
++    return out;
++}
++
++void finish() {
++    Walk &w = g_walk;
++    if (!w.active) return;
++    w.active = false;
++    std::uint32_t bw = 0;
++    for (int i = 0; i < std::min(g_last_n, 8); ++i)
++        if (g_last_bp[i] == w.first_page) bw = g_last_bw[i];
++    static int told = 0;
++    if (!bw || !w.pages || w.pages % bw || w.nweights != 3 || w.nfin != 4 || !w.luma || !w.dset || !w.dadd) {
++        if (told++ < 3) std::fprintf(stderr, "[gs] the game's colour filter: an unknown walk (%u pages, width %u, %d weights, %d writes), left out\n", w.pages, bw, w.nweights, w.nfin);
++        return;
++    }
++    const std::uint32_t width = bw * 64, height = w.pages / bw * 32;
++    if (told++ == 0) std::fprintf(stderr, "[gs] the game's colour filter: one pass over %ux%u (frame %X, depth %X)\n", width, height, w.first_page, w.zbp);
++    if (cpu_raster()) {
++        std::uint32_t luma[256], dset[256], dadd[256], f[4][256];
++        for (std::uint32_t i = 0; i < 256; ++i) {
++            luma[i] = entry(w.luma, i), dset[i] = entry(w.dset, i), dadd[i] = entry(w.dadd, i);
++            for (int k = 0; k < 4; ++k) f[k][i] = entry(w.fin[k], i);
++        }
++        const std::uint32_t *fin[4] = {f[0], f[1], f[2], f[3]};
++        for (std::uint32_t y = 0; y < height; ++y)
++            for (std::uint32_t x = 0; x < width; ++x)
++                write_pixel(0x00, w.first_page, bw, x, y, apply(w, read_pixel(0x00, w.first_page, bw, x, y), read_pixel(w.zpsm, w.zbp, bw, x, y), luma, dset, dadd, fin));
++    }
++#ifdef PS2_GPU
++    if (gpu_on()) {
++        const std::uint32_t p[16] = {w.first_page, bw, width, height, w.zbp, w.zpsm, w.luma, w.weights[0], w.weights[1], w.weights[2], w.dset, w.dadd,
++                                     w.fin[0], w.fin[1], w.fin[2], w.fin[3]};
++        gpu::game_filter(p);
++    }
++#endif
++}
++
++// false: a draw of the walk, left out
++bool step(const State &s, std::uint64_t attr) {
++    const Context &c = s.ctx[(attr >> 9) & 1u];
++    const std::uint32_t fbp = static_cast<std::uint32_t>(c.frame & 0x1FFu) * 32u, fbw = static_cast<std::uint32_t>(c.frame >> 16) & 0x3Fu;
++    const std::uint32_t fpsm = static_cast<std::uint32_t>(c.frame >> 24) & 0x3Fu, fbmsk = static_cast<std::uint32_t>(c.frame >> 32);
++    const std::uint32_t tbp = static_cast<std::uint32_t>(c.tex0) & 0x3FFFu, tbw = static_cast<std::uint32_t>(c.tex0 >> 14) & 0x3Fu;
++    const std::uint32_t tpsm = static_cast<std::uint32_t>(c.tex0 >> 20) & 0x3Fu, cbp = static_cast<std::uint32_t>(c.tex0 >> 37) & 0x3FFFu;
++    const std::uint32_t fix = static_cast<std::uint32_t>(c.alpha >> 32) & 0xFFu, dmode = static_cast<std::uint32_t>(c.alpha >> 6) & 3u;
++    const bool textured = (attr & 0x10u) != 0, sprite = (attr & 7u) == 6;
++    Walk &w = g_walk;
++    if (!w.active) {
++        if (fbw > 1) {   // remember the width of each buffer drawn into
++            int i = 0;
++            while (i < std::min(g_last_n, 8) && g_last_bp[i] != fbp) ++i;
++            if (i == std::min(g_last_n, 8)) i = g_last_n++ % 8;
++            g_last_bp[i] = fbp, g_last_bw[i] = fbw;
++            return true;
++        }
++        const std::uint32_t zbp = static_cast<std::uint32_t>(c.zbuf & 0x1FFu) * 32u;
++        if (!(sprite && textured && fbw == 1 && fpsm == 0x0A && tpsm == 0x0A && tbw == 1 && tbp == zbp)) return true;
++        w = Walk{};   // the walk starts: the first page of the depth copied as 16-bit into a 64-wide buffer
++        w.active = true, w.zbp = zbp, w.zpsm = 0x30u | ((static_cast<std::uint32_t>(c.zbuf >> 24)) & 0xFu);
++    }
++    if (fbw != 1) {   // the walk is over
++        finish();
++        return step(s, attr);
++    }
++    if (textured && tpsm == 0x13) {   // a byte read through a palette
++        if (fix == 0x80) (dmode == 2 ? w.dset : w.dadd) = cbp;
++        else {
++            w.luma = cbp;
++            if ((w.nweights == 0 || w.weights[w.nweights - 1] != fix) && w.nweights < 3) w.weights[w.nweights++] = fix;
++        }
++    } else if (textured && tpsm == 0x1B && (fbmsk == 0x00FFFFFFu || fbmsk == 0xFF000000u)) {   // the four writes back into the frame's page
++        if (w.nfin == 0) w.first_page = fbp;
++        if (w.nfin < 4) w.fin[w.nfin++] = cbp;
++        if (fbmsk == 0x00FFFFFFu) ++w.alpha_writes, w.pages = w.alpha_writes / 2;   // two alpha writes a page
++    }
++    return false;
++}
++}  // namespace rdfilter
++
+ // Inlined into the PACKED run (write_packed_run): as a call of its own it cost the ship about 0.15 ms of the drawing thread a frame.
+ [[gnu::always_inline]] static inline void kick(bool draw) {
+     State &s = g_state;
+@@ -919,6 +1044,11 @@ unsigned ui_boxes(float *out) {
+             else if (bar == 2 && opacity < 50) draw = false;
+         }
+     }
++    if (draw && rdfilter::g_on) [[unlikely]] {
++        std::uint64_t attr = s.prim;
++        if (!(s.prmodecont & 1u)) attr = (s.prim & 7u) | (s.prmode & ~7ull);
++        draw = rdfilter::step(s, attr);
++    }
+     if (draw && ui::g_on.load(std::memory_order_relaxed)) [[unlikely]] ui::add(s, needed);
+     if (draw) {
+         if (!trace::g_any || trace::draw(s, needed)) {
+@@ -1044,6 +1174,7 @@ void write(std::uint32_t reg, std::uint64_t value) {
+                          static_cast<unsigned long long>(s.bitbltbuf), static_cast<unsigned long long>(s.trxpos), static_cast<unsigned long long>(s.trxreg));
+         }
+         trace::transfer(s, value);
++        if (rdfilter::g_on) rdfilter::finish();   // a transfer in the middle of the walk: the pass runs before it
+         s.trxdir = value;
+         g_transfer = Transfer{};
+         g_carried = 0;
+-- 
+2.43.0
+

@@ -1,0 +1,186 @@
+From 238038ea5813c3d609ebbe698c8f68c4c714a312 Mon Sep 17 00:00:00 2001
+From: rawdanger-recomp <rawdanger-recomp@users.noreply.github.com>
+Date: Fri, 20 Nov 2026 15:03:38 +0000
+Subject: [PATCH] 0024-developers-text-sjis-and-size
+
+The developers' scenes' text through the US font sheet (PS2_SJIS_TEXT=<texture base>): the scene select (DEBSEL) prints
+Shift-JIS strings byte by byte through an ASCII sheet (grey checker boxes and stray letters); a lead byte's sprite is not
+drawn and the trail's is moved to the same character's ASCII cell (full-width letters, digits, space, signs, arrows), packed
+along its line; kana and kanji pairs are not drawn. While a developers' scene is on screen (set_debug_text, from the
+window's PS2_DEBUG_SCENES), the font's 24-pixel letters stretched to 32 with filtering are drawn at their own size.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01QNLFPekqhcU2dj7B3Utmea
+---
+ host/window.cpp               |   7 +++
+ runtime/include/ps2/video.hpp |   1 +
+ runtime/src/gs/gs.cpp         | 109 ++++++++++++++++++++++++++++++++++
+ 3 files changed, 117 insertions(+)
+
+diff --git a/host/window.cpp b/host/window.cpp
+index 13ef2d5..2b9c7cc 100644
+--- a/host/window.cpp
++++ b/host/window.cpp
+@@ -2603,6 +2603,13 @@ void poll() {
+     ps2::quick_watchdog();
+     take_key_card_answer();
+     keep_scene_request();
++    if (debug_scenes().set) {   // rawdanger-recomp: the developers' scenes' text at its own size (gs.cpp, sjis)
++        const DebugScenes &d = debug_scenes();
++        const std::uint32_t scene = ps2::ld32(d.address - 4);
++        static bool was = false;
++        const bool on = (d.mapsel && scene == d.mapsel) || (d.debug && scene == d.debug);
++        if (on != was) ps2::set_debug_text(was = on);
++    }
+     native_option_rows();
+     nopt::frame();
+     // (black for a second more after it: the game's picture still holds its last screen until the next scene draws over it)
+diff --git a/runtime/include/ps2/video.hpp b/runtime/include/ps2/video.hpp
+index da6a132..884307f 100644
+--- a/runtime/include/ps2/video.hpp
++++ b/runtime/include/ps2/video.hpp
+@@ -30,6 +30,7 @@ void set_jp_textures(bool on);
+ void set_bar_opacity(unsigned percent);
+ // rawdanger-recomp: note where the game's 2D lies (HUD, texts) so the rain on the lens stays under it (on while drops fall)
+ void set_ui_boxes(bool on);
++void set_debug_text(bool on);   // rawdanger-recomp: a developers' scene is on screen: its font drawn at its own size (gs.cpp, sjis)
+ // rawdanger-recomp: the keys shown instead of the PlayStation symbols in the game's font (cross, circle, square, triangle; short
+ // names of 1 to 3 letters, "" keeps the symbol); see gpu.cpp, draw_prompt_caps
+ void set_button_prompts(const std::string labels[4]);
+diff --git a/runtime/src/gs/gs.cpp b/runtime/src/gs/gs.cpp
+index d0d3d49..ead1e5f 100644
+--- a/runtime/src/gs/gs.cpp
++++ b/runtime/src/gs/gs.cpp
+@@ -883,6 +883,109 @@ unsigned ui_boxes(float *out) {
+     return ui::g_out_n;
+ }
+ 
++// rawdanger-recomp: the developers' scene select (DEBSEL) prints Shift-JIS strings (full-width letters, from the Japanese
++// build) byte by byte through the US font sheet, a 16 x 16 grid of 24-pixel cells in ASCII order (PS2_SJIS_TEXT=<the sheet's
++// texture base>, 3592 for Raw Danger): a lead byte's cell holds no letter (a grey checker), the trail byte's cell an unrelated one.
++// A sprite of that sheet on a lead byte's cell is not drawn; the sprite after it on the trail's cell, at the next place on the
++// same line, is moved to the cell of the same character in ASCII (full-width A-Z, a-z, 0-9, space and the common signs); a
++// pair with no ASCII form (kana, kanji) is not drawn at all.
++namespace sjis {
++std::atomic<bool> g_debug_text{false};   // a developers' scene (map select, scene select) is on screen: the window says (set_debug_text)
++const std::uint32_t g_tbp = [] { const char *v = std::getenv("PS2_SJIS_TEXT"); return v && *v ? static_cast<std::uint32_t>(std::strtoul(v, nullptr, 16)) : 0u; }();
++struct Lead { int x, y; std::uint32_t byte; };
++Lead g_leads[8];
++int g_nleads = 0;
++
++int ascii(std::uint32_t lead, std::uint32_t trail) {
++    if (lead == 0x82) {
++        if (trail >= 0x4F && trail <= 0x58) return '0' + static_cast<int>(trail - 0x4F);
++        if (trail >= 0x60 && trail <= 0x79) return 'A' + static_cast<int>(trail - 0x60);
++        if (trail >= 0x81 && trail <= 0x9A) return 'a' + static_cast<int>(trail - 0x81);
++        return -1;
++    }
++    if (lead == 0x81) {
++        static const struct { std::uint8_t t; char c; } kSigns[] = {
++            {0x40, ' '}, {0x41, ','}, {0x42, '.'}, {0x43, ','}, {0x44, '.'}, {0x46, ':'}, {0x47, ';'}, {0x48, '?'}, {0x49, '!'},
++            {0x5B, '-'}, {0x5C, '-'}, {0x5D, '-'}, {0x5E, '/'}, {0x5F, '\\'}, {0x60, '~'}, {0x62, '|'}, {0x65, '\''}, {0x66, '\''},
++            {0x67, '"'}, {0x68, '"'}, {0x69, '('}, {0x6A, ')'}, {0x6D, '['}, {0x6E, ']'}, {0x6F, '{'}, {0x70, '}'}, {0x7B, '+'},
++            {0x7C, '-'}, {0x7E, '*'}, {0x81, '='}, {0x83, '<'}, {0x84, '>'}, {0x8F, '\\'}, {0x90, '$'}, {0x93, '%'}, {0x94, '#'},
++            {0x95, '&'}, {0x96, '*'}, {0x97, '@'},
++            {0x9B, 'o'}, {0x9C, '*'}, {0x9E, '*'}, {0x9F, '*'}, {0xA0, '#'}, {0xA1, '#'}, {0xA2, '^'}, {0xA3, '^'}, {0xA4, 'v'}, {0xA5, 'v'},
++            {0xA8, '>'}, {0xA9, '<'}, {0xAA, '^'}, {0xAB, 'v'}};
++        for (const auto &k : kSigns)
++            if (k.t == trail) return k.c;
++    }
++    return -1;
++}
++
++// where each line of converted text starts this frame (the first lead seen at that height)
++struct Line { int y, x; std::uint64_t frame; };
++Line g_lines[32];
++int &line_start(int y, int x) {
++    const std::uint64_t now = frame_count();
++    Line *free = nullptr;
++    for (Line &l : g_lines) {
++        if (l.frame == now && std::abs(l.y - y) <= 2) {
++            if (x < l.x) l.x = x;
++            return l.x;
++        }
++        if (l.frame != now && !free) free = &l;
++    }
++    if (!free) free = &g_lines[0];
++    *free = {y, x, now};
++    return free->x;
++}
++
++// false: not drawn
++bool step(State &s, std::uint64_t attr) {
++    if ((attr & 7u) != 6 || !(attr & 0x10u) || !(attr & 0x100u)) return true;   // textured sprites with UV
++    const Context &c = s.ctx[(attr >> 9) & 1u];
++    if ((static_cast<std::uint32_t>(c.tex0) & 0x3FFFu) != g_tbp || ((c.tex0 >> 20) & 0x3Fu) != 0x14u) return true;
++    Vertex &a = s.queue[0], &b = s.queue[1];
++    const std::uint32_t cu = (std::min(a.u, b.u) >> 4) / 24u, cv = (std::min(a.v, b.v) >> 4) / 24u;
++    if (cu >= 16 || cv >= 16) return true;
++    const std::uint32_t byte = cv * 16u + cu;
++    const int ofx = static_cast<int>(c.xyoffset & 0xFFFFu), ofy = static_cast<int>((c.xyoffset >> 32) & 0xFFFFu);
++    const int x = (static_cast<int>(std::min(a.x, b.x)) - ofx) >> 4, y = (static_cast<int>(std::min(a.y, b.y)) - ofy) >> 4;
++    const int w = (static_cast<int>(std::max(a.x, b.x)) - static_cast<int>(std::min(a.x, b.x))) >> 4;
++    if (g_debug_text.load(std::memory_order_relaxed) && w >= 30 && w <= 34 && byte < 0x80) {
++        // the developers' text: the 24-pixel letters were stretched to 32 with filtering (soft, and the lines touch): drawn at their
++        // own size, 4 pixels down in their 32-pixel line, the letters three quarters as far from where the line starts
++        int &start = line_start(y, x);
++        const int nx = start + (x - start) * 3 / 4;
++        Vertex &lo = a.x <= b.x ? a : b, &hi = a.x <= b.x ? b : a;
++        lo.x = static_cast<std::uint32_t>((nx << 4) + ofx), hi.x = lo.x + (24u << 4);
++        Vertex &top = a.y <= b.y ? a : b, &bottom = a.y <= b.y ? b : a;
++        top.y = static_cast<std::uint32_t>(((y + 4) << 4) + ofy), bottom.y = top.y + (24u << 4);
++        return true;
++    }
++    if ((byte >= 0x81 && byte <= 0x9F) || (byte >= 0xE0 && byte <= 0xEF)) {   // a lead byte: its trail comes next, one cell on
++        g_leads[g_nleads++ % 8] = {x + w, y, byte};
++        return false;
++    }
++    for (int i = 0; i < std::min(g_nleads, 8); ++i) {
++        Lead &l = g_leads[i];
++        if (l.byte && std::abs(l.x - x) <= 2 && l.y == y) {
++            const int ch = ascii(l.byte, byte);
++            l.byte = 0;
++            if (ch < 0) return false;
++            const std::uint32_t nu = static_cast<std::uint32_t>(ch % 16) * 24u, nv = static_cast<std::uint32_t>(ch / 16) * 24u;
++            for (Vertex *v : {&a, &b}) {
++                v->u = v->u - cu * 24u * 16u + nu * 16u;
++                v->v = v->v - cv * 24u * 16u + nv * 16u;
++            }
++            // a full-width letter's place is twice an ASCII one: the letter goes half as far from where its line starts
++            int &start = line_start(y, l.x - w);
++            const int nx = start + (l.x - w - start) / 2;
++            const std::uint32_t back = static_cast<std::uint32_t>(x - nx) << 4;
++            a.x -= back, b.x -= back;
++            return true;
++        }
++    }
++    return true;
++}
++}  // namespace sjis
++
+ // The subtitles' halo: the font drawn in black at a low alpha, many times, in the bars' rows (Raw Danger: rgba 0,0,0,0x13)
+ [[gnu::noinline]] static bool subtitle_shade(const State &s) {
+     std::uint64_t attr = s.prim;
+@@ -1044,6 +1147,11 @@ bool step(const State &s, std::uint64_t attr) {
+             else if (bar == 2 && opacity < 50) draw = false;
+         }
+     }
++    if (draw && sjis::g_tbp) [[unlikely]] {
++        std::uint64_t attr = s.prim;
++        if (!(s.prmodecont & 1u)) attr = (s.prim & 7u) | (s.prmode & ~7ull);
++        draw = sjis::step(s, attr);
++    }
+     if (draw && rdfilter::g_on) [[unlikely]] {
+         std::uint64_t attr = s.prim;
+         if (!(s.prmodecont & 1u)) attr = (s.prim & 7u) | (s.prmode & ~7ull);
+@@ -2315,6 +2423,7 @@ void state(ps2::state::Stream &s) {
+ }
+ 
+ namespace ps2 {
++void set_debug_text(bool on) { ps2::gs::sjis::g_debug_text.store(on, std::memory_order_relaxed); }
+ void set_bar_opacity(unsigned percent) { ps2::gs::g_bar_opacity.store(static_cast<int>(std::min(percent, 100u)), std::memory_order_relaxed); }
+ void set_ui_boxes(bool on) { ps2::gs::ui::g_on.store(on, std::memory_order_relaxed); }
+ }
+-- 
+2.43.0
+

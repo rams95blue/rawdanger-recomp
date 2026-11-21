@@ -1,0 +1,770 @@
+diff --git a/host/achievements.cpp b/host/achievements.cpp
+index 655c636..d729cd1 100644
+--- a/host/achievements.cpp
++++ b/host/achievements.cpp
+@@ -3,6 +3,8 @@
+ #include "ps2/memory.hpp"
+ 
+ #include <chrono>
++#include <cmath>
++#include <cstring>
+ #include <cstdint>
+ #include <cstdio>
+ #include <cstdlib>
+@@ -15,25 +17,39 @@
+ namespace achievements {
+ namespace {
+ 
+-enum class Size { b8, b16, b32, bit0, bit1, bit2, bit3, bit4, bit5, bit6, bit7, low4, high4 };
+-enum class Kind { value, mem, delta, prior };
++enum class Size { b8, b16, b24, b32, b16be, b24be, b32be, bit0, bit1, bit2, bit3, bit4, bit5, bit6, bit7, low4, high4, bitcount, f32, f32be };
++enum class Kind { value, mem, delta, prior, recall };
++
++// A number as RetroAchievements keeps it: an unsigned 32-bit integer (sums wrap) or a float when a float takes part.
++struct Num {
++    bool f = false;
++    std::uint32_t u = 0;
++    double d = 0;
++    double real() const { return f ? d : static_cast<double>(u); }
++};
++Num num(std::uint32_t u) { Num n; n.u = u; return n; }
++Num numf(double d) { Num n; n.f = true; n.d = d; return n; }
+ 
+ struct Operand {
+     Kind kind = Kind::value;
+     Size size = Size::b8;
+-    std::uint32_t address = 0, value = 0;
++    bool bcd = false, invert = false;
++    std::uint32_t address = 0;
++    Num value;
+     // per-frame memory of a memory operand (delta / prior)
+     std::uint32_t last = 0, prior = 0;
+     bool seen = false;
+ };
+ 
+-enum class Flag { none, reset, pause, add_source, sub_source, and_next, or_next, add_hits, add_address };
++enum class Flag { none, reset, pause, add_source, sub_source, and_next, or_next, add_hits, sub_hits, add_address, reset_next_if, remember, measured, measured_if, trigger };
+ enum class Cmp { eq, ne, lt, le, gt, ge, none };
++enum class Op { none, mul, div, band, bxor, mod, add, sub };
+ 
+ struct Cond {
+     Flag flag = Flag::none;
+     Operand left, right;
+     Cmp cmp = Cmp::none;
++    Op op = Op::none;  // A: B: I: K: lines: left op right
+     std::uint32_t target = 0, hits = 0;  // .N. (0: no hit count)
+ };
+ 
+@@ -42,14 +58,15 @@ struct Group {
+ };
+ 
+ struct Achievement {
+-    std::string id, title, description;
++    std::string id, title, description, why;  // why: the reason it cannot be checked (empty: it can)
+     int points = 0;
+     std::vector<Group> groups;  // [0] core, then alternatives
+     bool unlocked = false, primed = false;  // primed: seen false once since loading
++    bool unofficial = false, enabled = true;
+ };
+ 
+ std::vector<Achievement> g_list;
+-std::string g_unlocks_path, g_note;
++std::string g_unlocks_path, g_off_path, g_note;
+ std::mutex g_lock;
+ bool g_loaded = false;
+ 
+@@ -68,47 +85,76 @@ bool parse_operand(const std::string &t, std::size_t &i, Operand &o) {
+         return i > start;
+     };
+     o = Operand();
++    if (t.compare(i, 8, "{recall}") == 0) { i += 8; o.kind = Kind::recall; return true; }
+     Kind k = Kind::mem;
+-    if (i < t.size() && (t[i] == 'd' || t[i] == 'p' || t[i] == 'b')) {
+-        k = t[i] == 'd' ? Kind::delta : t[i] == 'p' ? Kind::prior : Kind::mem;  // b (BCD) read as plain
+-        ++i;
++    for (bool more = true; more && i < t.size();) {
++        switch (t[i]) {
++        case 'd': k = Kind::delta; ++i; break;
++        case 'p': k = Kind::prior; ++i; break;
++        case 'b': o.bcd = true; ++i; break;
++        case '~': o.invert = true; ++i; break;
++        default: more = false; break;
++        }
+     }
+     if (t.compare(i, 2, "0x") == 0) {
+         i += 2;
+         o.kind = k;
+         o.size = Size::b16;
+         if (i < t.size()) {
+-            const char c = t[i];
+-            switch (c) {
++            switch (t[i]) {
+             case 'H': case 'h': o.size = Size::b8; ++i; break;
++            case 'W': case 'w': o.size = Size::b24; ++i; break;
+             case 'X': case 'x': o.size = Size::b32; ++i; break;
++            case 'I': case 'i': o.size = Size::b16be; ++i; break;
++            case 'J': case 'j': o.size = Size::b24be; ++i; break;
++            case 'G': case 'g': o.size = Size::b32be; ++i; break;
++            case 'K': case 'k': o.size = Size::bitcount; ++i; break;
+             case ' ': o.size = Size::b16; ++i; break;
+-            case 'M': o.size = Size::bit0; ++i; break;
+-            case 'N': o.size = Size::bit1; ++i; break;
+-            case 'O': o.size = Size::bit2; ++i; break;
++            case 'M': case 'm': o.size = Size::bit0; ++i; break;
++            case 'N': case 'n': o.size = Size::bit1; ++i; break;
++            case 'O': case 'o': o.size = Size::bit2; ++i; break;
+             case 'P': o.size = Size::bit3; ++i; break;
+-            case 'Q': o.size = Size::bit4; ++i; break;
+-            case 'R': o.size = Size::bit5; ++i; break;
+-            case 'S': o.size = Size::bit6; ++i; break;
+-            case 'T': o.size = Size::bit7; ++i; break;
+-            case 'L': o.size = Size::low4; ++i; break;
+-            case 'U': o.size = Size::high4; ++i; break;
++            case 'Q': case 'q': o.size = Size::bit4; ++i; break;
++            case 'R': case 'r': o.size = Size::bit5; ++i; break;
++            case 'S': case 's': o.size = Size::bit6; ++i; break;
++            case 'T': case 't': o.size = Size::bit7; ++i; break;
++            case 'L': case 'l': o.size = Size::low4; ++i; break;
++            case 'U': case 'u': o.size = Size::high4; ++i; break;
+             default: break;  // 0x1234: 16 bit
+             }
+         }
+         return hex(o.address);
+     }
++    if (t.compare(i, 2, "fF") == 0 || t.compare(i, 2, "fB") == 0) {  // floats in memory
++        o.kind = k;
++        o.size = t[i + 1] == 'F' ? Size::f32 : Size::f32be;
++        i += 2;
++        return hex(o.address);
++    }
+     o.kind = Kind::value;
++    if (i + 1 < t.size() && t[i] == 'f' && (std::isdigit(static_cast<unsigned char>(t[i + 1])) || t[i + 1] == '-' || t[i + 1] == '.')) {
++        ++i;  // f1.5: a float constant
++        const std::size_t start = i;
++        if (t[i] == '-') ++i;
++        while (i < t.size() && (std::isdigit(static_cast<unsigned char>(t[i])) || t[i] == '.')) ++i;
++        o.value = numf(std::atof(t.substr(start, i - start).c_str()));
++        return i > start;
++    }
++    if (i < t.size() && t[i] == 'f') return false;  // fH fI fM fL (double / MBF floats): not supported here
+     if (i < t.size() && (t[i] == 'h' || t[i] == 'H')) {
+         ++i;
+-        return hex(o.value);
++        std::uint32_t v = 0;
++        const bool ok = hex(v);
++        o.value = num(v);
++        return ok;
+     }
+     if (i < t.size() && (t[i] == 'v' || t[i] == 'V')) ++i;  // v123
+-    std::size_t start = i;
+-    std::uint64_t v = 0;
+-    while (i < t.size() && std::isdigit(static_cast<unsigned char>(t[i]))) v = v * 10 + static_cast<unsigned>(t[i++] - '0');
+-    o.value = static_cast<std::uint32_t>(v);
+-    return i > start;
++    const std::size_t start = i;
++    if (i < t.size() && (t[i] == '-' || t[i] == '+')) ++i;
++    while (i < t.size() && std::isdigit(static_cast<unsigned char>(t[i]))) ++i;  // integers only: "9.1." is 9 with a hit count
++    if (i == start) return false;
++    o.value = num(static_cast<std::uint32_t>(std::strtoll(t.substr(start, i - start).c_str(), nullptr, 10)));
++    return true;
+ }
+ 
+ bool parse_cond(const std::string &t, Cond &c) {
+@@ -123,20 +169,30 @@ bool parse_cond(const std::string &t, Cond &c) {
+         case 'N': c.flag = Flag::and_next; break;
+         case 'O': c.flag = Flag::or_next; break;
+         case 'C': c.flag = Flag::add_hits; break;
++        case 'D': c.flag = Flag::sub_hits; break;
+         case 'I': c.flag = Flag::add_address; break;
+-        default: break;  // M: Q: T: Z: K: ...: evaluated as plain conditions
++        case 'Z': c.flag = Flag::reset_next_if; break;
++        case 'K': c.flag = Flag::remember; break;
++        case 'M': case 'G': c.flag = Flag::measured; break;
++        case 'Q': c.flag = Flag::measured_if; break;
++        case 'T': c.flag = Flag::trigger; break;
++        default: return false;
+         }
+         i = 2;
+     }
+     if (!parse_operand(t, i, c.left)) return false;
+-    if (i >= t.size()) return true;  // a lone operand (A:/B:/I: lines)
++    if (i >= t.size()) return true;  // a lone operand (A:/B:/I:/K: lines)
+     if (t.compare(i, 2, "!=") == 0) { c.cmp = Cmp::ne; i += 2; }
+     else if (t.compare(i, 2, "<=") == 0) { c.cmp = Cmp::le; i += 2; }
+     else if (t.compare(i, 2, ">=") == 0) { c.cmp = Cmp::ge; i += 2; }
+     else if (t[i] == '=') { c.cmp = Cmp::eq; ++i; }
+     else if (t[i] == '<') { c.cmp = Cmp::lt; ++i; }
+     else if (t[i] == '>') { c.cmp = Cmp::gt; ++i; }
+-    else if (t[i] == '*' || t[i] == '/' || t[i] == '&' || t[i] == '^') return true;  // arithmetic modifiers: not supported, read as the left side
++    else if (std::string("*/&^%+-").find(t[i]) != std::string::npos) {
++        const char o = t[i++];
++        c.op = o == '*' ? Op::mul : o == '/' ? Op::div : o == '&' ? Op::band : o == '^' ? Op::bxor : o == '%' ? Op::mod : o == '+' ? Op::add : Op::sub;
++        return parse_operand(t, i, c.right) && i >= t.size();
++    }
+     else return false;
+     if (!parse_operand(t, i, c.right)) return false;
+     if (i < t.size() && (t[i] == '.' || t[i] == '(')) {
+@@ -144,20 +200,23 @@ bool parse_cond(const std::string &t, Cond &c) {
+         std::uint32_t h = 0;
+         while (i < t.size() && std::isdigit(static_cast<unsigned char>(t[i]))) h = h * 10 + static_cast<unsigned>(t[i++] - '0');
+         c.target = h;
++        if (i < t.size() && (t[i] == '.' || t[i] == ')')) ++i;
+     }
+-    return true;
++    return i >= t.size();
+ }
+ 
+ bool parse_logic(const std::string &logic, std::vector<Group> &groups) {
+     groups.clear();
+-    std::string group;
+-    std::stringstream gs(logic);
+-    bool first = true;
+-    while (std::getline(gs, group, 'S')) {
+-        if (!first && group.empty()) continue;
+-        first = false;
++    // groups are separated by S (core first, then alternatives); "0xS..." is a bit-6 size, not a separator
++    std::vector<std::string> parts(1);
++    for (std::size_t i = 0; i < logic.size(); ++i) {
++        if (logic[i] == 'S' && !(i >= 2 && logic[i - 1] == 'x' && logic[i - 2] == '0')) parts.emplace_back();
++        else parts.back() += logic[i];
++    }
++    for (std::size_t k = 0; k < parts.size(); ++k) {
++        if (k > 0 && parts[k].empty()) continue;
+         Group g;
+-        std::stringstream cs(group);
++        std::stringstream cs(parts[k]);
+         std::string cond;
+         while (std::getline(cs, cond, '_')) {
+             if (cond.empty()) continue;
+@@ -167,27 +226,59 @@ bool parse_logic(const std::string &logic, std::vector<Group> &groups) {
+         }
+         groups.push_back(g);
+     }
+-    return !groups.empty();
++    return !groups.empty() && !groups[0].conds.empty();
+ }
+ 
+ // ---- checking them ---------------------------------------------------------------------------------------------------
+ 
+-std::uint32_t read_mem(Size s, std::uint32_t a) {
++std::uint32_t read_raw(Size s, std::uint32_t a) {
+     a &= 0x01FFFFFFu;  // EE main memory
++    auto b = [](std::uint32_t x) { return static_cast<std::uint32_t>(ps2::ld8(x & 0x01FFFFFFu)); };
+     switch (s) {
+-    case Size::b8: return ps2::ld8(a);
+-    case Size::b16: return ps2::ld16(a & ~1u);
+-    case Size::b32: return ps2::ld32(a & ~3u);
+-    case Size::low4: return ps2::ld8(a) & 0xF;
+-    case Size::high4: return ps2::ld8(a) >> 4;
+-    default: return (ps2::ld8(a) >> (static_cast<int>(s) - static_cast<int>(Size::bit0))) & 1;
++    case Size::b8: return b(a);
++    case Size::b16: return b(a) | b(a + 1) << 8;
++    case Size::b24: return b(a) | b(a + 1) << 8 | b(a + 2) << 16;
++    case Size::b32: case Size::f32: return b(a) | b(a + 1) << 8 | b(a + 2) << 16 | b(a + 3) << 24;
++    case Size::b16be: return b(a) << 8 | b(a + 1);
++    case Size::b24be: return b(a) << 16 | b(a + 1) << 8 | b(a + 2);
++    case Size::b32be: case Size::f32be: return b(a) << 24 | b(a + 1) << 16 | b(a + 2) << 8 | b(a + 3);
++    case Size::low4: return b(a) & 0xF;
++    case Size::high4: return b(a) >> 4;
++    case Size::bitcount: { std::uint32_t v = b(a), n = 0; for (; v; v &= v - 1) ++n; return n; }
++    default: return (b(a) >> (static_cast<int>(s) - static_cast<int>(Size::bit0))) & 1;
+     }
+ }
+ 
++Num shape(const Operand &o, std::uint32_t raw) {
++    if (o.size == Size::f32 || o.size == Size::f32be) {
++        float f;
++        std::memcpy(&f, &raw, 4);
++        return numf(f);
++    }
++    std::uint32_t v = raw;
++    if (o.bcd) {
++        std::uint32_t out = 0, mul = 1;
++        for (; raw; raw >>= 4, mul *= 10) out += (raw & 0xF) * mul;
++        v = out;
++    }
++    if (o.invert) {
++        switch (o.size) {
++        case Size::b8: v = ~v & 0xFF; break;
++        case Size::b16: case Size::b16be: v = ~v & 0xFFFF; break;
++        case Size::b24: case Size::b24be: v = ~v & 0xFFFFFF; break;
++        case Size::low4: case Size::high4: v = ~v & 0xF; break;
++        case Size::b32: case Size::b32be: v = ~v; break;
++        default: v = v ^ 1; break;
++        }
++    }
++    return num(v);
++}
++
+ // The operand's value this frame; memory operands also move their delta / prior history (once per frame: `step`).
+-std::uint32_t value_of(Operand &o, std::uint32_t offset, bool step) {
++Num value_of(Operand &o, std::uint32_t offset, bool step, const Num &recall) {
+     if (o.kind == Kind::value) return o.value;
+-    const std::uint32_t now = read_mem(o.size, o.address + offset);
++    if (o.kind == Kind::recall) return recall;
++    const std::uint32_t now = read_raw(o.size, o.address + offset);
+     std::uint32_t result = now;
+     if (o.kind == Kind::delta) result = o.seen ? o.last : now;
+     else if (o.kind == Kind::prior) result = o.seen ? o.prior : now;
+@@ -196,63 +287,113 @@ std::uint32_t value_of(Operand &o, std::uint32_t offset, bool step) {
+         o.last = now;
+         o.seen = true;
+     }
+-    return result;
++    return shape(o, result);
++}
++
++Num apply(Op op, const Num &a, const Num &b) {
++    if (op == Op::none) return a;
++    if (a.f || b.f) {
++        const double x = a.real(), y = b.real();
++        switch (op) {
++        case Op::mul: return numf(x * y);
++        case Op::div: return numf(y == 0 ? 0 : x / y);
++        case Op::add: return numf(x + y);
++        case Op::sub: return numf(x - y);
++        case Op::mod: return numf(y == 0 ? 0 : std::fmod(x, y));
++        default: break;  // & ^ on floats: integer parts
++        }
++    }
++    const std::uint32_t x = a.f ? static_cast<std::uint32_t>(a.d) : a.u, y = b.f ? static_cast<std::uint32_t>(b.d) : b.u;
++    switch (op) {
++    case Op::mul: return num(x * y);
++    case Op::div: return num(y ? x / y : 0);
++    case Op::band: return num(x & y);
++    case Op::bxor: return num(x ^ y);
++    case Op::mod: return num(y ? x % y : 0);
++    case Op::add: return num(x + y);
++    case Op::sub: return num(x - y);
++    default: return a;
++    }
+ }
+ 
+-bool compare(Cmp c, std::uint32_t a, std::uint32_t b) {
++bool compare(Cmp c, const Num &a, const Num &b) {
++    if (a.f || b.f) {
++        const double x = a.real(), y = b.real();
++        switch (c) {
++        case Cmp::eq: return x == y; case Cmp::ne: return x != y; case Cmp::lt: return x < y;
++        case Cmp::le: return x <= y; case Cmp::gt: return x > y; case Cmp::ge: return x >= y; default: return x != 0;
++        }
++    }
+     switch (c) {
+-    case Cmp::eq: return a == b;
+-    case Cmp::ne: return a != b;
+-    case Cmp::lt: return a < b;
+-    case Cmp::le: return a <= b;
+-    case Cmp::gt: return a > b;
+-    case Cmp::ge: return a >= b;
+-    default: return a != 0;
++    case Cmp::eq: return a.u == b.u; case Cmp::ne: return a.u != b.u; case Cmp::lt: return a.u < b.u;
++    case Cmp::le: return a.u <= b.u; case Cmp::gt: return a.u > b.u; case Cmp::ge: return a.u >= b.u; default: return a.u != 0;
+     }
+ }
+ 
+ // One group: true when every plain condition holds (hit counts reached); reset / pause seen separately.
+-bool check_group(Group &g, bool &reset, bool &paused) {
++// Follows rcheevos: modifiers (A: B: I: K:) build the next condition's value or address, N:/O: chain truth into the next
++// condition, C:/D: add or remove their hits from the next condition with a hit target, Z: resets the next condition's hits.
++bool check_group(Group &g, bool &reset, bool &paused, bool pause_pass) {
+     bool all = true;
+-    std::int64_t add = 0;
++    Num add = num(0), recall;
++    bool have_add = false;
+     std::uint32_t address_offset = 0;
+     int chain = -1;  // -1 none, 0 false, 1 true: AndNext / OrNext carried into the next condition
+-    std::uint32_t extra_hits = 0;
+-    // pause conditions first, as RetroAchievements does: a paused group keeps its hit counts and is not true
+-    for (Cond &c : g.conds)
+-        if (c.flag == Flag::pause) {
+-            const std::uint32_t l = value_of(c.left, 0, false), r = value_of(c.right, 0, false);
+-            if (compare(c.cmp, l, r)) paused = true;
+-        }
+-    if (paused) {
+-        for (Cond &c : g.conds) { value_of(c.left, 0, true); value_of(c.right, 0, true); }
+-        return false;
+-    }
++    bool chain_or = false;  // the chain carried came from O: (else N:)
++    std::int64_t extra_hits = 0;
++    bool reset_next = false;
+     for (Cond &c : g.conds) {
+-        const std::uint32_t l = value_of(c.left, address_offset, true);
+-        if (c.flag == Flag::add_address) { address_offset = l; continue; }
+-        const std::uint32_t r = value_of(c.right, address_offset, true);
++        if (pause_pass && c.flag != Flag::pause && c.flag != Flag::add_source && c.flag != Flag::sub_source && c.flag != Flag::add_address &&
++            c.flag != Flag::and_next && c.flag != Flag::or_next && c.flag != Flag::remember) {
++            // the pause pass only works out P: conditions (with what builds them); the rest waits for the main pass
++            add = num(0); have_add = false; address_offset = 0; chain = -1;
++            continue;
++        }
++        if (!pause_pass && c.flag == Flag::pause) { add = num(0); have_add = false; address_offset = 0; chain = -1; continue; }
++        const bool step = pause_pass ? c.flag == Flag::pause : true;  // each operand moves its history once a frame
++        const Num l = value_of(c.left, address_offset, step, recall);
++        const Num r = value_of(c.right, address_offset, step, recall);
++        if (c.flag == Flag::add_address) { address_offset = apply(c.op, l, r).u; continue; }
+         address_offset = 0;
+-        if (c.flag == Flag::add_source) { add += l; continue; }
+-        if (c.flag == Flag::sub_source) { add -= l; continue; }
+-        const std::uint32_t left = static_cast<std::uint32_t>(static_cast<std::int64_t>(l) + add);
+-        add = 0;
++        if (c.flag == Flag::add_source || c.flag == Flag::sub_source || c.flag == Flag::remember) {
++            Num v = apply(c.op, l, r);
++            if (have_add) v = apply(Op::add, add, v);
++            if (c.flag == Flag::sub_source) v = apply(Op::sub, have_add ? add : num(0), apply(c.op, l, r));
++            if (c.flag == Flag::remember) { recall = v; add = num(0); have_add = false; }
++            else { add = v; have_add = true; }
++            continue;
++        }
++        const Num left = have_add ? apply(Op::add, add, l) : l;
++        add = num(0);
++        have_add = false;
+         bool truth = compare(c.cmp, left, r);
+-        if (chain == 0 && c.flag != Flag::or_next) truth = false;
+-        if (c.flag == Flag::and_next) { chain = truth && chain != 0 ? 1 : 0; continue; }
+-        if (c.flag == Flag::or_next) { chain = truth || chain == 1 ? 1 : 0; continue; }
+-        if (chain == 1) truth = truth || false;
++        if (chain != -1) truth = chain_or ? (truth || chain == 1) : (truth && chain == 1);  // the line before was N: or O:
++        if (c.flag == Flag::and_next) { chain = truth ? 1 : 0; chain_or = false; continue; }
++        if (c.flag == Flag::or_next) { chain = truth ? 1 : 0; chain_or = true; continue; }
+         chain = -1;
+-        if (c.flag == Flag::add_hits) { if (truth) ++extra_hits; continue; }
+-        if (c.flag == Flag::pause) continue;
+-        if (c.flag == Flag::reset) { if (truth) reset = true; continue; }
++        if (c.flag == Flag::add_hits) { if (truth && c.hits < 0xFFFFFFFFu) ++c.hits; extra_hits += c.hits; continue; }
++        if (c.flag == Flag::sub_hits) { if (truth && c.hits < 0xFFFFFFFFu) ++c.hits; extra_hits -= c.hits; continue; }
++        if (c.flag == Flag::reset_next_if) { reset_next = truth; continue; }
++        if (reset_next) { c.hits = 0; reset_next = false; }
++        if (c.flag == Flag::pause) {
++            if (c.target) { if (truth && c.hits < c.target) ++c.hits; truth = c.hits >= c.target; }
++            if (truth) paused = true;
++            extra_hits = 0;
++            continue;
++        }
++        if (c.flag == Flag::reset) {
++            if (c.target) { if (truth && c.hits < c.target) ++c.hits; truth = c.hits >= c.target; }
++            if (truth) reset = true;
++            extra_hits = 0;
++            continue;
++        }
+         if (c.target) {
+             if (truth && c.hits < c.target) ++c.hits;
+-            if (c.hits + extra_hits < c.target) all = false;
+-            extra_hits = 0;
++            if (static_cast<std::int64_t>(c.hits) + extra_hits < c.target) all = false;
+         } else if (!truth) {
+             all = false;
+         }
++        extra_hits = 0;
+     }
+     return all;
+ }
+@@ -263,15 +404,20 @@ void clear_hits(Achievement &a) {
+ }
+ 
+ bool check(Achievement &a) {
+-    bool reset = false, paused = false;
+-    bool core = check_group(a.groups[0], reset, paused);
++    bool reset = false, paused = false, core_paused = false;
++    // the pause conditions first, as rcheevos does: a paused group keeps its hit counts, is not true and does not move on
++    check_group(a.groups[0], reset, core_paused, true);
++    bool core = false;
++    if (!core_paused) core = check_group(a.groups[0], reset, paused, false);
+     bool any_alt = a.groups.size() == 1;
+     for (std::size_t i = 1; i < a.groups.size(); ++i) {
+-        bool p = false;
+-        if (check_group(a.groups[i], reset, p)) any_alt = true;
++        bool p = false, dummy = false;
++        check_group(a.groups[i], dummy, p, true);
++        if (p) continue;
++        if (check_group(a.groups[i], reset, dummy, false)) any_alt = true;
+     }
+     if (reset) { clear_hits(a); return false; }
+-    return core && any_alt && !paused;
++    return core && any_alt && !core_paused;
+ }
+ 
+ void save_unlock(const Achievement &a) {
+@@ -285,6 +431,27 @@ void save_unlock(const Achievement &a) {
+ 
+ // ---- the two file forms ----------------------------------------------------------------------------------------------
+ 
++bool g_with_unofficial = false;  // PS2_ACHIEVEMENTS_UNOFFICIAL=1
++
++// Every achievement of the set is listed; one whose condition uses something this checker does not have stays in the list,
++// marked, and is never checked (so the list shows the whole set, and nothing unlocks by a wrong reading).
++void add(Achievement a, const std::string &logic) {
++    if (!parse_logic(logic, a.groups)) {
++        a.groups.clear();
++        a.why = "condition not supported";
++        std::fprintf(stderr, "[achievements] %s: condition not understood: %s\n", a.title.c_str(), logic.c_str());
++    }
++    g_list.push_back(a);
++}
++
++void save_off() {
++    if (g_off_path.empty()) return;
++    std::ofstream f(g_off_path, std::ios::trunc);
++    f << "# achievements switched off (ids), rawdanger-recomp: F1 -> Achievements or RawDangerPC.exe\n";
++    for (const Achievement &a : g_list)
++        if (!a.enabled) f << a.id << "\n";
++}
++
+ // RACache\Data\<id>.json: only the fields used here, read without a JSON library (strings with \" and \\ escapes)
+ std::string json_field(const std::string &obj, const std::string &key) {
+     const std::string k = "\"" + key + "\"";
+@@ -324,9 +491,9 @@ void load_json(const std::string &text) {
+                 a.title = json_field(obj, "Title");
+                 a.description = json_field(obj, "Description");
+                 a.points = std::atoi(json_field(obj, "Points").c_str());
+-                if (json_field(obj, "Flags") == "5") continue;  // unofficial ones
+-                if (parse_logic(json_field(obj, "MemAddr"), a.groups)) g_list.push_back(a);
+-                else std::fprintf(stderr, "[achievements] %s: condition not understood, skipped\n", a.title.c_str());
++                a.unofficial = json_field(obj, "Flags") == "5";  // RetroAchievements' unofficial (still in test) ones
++                if (a.unofficial && !g_with_unofficial) continue;
++                add(a, json_field(obj, "MemAddr"));
+             }
+         } else if (text[i] == ']' && depth == 0) break;
+     }
+@@ -338,8 +505,7 @@ void load_text(const std::string &text) {
+     Achievement cur;
+     bool have = false;
+     auto flush = [&] {
+-        if (have && parse_logic(logic, cur.groups)) g_list.push_back(cur);
+-        else if (have) std::fprintf(stderr, "[achievements] %s: condition not understood, skipped\n", cur.title.c_str());
++        if (have && (!cur.unofficial || g_with_unofficial)) add(cur, logic);
+         cur = Achievement();
+         logic.clear();
+         have = false;
+@@ -360,6 +526,7 @@ void load_text(const std::string &text) {
+         else if (k == "description") cur.description = v;
+         else if (k == "points") cur.points = std::atoi(v.c_str());
+         else if (k == "logic") logic = v;
++        else if (k == "unofficial") cur.unofficial = v == "1";
+     }
+     flush();
+ }
+@@ -379,8 +546,20 @@ bool load(const char *set_path, const std::string &unlocks_path) {
+     std::stringstream ss;
+     ss << in.rdbuf();
+     const std::string text = ss.str();
++    const char *uo = std::getenv("PS2_ACHIEVEMENTS_UNOFFICIAL");
++    g_with_unofficial = uo && *uo == '1';
+     if (text.find("\"Achievements\"") != std::string::npos) load_json(text);
+     else load_text(text);
++    // PS2_ACHIEVEMENTS_OFF=<file>: ids the player switched off (default: next to the unlocks file)
++    const char *off = std::getenv("PS2_ACHIEVEMENTS_OFF");
++    g_off_path = off && *off ? std::string(off) : unlocks_path + ".off";
++    {
++        std::set<std::string> ids;
++        std::ifstream o(g_off_path);
++        std::string l;
++        while (std::getline(o, l)) { l = trim(l); if (!l.empty() && l[0] != '#') ids.insert(l); }
++        for (Achievement &a : g_list) a.enabled = ids.count(a.id) == 0;
++    }
+     g_unlocks_path = unlocks_path;
+     std::set<std::string> done;
+     std::ifstream u(unlocks_path);
+@@ -396,7 +575,7 @@ void frame() {
+     if (!g_loaded) return;
+     std::lock_guard<std::mutex> hold(g_lock);
+     for (Achievement &a : g_list) {
+-        if (a.unlocked) continue;
++        if (a.unlocked || !a.enabled || a.groups.empty()) continue;
+         const bool now = check(a);
+         if (!now) { a.primed = true; continue; }
+         if (!a.primed) continue;  // true from the first frame on (a loaded save): wait for it to be false once
+@@ -410,10 +589,22 @@ void frame() {
+ std::vector<Row> rows() {
+     std::lock_guard<std::mutex> hold(g_lock);
+     std::vector<Row> out;
+-    for (const Achievement &a : g_list) out.push_back({a.title, a.description, a.points, a.unlocked});
++    for (const Achievement &a : g_list) out.push_back({a.title, a.description, a.points, a.unlocked, a.enabled, a.unofficial, a.groups.empty()});
+     return out;
+ }
+ 
++bool toggle(std::size_t index, std::string &note) {
++    std::lock_guard<std::mutex> hold(g_lock);
++    if (index >= g_list.size()) return false;
++    Achievement &a = g_list[index];
++    if (a.groups.empty()) { note = a.title + ": its condition is not supported, it cannot be checked"; return false; }
++    a.enabled = !a.enabled;
++    a.primed = false;
++    save_off();
++    note = a.title + (a.enabled ? ": on" : ": off (not checked)");
++    return true;
++}
++
+ std::string take_note() {
+     std::lock_guard<std::mutex> hold(g_lock);
+     std::string n;
+diff --git a/host/achievements.hpp b/host/achievements.hpp
+index 26d8ca6..2931132 100644
+--- a/host/achievements.hpp
++++ b/host/achievements.hpp
+@@ -15,11 +15,14 @@
+ //   - a RetroAchievements cache file of the player's own (RACache\Data\<game id>.json, written by a RetroAchievements
+ //     emulator after logging in): its "Achievements" list with ID, Title, Description, Points and MemAddr is read as is.
+ //
+-// Supported condition syntax (RetroAchievements memory strings): sizes 0xH (8 bit), 0x / 0x  (16 bit), 0xX (32 bit),
+-// 0xM..0xT (bit 0..7), 0xL / 0xU (low / high nibble); d (delta: last frame's value) and p (prior: the value before it
+-// last changed) prefixes; values as decimal or hFF; = != < <= > >=; hit counts .N.; flags R: (reset) P: (pause)
+-// A: (add source) B: (sub source) N: (and next) O: (or next) C: (add hits) I: (add address) M: Q: T: (as plain);
+-// core group and alternatives separated by S. PS2 addresses are EE main memory (0 ... 0x1FFFFFF).
++// Supported condition syntax (RetroAchievements memory strings, following rcheevos): sizes 0xH 8 bit, 0x / 0x  16 bit,
++// 0xW 24 bit, 0xX 32 bit, 0xI 0xJ 0xG 16/24/32 bit big-endian, 0xM..0xT bit 0..7, 0xL / 0xU nibbles, 0xK bit count, fF / fB
++// float (little / big endian); prefixes d (delta), p (prior), b (BCD), ~ (inverted); values decimal, -decimal, hFF, f1.5
++// (float), {recall}; = != < <= > >=; modifiers * / & ^ % + - on A: B: I: K: lines; hit counts .N. or (N); flags R: P: A:
++// B: N: O: C: D: I: Z: (reset next if) K: (remember) M: G: Q: T: (as plain conditions); core and alternatives separated by
++// S. Not supported (the achievement is listed but never checked): double / MBF floats (fH fI fM fL).
++// PS2_ACHIEVEMENTS_UNOFFICIAL=1 also loads RetroAchievements' unofficial ones (Flags 5; "unofficial = 1" in the text
++// form). PS2 addresses are EE main memory (0 ... 0x1FFFFFF).
+ 
+ #include <string>
+ #include <vector>
+@@ -30,12 +33,16 @@ struct Row {
+     std::string title, description;
+     int points = 0;
+     bool unlocked = false;
++    bool enabled = true;      // switched off by the player: not checked
++    bool unofficial = false;  // RetroAchievements' unofficial (test) set, only with PS2_ACHIEVEMENTS_UNOFFICIAL=1
++    bool unsupported = false; // its condition uses something this checker does not have: listed, never checked
+ };
+ 
+ bool load(const char *set_path, const std::string &unlocks_path);  // false: no set
+ void frame();                                                         // once per video frame: check, unlock
+ std::vector<Row> rows();                                              // for the menu page
+-std::string take_note();                                              // "Achievement unlocked: ..." once, then empty
++std::string take_note();
++bool toggle(std::size_t index, std::string &note);                   // switch one on / off (kept in PS2_ACHIEVEMENTS_OFF)                                              // "Achievement unlocked: ..." once, then empty
+ bool loaded();
+ int unlocked_count();
+ int total_points(bool unlocked_only);
+diff --git a/host/quickmenu.cpp b/host/quickmenu.cpp
+index b54d7a9..38ae4d7 100644
+--- a/host/quickmenu.cpp
++++ b/host/quickmenu.cpp
+@@ -214,7 +214,8 @@ Command Menu::choose() {
+         return Command::none;
+     }
+     if (page_ == Page::achievements) {
+-        if (selected_ >= recomp_rows_) back();
++        if (selected_ < recomp_rows_) return Command::achievement_toggle;
++        back();
+         return Command::none;
+     }
+     if (page_ == Page::keys) {
+@@ -362,7 +363,7 @@ void Menu::draw_keys(int window_width, int window_height, const Values &values,
+ void Menu::draw_recomp(int window_width, int window_height, const Values &values, Picture &out) {
+     const bool ach = page_ == Page::achievements;
+     const std::string kTitleText = ach ? "Achievements - offline, rawdanger-recomp" : "Recomp options - rawdanger-recomp",
+-                      kHint = ach ? "Up / Down: scroll     Esc / Circle: back" : "Enter / Cross: switch     Esc / Circle: back",
++                      kHint = ach ? "Enter / Cross: switch on / off     Esc / Circle: back" : "Enter / Cross: switch     Esc / Circle: back",
+                       kBuilt = ach ? "* unlocked. Kept next to the saves; nothing goes online" : "Built in: chosen in RawDangerPC.exe, changed by building again";
+     recomp_rows_ = static_cast<int>(values.recomp_rows.size());
+     const int all = recomp_rows_;
+diff --git a/host/quickmenu.hpp b/host/quickmenu.hpp
+index fa8bc94..47631e2 100644
+--- a/host/quickmenu.hpp
++++ b/host/quickmenu.hpp
+@@ -19,7 +19,8 @@ enum class Command {
+     key_defaults,  // keys page: put back the default keys (asked once, like Quit)
+     recomp,        // rawdanger-recomp: the main menu's entry that opens the Recomp options page
+     recomp_toggle, // Recomp options page: switch the highlighted option (recomp_row())
+-    achievements   // rawdanger-recomp: the main menu's entry that opens the achievements page
++    achievements,  // rawdanger-recomp: the main menu's entry that opens the achievements page
++    achievement_toggle  // achievements page: switch the highlighted achievement on / off (recomp_row())
+ };
+ 
+ // What the entries show; the window fills it in before each drawing.
+diff --git a/host/recomp_options.cpp b/host/recomp_options.cpp
+index dc79949..2d0b872 100644
+--- a/host/recomp_options.cpp
++++ b/host/recomp_options.cpp
+@@ -109,9 +109,14 @@ void apply_startup() {
+         if (!s.live) continue;
+         // the patch list was read from patches.txt (everything the build turned on); a live section switched off keeps its
+         // original values instead, from the first frame on
+-        for (const Word &w : s.words)
++        for (const Word &w : s.words) {
++            bool listed = false;
+             for (ps2::Patch &p : ps2::g_options.patches)
+-                if (p.address == w.address && p.bytes == 4) p.value = s.on ? w.patched : w.original;
++                if (p.address == w.address && p.bytes == 4) { p.value = s.on ? w.patched : w.original; listed = true; }
++            // a switch variable (recomp.ini "word" of an option whose code the build made switchable, pnach.py toggles) is in no
++            // patch file: it becomes a patch written every frame, so the translated code reads the chosen value from the start
++            if (!listed) ps2::g_options.patches.push_back(ps2::Patch{1, 4, w.address, s.on ? w.patched : w.original});
++        }
+         if (s.aspect169) ps2::g_options.widescreen = s.on;
+         if (s.remap_count) ps2::disc::set_remap(s.remap_from, s.remap_to, s.remap_count, !s.on);
+         std::fprintf(stderr, "[recomp] %s: %s\n", s.label.c_str(), s.on ? "on" : "off");
+diff --git a/host/window.cpp b/host/window.cpp
+index a40d7fc..a79f17e 100644
+--- a/host/window.cpp
++++ b/host/window.cpp
+@@ -919,15 +919,16 @@ void menu_paint(bool show_again = true) {
+         if (g_menu.on_achievements_page()) {
+             for (const achievements::Row &r : achievements::rows()) {
+                 quickmenu::Values::RecompRow row;
+-                row.label = (r.unlocked ? "* " : "  ") + r.title;
+-                row.state = std::to_string(r.points);
+-                row.live = r.unlocked;
++                row.label = (r.unlocked ? "* " : "  ") + r.title + (r.unofficial ? " (unofficial)" : "");
++                row.state = r.unsupported ? "n/a" : !r.enabled ? "off" : std::to_string(r.points);
++                row.live = r.unlocked || (r.enabled && !r.unsupported);
+                 v.recomp_rows.push_back(row);
+             }
+             g_menu.set_recomp_rows(static_cast<int>(v.recomp_rows.size()));
+             v.recomp_note = achievements::loaded() ? std::to_string(achievements::unlocked_count()) + " of " + std::to_string(v.recomp_rows.size()) + " unlocked, " +
+                                                          std::to_string(achievements::total_points(true)) + " of " + std::to_string(achievements::total_points(false)) + " points"
+                                                    : "No achievement set: start the game from RawDangerPC.exe";
++            if (!g_recomp_note.empty()) v.recomp_note = g_recomp_note;
+         } else if (g_menu.on_recomp_page()) {
+             for (const recomp::Section &sec : recomp::sections()) {
+                 quickmenu::Values::RecompRow row;
+@@ -1098,6 +1099,8 @@ void menu_command(quickmenu::Command c, int step) {
+     using quickmenu::Command;
+     switch (c) {
+     case Command::recomp: g_recomp_note = recomp::loaded() ? "" : "Built without RawDangerPC.exe: nothing to switch"; break;
++    case Command::achievements: g_recomp_note.clear(); break;
++    case Command::achievement_toggle: achievements::toggle(static_cast<std::size_t>(g_menu.recomp_row()), g_recomp_note); break;
+     case Command::recomp_toggle: {
+         const bool wide = ps2::g_options.widescreen;
+         recomp::toggle(static_cast<std::size_t>(g_menu.recomp_row()), g_recomp_note);
+@@ -1367,6 +1370,7 @@ void poll() {
+             if (e.key.keysym.scancode == SDL_SCANCODE_F2) cycle_look();
+             if (e.key.keysym.scancode == SDL_SCANCODE_F4) {  // rawdanger-recomp: the achievements page at once
+                 open_menu("F4");
++                g_recomp_note.clear();
+                 g_menu.show_achievements();
+                 menu_paint();
+             }
+diff --git a/recomp/codegen.cpp b/recomp/codegen.cpp
+index 26942f9..27d79cd 100644
+--- a/recomp/codegen.cpp
++++ b/recomp/codegen.cpp
+@@ -396,7 +396,9 @@ private:
+         if (ds.op == Invalid) return std::format("stop(c, {}, \"unsupported delay slot\"); return;", pc(ds.pc));
+         std::string text;
+         capture_ = &text;
+-        simple(ds);
++        // rawdanger-recomp: a toggled instruction can sit in a delay slot too (Raw Danger's "li a0,6" after jal 0x16ED40)
++        if (const auto t = options_.toggles.find(ds.pc); t != options_.toggles.end()) toggled(ds, t->second);
++        else simple(ds);
+         capture_ = nullptr;
+         return text;
+     }
+@@ -577,6 +579,14 @@ private:
+         const std::string slot = delay(ds);
+         const std::string link = std::format("c.r[31].sd[0] = static_cast<std::int32_t>({});", pc(ret));
+         const std::uint32_t t = i.branch_target_of();
++        // rawdanger-recomp: a call that a patch switches with a nop at run time (pnach.py toggle whose other word is 0): while the
++        // variable has its value only the delay slot runs, otherwise the call as the program has it.
++        if (const auto tg = options_.toggles.find(a); tg != options_.toggles.end()) {
++            if (i.op != Jal || tg->second.word != 0 || dynamic_jump(a))
++                throw std::runtime_error(std::format("toggle at {:08X}: only a jal switched with a nop can be toggled", a));
++            line(std::format("if (ld16({}) == {}u) {{ {} }} else {{ {} {} {} }}", hex(tg->second.cond_addr), tg->second.value, slot, link, slot, call_to(t, ret)));
++            return;
++        }
+         if (dynamic_jump(a)) {
+             const std::string target = std::format("const std::uint32_t t = (({} + 4u) & 0xF0000000u) | ((ld32({}) & 0x03FFFFFFu) << 2);", pc(a), pc(a));
+             if (i.op == Jal)

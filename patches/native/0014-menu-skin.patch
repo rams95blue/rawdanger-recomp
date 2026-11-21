@@ -1,0 +1,229 @@
+From 6fc534d867266b5bbaa7c67a14866874ae1d79b3 Mon Sep 17 00:00:00 2001
+From: rawdanger-recomp <rawdanger-recomp@users.noreply.github.com>
+Date: Thu, 19 Nov 2026 02:32:34 +0000
+Subject: [PATCH] 0014-menu-skin.patch
+
+---
+ host/keymap.cpp    |  8 ++++++++
+ host/keymap.hpp    |  3 +++
+ host/quickmenu.cpp | 43 ++++++++++++++++++++++++++++++++++---------
+ host/quickmenu.hpp |  9 ++++++++-
+ host/window.cpp    | 17 +++++++++++++++++
+ 5 files changed, 70 insertions(+), 10 deletions(-)
+
+diff --git a/host/keymap.cpp b/host/keymap.cpp
+index 96f8798..639eb82 100644
+--- a/host/keymap.cpp
++++ b/host/keymap.cpp
+@@ -160,6 +160,7 @@ std::string with_line(const std::string &file_text, const std::string &name, con
+ std::string with_look(const std::string &file_text, int look) { return with_line(file_text, "look", std::string("look = ") + look_word(look)); }
+ 
+ std::string with_scale(const std::string &file_text, int scale) { return with_line(file_text, "scale", "scale = " + (scale == kScaleAuto ? std::string("auto") : std::to_string(scale))); }
++std::string with_menu_skin(const std::string &file_text, int skin) { return with_line(file_text, "menuskin", std::string("menu_skin = ") + (skin == 1 ? "japanese" : "hazard")); }
+ std::string with_integer_scale(const std::string &file_text, int on) { return with_line(file_text, "integerscale", "integer_scale = " + std::to_string(on ? 1 : 0)); }
+ std::string with_lens_rain(const std::string &file_text, int level) { return with_line(file_text, "lensrain", "lens_rain = " + std::to_string(level)); }
+ std::string with_smaa(const std::string &file_text, int on) { return with_line(file_text, "smaa", "smaa = " + std::to_string(on ? 1 : 0)); }
+@@ -310,6 +311,13 @@ void parse(const std::string &text, Config &config, std::vector<std::string> &pr
+             else bad("smaa is on or off, ignored");
+             continue;
+         }
++        if (name == "menuskin") {
++            const std::string v = squash(value);
++            if (v == "hazard" || v == "0") config.menu_skin = 0;
++            else if (v == "japanese" || v == "jp" || v == "1") config.menu_skin = 1;
++            else bad("menu_skin is hazard or japanese, ignored");
++            continue;
++        }
+         if (name == "integerscale" || name == "lensrain") {
+             char *tail = nullptr;
+             const long v = std::strtol(value.c_str(), &tail, 10);
+diff --git a/host/keymap.hpp b/host/keymap.hpp
+index a2ea7f0..43e0df5 100644
+--- a/host/keymap.hpp
++++ b/host/keymap.hpp
+@@ -40,6 +40,8 @@ struct Config {
+ 
+     int pause_unfocused = 1;   // rawdanger-recomp: the quick menu opens (the game waits) when the window goes to the background
+     int master_volume = 100;
++    int menu_skin = -1;        // rawdanger-recomp: the F1 menu's look: 0 hazard (yellow on black), 1 Japanese (blue on white, the
++                               // launcher's Japanese skin); -1 = from the game's language (PS2_LANGUAGE / PS2_MENU_SKIN)
+     int integer_scale = 0;     // rawdanger-recomp: the picture is enlarged by whole numbers only (every console pixel row the same height)
+     int lens_rain = 0;         // rawdanger-recomp: rain drops on the lens while playing: 0 off, 1 light, 2 heavy
+     int smaa = 0;              // rawdanger-recomp: SMAA 1x on the console picture (anti-aliasing), 0 off, 1 on   // rawdanger-recomp: the volume of everything the game plays, 0 to 100 (%)
+@@ -61,6 +63,7 @@ const char *sharp_2d_word(int sharp);  // "soft", "sharp", "sharpest"
+ std::string with_pause_unfocused(const std::string &file_text, int on);  // the 'pause_unfocused' line
+ std::string with_master_volume(const std::string &file_text, int percent);
+ std::string with_integer_scale(const std::string &file_text, int on);
++std::string with_menu_skin(const std::string &file_text, int skin);   // the 'menu_skin' line: hazard / japanese
+ std::string with_lens_rain(const std::string &file_text, int level);
+ std::string with_smaa(const std::string &file_text, int on);  // the 'master_volume' line
+ 
+diff --git a/host/quickmenu.cpp b/host/quickmenu.cpp
+index 24572a7..6e6ecc4 100644
+--- a/host/quickmenu.cpp
++++ b/host/quickmenu.cpp
+@@ -114,10 +114,10 @@ constexpr Command kCommands[kEntries] = {Command::resume,   Command::save,
+ // the program's key for the same thing, shown dim at the right end of the entry
+ constexpr const char *kKeys[kEntries] = {"F1", "F5", "F8", "F3", "", "F4", "", "", "", ""};
+ // the Graphics page
+-constexpr int kGraphicsEntries = 11;
++constexpr int kGraphicsEntries = 12;
+ constexpr Command kGraphics[kGraphicsEntries] = {Command::scale,      Command::look,      Command::antialias,     Command::integer_scale,   Command::sharp_2d, Command::fullscreen,
+-                                                 Command::widescreen, Command::lens_rain, Command::master_volume, Command::pause_unfocused, Command::back};
+-constexpr const char *kGraphicsKeys[kGraphicsEntries] = {"", "F2", "", "", "", "F11", "", "", "", "", "Esc"};
++                                                 Command::widescreen, Command::lens_rain, Command::master_volume, Command::pause_unfocused, Command::menu_skin, Command::back};
++constexpr const char *kGraphicsKeys[kGraphicsEntries] = {"", "F2", "", "", "", "F11", "", "", "", "", "", "Esc"};
+ constexpr int kVisibleRows = 11;  // lines of the keys page shown at once; the page scrolls
+ constexpr int kKeysPageChars = 58;
+ 
+@@ -125,10 +125,12 @@ constexpr std::uint32_t rgba(int r, int g, int b, int a) {
+     return static_cast<std::uint32_t>(r) | static_cast<std::uint32_t>(g) << 8 | static_cast<std::uint32_t>(b) << 16 | static_cast<std::uint32_t>(a) << 24;
+ }
+ // Raw Danger's hazard look (the launcher's): black panel, warning yellow, a strip of hazard tape over the top
+-constexpr std::uint32_t kPanel = rgba(14, 13, 10, 226), kFrame = rgba(120, 104, 40, 255), kTitle = rgba(255, 206, 0, 255),
+-                        kText = rgba(236, 232, 220, 255), kBar = rgba(255, 206, 0, 250), kBarText = rgba(16, 14, 8, 255),
+-                        kDim = rgba(150, 144, 128, 255), kBarDim = rgba(92, 70, 0, 255), kTape1 = rgba(255, 206, 0, 255),
+-                        kTape2 = rgba(18, 16, 10, 255), kAlarm = rgba(214, 40, 30, 255);
++// (set_skin switches these between the two looks)
++std::uint32_t kPanel = rgba(14, 13, 10, 226), kFrame = rgba(120, 104, 40, 255), kTitle = rgba(255, 206, 0, 255),
++              kText = rgba(236, 232, 220, 255), kBar = rgba(255, 206, 0, 250), kBarText = rgba(16, 14, 8, 255),
++              kDim = rgba(150, 144, 128, 255), kBarDim = rgba(92, 70, 0, 255), kTape1 = rgba(255, 206, 0, 255),
++              kTape2 = rgba(18, 16, 10, 255), kAlarm = rgba(214, 40, 30, 255);
++int g_skin = 0;
+ 
+ struct Canvas {
+     Picture &p;
+@@ -154,6 +156,28 @@ struct Canvas {
+     }
+ };
+ 
++}  // namespace
++
++void set_skin(int skin) {
++    g_skin = skin == 1 ? 1 : 0;
++    if (g_skin == 1) {
++        // the launcher's Japanese skin (Theme in launcher\Launcher.cs): white-blue paper, navy text, blue bars and tape
++        kPanel = rgba(246, 250, 254, 248); kFrame = rgba(150, 184, 226, 255); kTitle = rgba(18, 86, 196, 255);
++        kText = rgba(14, 30, 64, 255);     kBar = rgba(18, 86, 196, 250);    kBarText = rgba(255, 255, 255, 255);
++        kDim = rgba(84, 108, 146, 255);    kBarDim = rgba(196, 216, 244, 255); kTape1 = rgba(40, 110, 214, 255);
++        kTape2 = rgba(236, 244, 253, 255); kAlarm = rgba(0, 160, 230, 255);
++    } else {
++        kPanel = rgba(14, 13, 10, 226);   kFrame = rgba(120, 104, 40, 255); kTitle = rgba(255, 206, 0, 255);
++        kText = rgba(236, 232, 220, 255); kBar = rgba(255, 206, 0, 250);    kBarText = rgba(16, 14, 8, 255);
++        kDim = rgba(150, 144, 128, 255);  kBarDim = rgba(92, 70, 0, 255);   kTape1 = rgba(255, 206, 0, 255);
++        kTape2 = rgba(18, 16, 10, 255);   kAlarm = rgba(214, 40, 30, 255);
++    }
++}
++
++int skin() { return g_skin; }
++
++namespace {
++
+ std::string entry_text(Command c, const Values &v, bool quit_armed) {
+     switch (c) {
+     case Command::resume: return "Resume";
+@@ -176,6 +200,7 @@ std::string entry_text(Command c, const Values &v, bool quit_armed) {
+         return std::string("Anti-aliasing:  < ") + kAa[std::clamp(v.antialias, 0, 2)] + " >";
+     }
+     case Command::integer_scale: return std::string("Whole-number scaling:  < ") + (v.integer_scale ? "on" : "off") + " >";
++    case Command::menu_skin: return std::string("Menu look:  < ") + (v.menu_skin == 1 ? "Japanese (blue on white)" : "hazard (yellow on black)") + " >";
+     case Command::lens_rain: {
+         static const char *const kRain[] = {"off", "light", "heavy"};
+         return std::string("Rain on the lens:  < ") + kRain[std::clamp(v.lens_rain, 0, 2)] + " >" + (v.lens_rain && !v.lens_rain_known ? "  (also on menus)" : "");
+@@ -321,7 +346,7 @@ Command Menu::side() const {
+     if (page_ != Page::graphics) return Command::none;
+     const Command c = kGraphics[selected_];
+     return c == Command::look || c == Command::scale || c == Command::sharp_2d || c == Command::fullscreen || c == Command::widescreen || c == Command::pause_unfocused ||
+-                   c == Command::master_volume || c == Command::integer_scale || c == Command::lens_rain || c == Command::antialias
++                   c == Command::master_volume || c == Command::integer_scale || c == Command::lens_rain || c == Command::antialias || c == Command::menu_skin
+                ? c : Command::none;
+ }
+ 
+@@ -455,7 +480,7 @@ void Menu::draw_recomp(int window_width, int window_height, const Values &values
+         const int bw = inner_w - 2 * bar_pad * s, bh = 4 * s;
+         const float f = std::clamp(values.progress < 0 ? 0.f : values.progress, 0.f, 1.f);
+         c.tape(text_x, y, bw, bh, std::max(2, 2 * s));
+-        c.fill(text_x, y, bw, bh, rgba(14, 13, 10, 170));
++        c.fill(text_x, y, bw, bh, (kPanel & 0x00FFFFFFu) | 0xAA000000u);
+         c.fill(text_x, y, static_cast<int>(bw * f), bh, kTitle);
+         y += 8 * s;
+     }
+diff --git a/host/quickmenu.hpp b/host/quickmenu.hpp
+index 0d8c4e3..c34ef15 100644
+--- a/host/quickmenu.hpp
++++ b/host/quickmenu.hpp
+@@ -12,6 +12,11 @@
+ 
+ namespace quickmenu {
+ 
++// rawdanger-recomp: the menu's look. 0: hazard tape, yellow on black (the launcher's English skin); 1: Japanese, blue on white
++// (the launcher's Japanese skin). Takes effect at the next paint.
++void set_skin(int skin);
++int skin();
++
+ enum class Command {
+     none, resume, save, load, look, scale, sharp_2d, fullscreen, keys, quit,
+     change_keys,   // the main menu's entry that opens the keys page (the menu switches page by itself)
+@@ -28,6 +33,7 @@ enum class Command {
+     antialias,     // Graphics and sound page: off / smooth edges / SMAA
+     lens_rain,     // Graphics and sound page: rain drops on the lens while playing (off / light / heavy)
+     master_volume, // Graphics and sound page: the volume of the game's sound (left / right: 10 % steps)
++    menu_skin,     // Graphics and sound page: the menu's look (hazard / Japanese)
+     language,      // rawdanger-recomp: restart the game in its other language (the launcher's other build; asked once, like Quit)
+     back           // a page's Back line
+ };
+@@ -50,7 +56,8 @@ struct Values {
+     int lens_rain = 0;             // 0 off, 1 light, 2 heavy
+     bool lens_rain_known = true;   // the game says when it is playing (PS2_LENS_WHEN); false: the drops would also fall on menus
+     std::string title;             // the game's name for the panel's title ("Raw Danger! Enhanced Edition")
+-    std::string language_now, language_other;  // "English", "Japanese": the other one is empty when the launcher has no other build
++    std::string language_now, language_other;
++    int menu_skin = 0;             // 0 hazard, 1 Japanese  // "English", "Japanese": the other one is empty when the launcher has no other build
+     // the keys page: one row per button (label and its keys, in the order of keys.ini) and a message line (what the last change did)
+     struct KeyRow {
+         std::string label, keys;
+diff --git a/host/window.cpp b/host/window.cpp
+index 4f70ef2..88ab888 100644
+--- a/host/window.cpp
++++ b/host/window.cpp
+@@ -573,6 +573,16 @@ void load_keys() {
+     if (have) keymap::parse(text, config, problems);
+     for (const std::string &p : problems) std::fprintf(stderr, "[keys] %s, %s\n", g_keys_path.c_str(), p.c_str());
+     g_keys = config;
++    {
++        // rawdanger-recomp: the menu's look: keys.ini, else the launcher's skin (PS2_MENU_SKIN=japanese) or the game's language
++        int skin = g_keys.menu_skin;
++        if (skin < 0) {
++            const char *want = std::getenv("PS2_MENU_SKIN");
++            const char *lang = std::getenv("PS2_LANGUAGE");
++            skin = (want && (std::string(want) == "japanese" || std::string(want) == "1")) || (!want && lang && std::string(lang) == "Japanese") ? 1 : 0;
++        }
++        quickmenu::set_skin(skin);
++    }
+     g_master_volume = std::clamp(g_keys.master_volume, 0, 100);
+     lens_rain::set_level(g_keys.lens_rain);
+     if (!g_look_forced && config.look >= 0) g_look = config.look;
+@@ -970,6 +980,7 @@ void menu_paint(bool show_again = true) {
+         v.pause_unfocused = g_keys.pause_unfocused != 0;
+         v.master_volume = g_master_volume;
+         v.integer_scale = g_keys.integer_scale != 0;
++        v.menu_skin = quickmenu::skin();
+         v.antialias = g_keys.smaa ? 2 : (g_look & 1) ? 1 : 0;
+         {
+             static const char *const kFilters[] = {"Raw pixels", "Soft (TV)", "Sharp", "FSR 1"};
+@@ -1219,6 +1230,12 @@ void menu_command(quickmenu::Command c, int step) {
+         set_notice(std::string("Anti-aliasing: ") + kAa[aa]);
+         break;
+     }
++    case Command::menu_skin:
++        g_keys.menu_skin = quickmenu::skin() ? 0 : 1;
++        quickmenu::set_skin(g_keys.menu_skin);
++        rewrite_keys_file([](const std::string &t) { return keymap::with_menu_skin(t, g_keys.menu_skin); }, "menu look");
++        set_notice(g_keys.menu_skin ? "Menu look: Japanese (blue on white)" : "Menu look: hazard (yellow on black)");
++        break;
+     case Command::integer_scale:
+         g_keys.integer_scale = g_keys.integer_scale ? 0 : 1;
+         ps2::set_video_options(video_bits());
+-- 
+2.43.0
+

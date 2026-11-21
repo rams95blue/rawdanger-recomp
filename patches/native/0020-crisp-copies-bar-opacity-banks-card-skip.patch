@@ -1,0 +1,572 @@
+From 2b2e54a67ee0f2635aaacd4951a5b6a10a3d261a Mon Sep 17 00:00:00 2001
+From: rams95 <rams95@users.noreply.github.com>
+Date: Thu, 19 Nov 2026 23:24:55 +0000
+Subject: [PATCH] 0020-crisp-copies-bar-opacity-banks-card-skip.patch
+
+Crisp picture at any internal resolution: Raw Danger copies each finished picture into the shown buffer at 449 rows from
+448, which the engine read with the console's one-texel tent (a blur of about one console pixel at every scale);
+PS2_RT_COPY_TENT=0 reads near 1:1 copies of a rendered picture by their own inner samples (gs.wgsl RT_TENT). Cutscene
+black bars by opacity 0-100 (keys.ini black_bars), the subtitles' halo fading with them; the lens mist no longer stops at
+the HUD boxes (the dark box behind subtitles). The card check at start is run unseen at full speed (PS2_SKIP_SCENE).
+A second disc remap per option (remap2_off/on: the Enhanced Edition's sound banks with voices follow the voice switch).
+F7 retries until the game switches and opens only from the scene given (PS2_DEBUG_SCENES 4th number). Sharpen off by
+default; menu footer gone.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01QNLFPekqhcU2dj7B3Utmea
+---
+ host/keymap.cpp               | 11 +++--
+ host/keymap.hpp               | 12 +++---
+ host/quickmenu.cpp            |  6 +--
+ host/quickmenu.hpp            |  4 +-
+ host/recomp_options.cpp       | 14 +++++--
+ host/recomp_options.hpp       |  4 ++
+ host/window.cpp               | 78 +++++++++++++++++++++++++++++++----
+ runtime/include/ps2/video.hpp |  6 +--
+ runtime/src/gs/gpu/blit.wgsl  | 18 +++++---
+ runtime/src/gs/gpu/gpu.cpp    |  9 +++-
+ runtime/src/gs/gpu/gs.wgsl    | 18 ++++++++
+ runtime/src/gs/gs.cpp         | 47 ++++++++++++++++-----
+ 12 files changed, 178 insertions(+), 49 deletions(-)
+
+diff --git a/host/keymap.cpp b/host/keymap.cpp
+index 74beae6..bf6dfa7 100644
+--- a/host/keymap.cpp
++++ b/host/keymap.cpp
+@@ -174,7 +174,7 @@ std::string with_sharpen(const std::string &file_text, int level) {
+     static const char *const kNames[4] = {"off", "low", "medium", "high"};
+     return with_line(file_text, "sharpen", std::string("sharpen = ") + kNames[std::clamp(level, 0, 3)]);
+ }
+-std::string with_black_bars(const std::string &file_text, int on) { return with_line(file_text, "blackbars", std::string("black_bars = ") + (on ? "on" : "off")); }
++std::string with_black_bars(const std::string &file_text, int percent) { return with_line(file_text, "blackbars", "black_bars = " + std::to_string(std::clamp(percent, 0, 100))); }
+ std::string with_key_prompts(const std::string &file_text, int on) { return with_line(file_text, "keyprompts", std::string("key_prompts = ") + (on ? "on" : "off")); }
+ std::string short_input_name(int input) {
+     switch (input) {
+@@ -401,9 +401,12 @@ void parse(const std::string &text, Config &config, std::vector<std::string> &pr
+         }
+         if (name == "blackbars") {
+             const std::string v = squash(value);
+-            if (v == "on" || v == "1") config.black_bars = 1;
+-            else if (v == "off" || v == "0") config.black_bars = 0;
+-            else bad("black_bars is on or off, ignored");
++            char *end = nullptr;
++            const long n = std::strtol(v.c_str(), &end, 10);
++            if (v == "on") config.black_bars = 100;
++            else if (v == "off") config.black_bars = 0;
++            else if (!v.empty() && end && *end == '\0' && n >= 0 && n <= 100) config.black_bars = static_cast<int>(n);
++            else bad("black_bars is an opacity from 0 (none) to 100, ignored");
+             continue;
+         }
+         if (name == "keyprompts") {
+diff --git a/host/keymap.hpp b/host/keymap.hpp
+index 730922f..4b6943d 100644
+--- a/host/keymap.hpp
++++ b/host/keymap.hpp
+@@ -43,11 +43,11 @@ struct Config {
+     int menu_skin = -1;        // rawdanger-recomp: the F1 menu's look: 0 hazard (yellow on black), 1 Japanese (blue on white, the
+                                // launcher's Japanese skin); -1 = from the game's language (PS2_LANGUAGE / PS2_MENU_SKIN)
+     int reverb = 1;            // rawdanger-recomp: the sound chip's reverb (0 off)
+-    int key_prompts = 1;
+-    int black_bars = 1;
+-    int sharpen = 2;           // rawdanger-recomp: contrast-adaptive sharpening of the picture: 0 off, 1 low, 2 medium, 3 high        // rawdanger-recomp: the cutscenes' black bars (0: left out, the picture fills the screen)
+-    int mouse_look = 1;
+-    double look_speed = 2.0;   // rawdanger-recomp: how far the mouse look turns (0.2 to 4)        // rawdanger-recomp: the mouse turns the camera while playing (PS2_MOUSE_LOOK_* from the launcher); 0 off       // rawdanger-recomp: the game's texts show the keys instead of the PlayStation symbols (0: the symbols)
++    int key_prompts = 1;       // rawdanger-recomp: the game's texts show the keys instead of the PlayStation symbols (0: the symbols)
++    int black_bars = 100;      // rawdanger-recomp: the cutscenes' black bars, opacity in % (0: left out, the picture fills the screen)
++    int sharpen = 0;           // rawdanger-recomp: contrast-adaptive sharpening of the picture: 0 off (the picture is crisp by itself since the copy fix), 1 low, 2 medium, 3 high
++    int mouse_look = 1;        // rawdanger-recomp: the mouse turns the camera while playing (PS2_MOUSE_LOOK_* from the launcher); 0 off
++    double look_speed = 2.0;   // rawdanger-recomp: how far the mouse look turns (0.2 to 4)
+     int window_w = 0, window_h = 0;  // rawdanger-recomp: the window's size from the menu's presets (0: the default)
+     int integer_scale = 0;     // rawdanger-recomp: the picture is enlarged by whole numbers only (every console pixel row the same height)
+     int lens_rain = 0;         // rawdanger-recomp: rain drops on the lens while playing: 0 off, 1 light, 2 heavy
+@@ -73,7 +73,7 @@ std::string with_integer_scale(const std::string &file_text, int on);
+ std::string with_menu_skin(const std::string &file_text, int skin);
+ std::string with_reverb(const std::string &file_text, int on);
+ std::string with_key_prompts(const std::string &file_text, int on);
+-std::string with_black_bars(const std::string &file_text, int on);
++std::string with_black_bars(const std::string &file_text, int percent);
+ std::string with_sharpen(const std::string &file_text, int level);
+ std::string with_mouse_look(const std::string &file_text, int on);
+ std::string with_mouse_speed(const std::string &file_text, double speed);
+diff --git a/host/quickmenu.cpp b/host/quickmenu.cpp
+index b69b3b3..38007ad 100644
+--- a/host/quickmenu.cpp
++++ b/host/quickmenu.cpp
+@@ -365,7 +365,7 @@ std::string entry_text(Command c, const Values &v, bool quit_armed) {
+         static const char *const kLevels[] = {"off", "low", "medium", "high"};
+         return std::string("Sharpen the picture:  < ") + kLevels[std::clamp(v.sharpen, 0, 3)] + " >";
+     }
+-    case Command::black_bars: return std::string("Cutscene black bars:  < ") + (v.black_bars ? "shown" : "removed") + " >";
++    case Command::black_bars: return "Cutscene black bars:  < " + (v.black_bars <= 0 ? std::string("removed") : std::to_string(v.black_bars) + " % opaque") + " >";
+     case Command::reverb: return std::string("Reverb (rooms, tunnels):  < ") + (v.reverb ? "on" : "off") + " >";
+     case Command::widescreen: return v.widescreen < 0 ? "Widescreen: not in this game" : std::string("Widescreen 16:9:  < ") + (v.widescreen ? "on" : "off") + " >";
+     case Command::pause_unfocused: return std::string("Pause in the background:  < ") + (v.pause_unfocused ? "on" : "off") + " >";
+@@ -866,8 +866,8 @@ void Menu::draw_list(int window_width, int window_height, const Values &values,
+     for (char &ch : game) ch = static_cast<char>(ch >= 'a' && ch <= 'z' ? ch - 32 : ch);
+     const std::string kTitleText = gfx ? (native_ ? "PC SETTINGS" : "SETTINGS") : game + " - PAUSED";
+     const std::string kHint = gfx ? "Left / Right: change   Tab / Q / E / L1 / R1: tabs   Esc: back" : "Enter / Cross: OK     F1 / Esc / Circle: resume";
+-    const std::string kNote = gfx ? (values.scale_next != values.scale_now || values.sharp_next != values.sharp_now ? "Resolution and text filter: used at the next start" : "Saved in keys.ini next to the game")
+-                                  : "rawdanger-recomp";
++    const std::string kNote = gfx ? (values.scale_next != values.scale_now || values.sharp_next != values.sharp_now ? "Resolution and text filter: used at the next start" : "Changes apply at once and are kept")
++                                  : "";
+     std::vector<std::string> lines(n);
+     std::size_t chars = std::max({kTitleText.size(), kHint.size(), kNote.size()});
+     for (int i = 0; i < n; ++i) {
+diff --git a/host/quickmenu.hpp b/host/quickmenu.hpp
+index 22e01e7..84d3ef1 100644
+--- a/host/quickmenu.hpp
++++ b/host/quickmenu.hpp
+@@ -76,8 +76,8 @@ struct Values {
+     int game_blur = -1;            // the game's blur: -1 this build has no switch for it, 0 off, 1 on (as on the console)
+     bool reverb = true;
+     int key_prompts = -1;
+-    bool black_bars = true;
+-    int sharpen = 2;
++    int black_bars = 100;
++    int sharpen = 0;
+     int mouse_look = -1;           // -1: this game has no mouse look (PS2_MOUSE_LOOK_YAW), 0 off, 1 on
+     double mouse_speed = 1.0;
+     bool mouse_invert_y = false, mouse_invert_x = false;          // -1: this game has no prompt font (PS2_PROMPT_FONT_KEY), 0 symbols, 1 keys
+diff --git a/host/recomp_options.cpp b/host/recomp_options.cpp
+index 5cb012f..b3dbb37 100644
+--- a/host/recomp_options.cpp
++++ b/host/recomp_options.cpp
+@@ -55,9 +55,13 @@ void save() {
+ 
+ // each section with a remap gets its own slot (its place in the file), so the voices and the texture options work together
+ void apply_remap(const Section &s) {
+-    if (!s.remap_count) return;
+-    const int slot = static_cast<int>(&s - g_sections.data()) % ps2::disc::kRemapSlots;
+-    ps2::disc::set_remap_slot(slot, s.remap_from, s.remap_to, s.remap_count, s.remap_when_on ? s.on : !s.on);
++    const int index = static_cast<int>(&s - g_sections.data());
++    if (s.remap_count)
++        ps2::disc::set_remap_slot(index % ps2::disc::kRemapSlots, s.remap_from, s.remap_to, s.remap_count, s.remap_when_on ? s.on : !s.on);
++    // the second area of a section takes a slot from the other half (the sections with a remap are few: voices and two textures)
++    if (s.remap2_count)
++        ps2::disc::set_remap_slot((index + ps2::disc::kRemapSlots / 2) % ps2::disc::kRemapSlots, s.remap2_from, s.remap2_to, s.remap2_count,
++                                  s.remap2_when_on ? s.on : !s.on);
+ }
+ 
+ }  // namespace
+@@ -97,6 +101,10 @@ bool load(const char *path) {
+             unsigned f = 0, t = 0, n = 0;
+             if (std::sscanf(v.c_str(), "%u %u %u", &f, &t, &n) == 3) { cur->remap_from = f; cur->remap_to = t; cur->remap_count = n; cur->remap_when_on = k == "remap_on"; }
+         }
++        else if (k == "remap2_off" || k == "remap2_on") {
++            unsigned f = 0, t = 0, n = 0;
++            if (std::sscanf(v.c_str(), "%u %u %u", &f, &t, &n) == 3) { cur->remap2_from = f; cur->remap2_to = t; cur->remap2_count = n; cur->remap2_when_on = k == "remap2_on"; }
++        }
+         else if (k == "word") {
+             Word w;
+             unsigned a = 0, p = 0, o = 0;
+diff --git a/host/recomp_options.hpp b/host/recomp_options.hpp
+index 9e8e16f..cc2038e 100644
+--- a/host/recomp_options.hpp
++++ b/host/recomp_options.hpp
+@@ -34,6 +34,10 @@ struct Section {
+     // remap_on = FROM TO COUNT: the same, while the option is on (the Enhanced Edition's Japanese textures: the disc's index
+     // points to the US copies, read from the Japanese copies' area while the option is on)
+     bool remap_when_on = false;
++    // rawdanger-recomp: remap2_off / remap2_on = FROM TO COUNT: a second area the same option moves (the Enhanced Edition's
++    // voice switch also swaps the sound banks with voices in them: Japanese where ROOT.FAT points, English further on)
++    std::uint32_t remap2_from = 0, remap2_to = 0, remap2_count = 0;
++    bool remap2_when_on = false;
+ };
+ 
+ bool load(const char *path);                // false when there is no file (then the menu page says so)
+diff --git a/host/window.cpp b/host/window.cpp
+index ba8f346..198d4f3 100644
+--- a/host/window.cpp
++++ b/host/window.cpp
+@@ -238,7 +238,7 @@ std::vector<std::size_t> g_recomp_row_section;  // the Game options page's lines
+ // ("0x48F48C;0;41"). Opened from Settings > Game (lines at the end) or F7 (map select; Shift+F7 the debug menu when offered).
+ // In the map select: up / down the line, left / right the value, Cross loads the map at that gate.
+ constexpr std::size_t kDebugRow = static_cast<std::size_t>(-2), kMapSelRow = static_cast<std::size_t>(-3);
+-struct DebugScenes { std::uint32_t address = 0, debug = 0, mapsel = 0; bool set = false; };
++struct DebugScenes { std::uint32_t address = 0, debug = 0, mapsel = 0, from = 0; bool set = false; };
+ const DebugScenes &debug_scenes() {
+     static const DebugScenes d = [] {
+         DebugScenes r;
+@@ -248,12 +248,17 @@ const DebugScenes &debug_scenes() {
+         r.address = static_cast<std::uint32_t>(std::strtoul(v, &end, 0));
+         if (end && *end == ';') r.debug = static_cast<std::uint32_t>(std::strtoul(end + 1, &end, 0));
+         if (end && *end == ';') r.mapsel = static_cast<std::uint32_t>(std::strtoul(end + 1, &end, 0));
++        // a fourth number: the only scene they open from (Raw Danger: 21, the game itself; over the title the map select shows
++        // but the title keeps the pad)
++        if (end && *end == ';') r.from = static_cast<std::uint32_t>(std::strtoul(end + 1, &end, 0));
+         r.set = r.address != 0 && (r.debug != 0 || r.mapsel != 0);
+         return r;
+     }();
+     return d;
+ }
+ void open_debug_scene(bool map_select);  // below
++bool in_skipped_scene();
++void keep_scene_request();
+ void set_notice(const std::string &text);
+ std::string g_keys_path;
+ std::filesystem::file_time_type g_keys_time{};
+@@ -285,8 +290,9 @@ int g_last_dx = 0, g_last_dy = -1;  // the last direction the walk keys gave, fo
+ // The picture look (F2): how the picture is enlarged and smoothed for the window (display only, the game and the saved pictures do not
+ // change). The choice sits in keys.ini ('look = ...'); PS2_LOOK=0..7 or a look word overrides it for a run and is not written.
+ int g_look = keymap::kDefaultLook;
++bool g_blank_picture = false;   // rawdanger-recomp: a skipped scene (PS2_SKIP_SCENE): the picture is black
+ std::uint32_t video_bits() {
+-    return static_cast<std::uint32_t>(g_look) | (g_keys.integer_scale ? 8u : 0u) | (g_keys.smaa ? 16u : 0u) | (static_cast<std::uint32_t>(std::clamp(g_keys.sharpen, 0, 3)) << 5);
++    return (g_blank_picture ? 128u : 0u) | static_cast<std::uint32_t>(g_look) | (g_keys.integer_scale ? 8u : 0u) | (g_keys.smaa ? 16u : 0u) | (static_cast<std::uint32_t>(std::clamp(g_keys.sharpen, 0, 3)) << 5);
+ }
+ bool g_look_forced = false;
+ 
+@@ -753,7 +759,7 @@ void load_keys() {
+         if (g_keys.smaa) ps2::set_smaa_quality(static_cast<unsigned>(g_keys.smaa));
+         send_key_prompts();
+     }
+-    ps2::set_hide_bars(!g_keys.black_bars);
++    ps2::set_bar_opacity(static_cast<unsigned>(std::clamp(g_keys.black_bars, 0, 100)));
+     g_master_volume = std::clamp(g_keys.master_volume, 0, 100);
+     lens_rain::set_level(g_keys.lens_rain);
+     if (!g_look_forced && config.look >= 0) g_look = config.look;
+@@ -1324,7 +1330,7 @@ void menu_paint(bool show_again) {
+         if (const int blur = blur_section(); blur >= 0) v.game_blur = recomp::sections()[static_cast<std::size_t>(blur)].on ? 0 : 1;
+         v.reverb = ps2::reverb();
+         v.key_prompts = std::getenv("PS2_PROMPT_FONT_KEY") ? g_keys.key_prompts : -1;
+-        v.black_bars = g_keys.black_bars != 0;
++        v.black_bars = g_keys.black_bars;
+         v.sharpen = g_keys.sharpen;
+         parse_mouse_look();
+         v.mouse_look = g_look_yaw.set ? g_keys.mouse_look : -1;
+@@ -1483,12 +1489,37 @@ void close_menu(const char *why) {
+ 
+ void close_menu_if_open(const char *why) { close_menu(why); }
+ 
++// the scene asked for, written again each pass until the game is in it (the game's own pause holds its scene switch) or 3 s pass
++std::uint32_t g_scene_request = 0;
++Uint32 g_scene_request_until = 0;
++std::uint32_t g_scene_before_debug = 0;
++
+ void open_debug_scene(bool map_select) {
+     const DebugScenes &d = debug_scenes();
+     if (!d.set || (map_select && !d.mapsel) || (!map_select && !d.debug)) return;
++    const std::uint32_t target = map_select ? d.mapsel : d.debug;
++    const std::uint32_t now = ps2::ld32(d.address - 4);   // the scene the game runs (Raw Danger: just before the next-scene word)
+     if (g_menu.is_open()) close_menu(map_select ? "Map select" : "Debug menu");
+-    ps2::st32(d.address, map_select ? d.mapsel : d.debug);
++    if (now == target) return;
++    if (d.from && now != d.from) {
++        set_notice(map_select ? "Map select: from the game itself (not the menus or the title)" : "Debug menu: from the game itself");
++        return;
++    }   // already there (it has no way out but loading a map: going back to the game scene leaves it running)
++    g_scene_before_debug = now;
++    g_scene_request = target;
+     set_notice(map_select ? "Map select: up/down a line, left/right its value, Cross loads the map" : "The developers' debug menu");
++    g_scene_request_until = SDL_GetTicks() + 3000;
++    ps2::st32(d.address, g_scene_request);
++}
++
++void keep_scene_request() {
++    if (!g_scene_request) return;
++    const DebugScenes &d = debug_scenes();
++    if (ps2::ld32(d.address - 4) == g_scene_request || static_cast<Sint32>(SDL_GetTicks() - g_scene_request_until) > 0) {
++        g_scene_request = 0;
++        return;
++    }
++    if (ps2::ld32(d.address) != g_scene_request) ps2::st32(d.address, g_scene_request);
+ }
+ 
+ void set_notice(const std::string &text) {
+@@ -1683,10 +1714,11 @@ void menu_command(quickmenu::Command c, int step) {
+         break;
+     }
+     case Command::black_bars:
+-        g_keys.black_bars = g_keys.black_bars ? 0 : 1;
+-        ps2::set_hide_bars(!g_keys.black_bars);
++        // 100 % (as the game draws them) down to 0 (left out) in steps of 10
++        g_keys.black_bars = (std::clamp(g_keys.black_bars, 0, 100) / 10 * 10 + step * 10 + 110) % 110;
++        ps2::set_bar_opacity(static_cast<unsigned>(g_keys.black_bars));
+         rewrite_keys_file([](const std::string &t) { return keymap::with_black_bars(t, g_keys.black_bars); }, "cutscene bars");
+-        set_notice(g_keys.black_bars ? "Cutscene black bars shown" : "Cutscene black bars removed");
++        set_notice(g_keys.black_bars ? "Cutscene black bars: " + std::to_string(g_keys.black_bars) + " % opaque" : std::string("Cutscene black bars removed"));
+         break;
+     case Command::key_prompts:
+         if (!std::getenv("PS2_PROMPT_FONT_KEY")) break;
+@@ -2075,6 +2107,14 @@ void poll() {
+     if (!g_script.empty()) play_pad_script();
+     ps2::quick_watchdog();
+     take_key_card_answer();
++    keep_scene_request();
++    // (black for a second more after it: the game's picture still holds its last screen until the next scene draws over it)
++    static Uint32 skipped_until = 0;
++    if (in_skipped_scene()) skipped_until = SDL_GetTicks() + 1000;
++    if (const bool blank = static_cast<Sint32>(skipped_until - SDL_GetTicks()) > 0; blank != g_blank_picture) {
++        g_blank_picture = blank;
++        ps2::set_video_options(video_bits());
++    }
+     SDL_Event e;
+     while (timed_poll_event(e)) {
+         window_stage("handling a window event");
+@@ -2214,8 +2254,28 @@ void note_audio();
+ // PS2_NO_LIMIT=1 (docs/speed.md): a window run goes as fast as it can, with no wait for the sound device and no wait for the clock, to
+ // measure what the processor threads and the graphics chip can do. The sound plays out of step (it is dropped when it runs too far
+ // behind). Off unless set; "0" counts as off.
++// rawdanger-recomp: a scene the player never sees. PS2_SKIP_SCENE="ADDRESS=VALUE" (Raw Danger: the scene word 0x48F488 = 3,
++// the memory-card check at start): while the game is in it, it runs as fast as it can and the picture stays black, so the card
++// is still read (the options and the unlocks in its system data) but no "Checking memory card" screen shows; PS2_AUTO_CROSS
++// answers its one question.
++std::pair<std::uint32_t, std::uint32_t> skip_scene_spec() {
++    static const auto spec = [] {
++        std::pair<std::uint32_t, std::uint32_t> r{0, 0};
++        if (const char *v = std::getenv("PS2_SKIP_SCENE"); v && *v) {
++            unsigned long a = 0, w = 0;
++            if (std::sscanf(v, "%lx=%lu", &a, &w) == 2) r = {static_cast<std::uint32_t>(a), static_cast<std::uint32_t>(w)};
++        }
++        return r;
++    }();
++    return spec;
++}
++bool in_skipped_scene() {
++    const auto spec = skip_scene_spec();
++    return spec.first && ps2::ld32(spec.first) == spec.second;
++}
++
+ bool no_limit() {
+-    if (g_fast_forward) return true;
++    if (g_fast_forward || in_skipped_scene()) return true;
+     static const bool on = [] {
+         const std::string value = ps2::os::env("PS2_NO_LIMIT");
+         const bool set = !value.empty() && value != "0";
+diff --git a/runtime/include/ps2/video.hpp b/runtime/include/ps2/video.hpp
+index ccee2f2..da6a132 100644
+--- a/runtime/include/ps2/video.hpp
++++ b/runtime/include/ps2/video.hpp
+@@ -25,9 +25,9 @@ void set_smaa_quality(unsigned quality);
+ void set_sharp_2d(unsigned sharp);
+ // rawdanger-recomp: the Japanese release's pictures (texture overrides under jp/) on or off, at once
+ void set_jp_textures(bool on);
+-// rawdanger-recomp: leave out the black bars of the cutscenes (full-width untextured black sprites at the top and bottom edge);
+-// the subtitles then sit over the picture
+-void set_hide_bars(bool on);
++// rawdanger-recomp: the opacity of the cutscenes' black bars (full-width untextured black sprites at the top and bottom edge),
++// 0 (left out: the picture fills the screen) to 100 (as the game draws them)
++void set_bar_opacity(unsigned percent);
+ // rawdanger-recomp: note where the game's 2D lies (HUD, texts) so the rain on the lens stays under it (on while drops fall)
+ void set_ui_boxes(bool on);
+ // rawdanger-recomp: the keys shown instead of the PlayStation symbols in the game's font (cross, circle, square, triangle; short
+diff --git a/runtime/src/gs/gpu/blit.wgsl b/runtime/src/gs/gpu/blit.wgsl
+index 902453a..e245c5d 100644
+--- a/runtime/src/gs/gpu/blit.wgsl
++++ b/runtime/src/gs/gpu/blit.wgsl
+@@ -331,13 +331,17 @@ fn reduced_scene(uv: vec2<f32>) -> vec3<f32> {
+     return sum / f32(n.x * n.y);
+ }
+ 
+-fn lens_mist(uv: vec2<f32>, picture: vec3<f32>) -> vec3<f32> {
+-    // a soft look through fogged glass: the picture spread over a few pixels, a little lifted and cooler, more at the edges
++fn lens_mist(uv: vec2<f32>, picture: vec3<f32>, on_ui: bool) -> vec3<f32> {
++    // a soft look through fogged glass: the picture spread over a few pixels, a little lifted and cooler, more at the edges.
++    // Over the game's HUD and texts only the lift (no spreading): the same brightness as around them, the letters stay sharp.
+     let px = vec2<f32>(2.5 / max(f32(blit.out_width), 1.0), 2.5 / max(f32(blit.out_height), 1.0));
+-    let spread = (scene(clamp(uv + vec2<f32>(px.x, px.y), vec2<f32>(0.0), vec2<f32>(1.0))) +
++    var spread = picture;
++    if (!on_ui) {
++        spread = (scene(clamp(uv + vec2<f32>(px.x, px.y), vec2<f32>(0.0), vec2<f32>(1.0))) +
+                   scene(clamp(uv + vec2<f32>(-px.x, px.y), vec2<f32>(0.0), vec2<f32>(1.0))) +
+                   scene(clamp(uv + vec2<f32>(px.x, -px.y), vec2<f32>(0.0), vec2<f32>(1.0))) +
+                   scene(clamp(uv + vec2<f32>(-px.x, -px.y), vec2<f32>(0.0), vec2<f32>(1.0)))) * 0.25;
++    }
+     let edge = smoothstep(0.2, 0.75, length((uv - vec2<f32>(0.5)) * vec2<f32>(1.0, 1.25)));
+     let fogged = spread * 0.9 + vec3<f32>(0.05, 0.06, 0.075);
+     return mix(picture, fogged, clamp(lens.mist, 0.0, 1.0) * (0.2 + 0.8 * edge) * 0.65);
+@@ -370,9 +374,10 @@ fn over_ui(uv: vec2<f32>) -> bool {
+     return false;
+ }
+ 
+-fn drops_over(uv: vec2<f32>, picture: vec3<f32>) -> vec3<f32> {
++fn drops_over(uv: vec2<f32>, picture: vec3<f32>, on_ui: bool) -> vec3<f32> {
+     var c = picture;
+-    if (lens.mist > 0.01) { c = lens_mist(uv, c); }
++    if (lens.mist > 0.01) { c = lens_mist(uv, c, on_ui); }
++    if (on_ui) { return c; }   // the drops stay under the game's 2D
+     let aspect = f32(blit.out_width) / max(f32(blit.out_height), 1.0);
+     let n = min(lens.count, 64u);
+     for (var i = 0u; i < n; i = i + 1u) {
+@@ -417,6 +422,7 @@ fn drops_over(uv: vec2<f32>, picture: vec3<f32>) -> vec3<f32> {
+ 
+ @fragment
+ fn fs(in: VertexOut) -> @location(0) vec4<f32> {
++    if ((blit.options & 128u) != 0u) { return vec4<f32>(0.0, 0.0, 0.0, 1.0); }   // rawdanger-recomp: a scene the player does not see
+     var c: vec3<f32>;
+     if (blit.width > blit.out_width + blit.out_width / 16u || blit.height > blit.out_height + blit.out_height / 16u) {
+         c = reduced_scene(in.uv);
+@@ -432,6 +438,6 @@ fn fs(in: VertexOut) -> @location(0) vec4<f32> {
+         let sharpen_level = (blit.options >> 5u) & 3u;
+         if (sharpen_level != 0u) { c = sharpen(in.uv, c, sharpen_level); }
+     }
+-    if ((lens.count > 0u || lens.mist > 0.01) && !over_ui(in.uv)) { c = drops_over(in.uv, c); }
++    if (lens.count > 0u || lens.mist > 0.01) { c = drops_over(in.uv, c, over_ui(in.uv)); }
+     return vec4<f32>(clamp(c, vec3<f32>(0.0), vec3<f32>(1.0)), 1.0);
+ }
+diff --git a/runtime/src/gs/gpu/gpu.cpp b/runtime/src/gs/gpu/gpu.cpp
+index 0c95a9e..3850f52 100644
+--- a/runtime/src/gs/gpu/gpu.cpp
++++ b/runtime/src/gs/gpu/gpu.cpp
+@@ -4255,6 +4255,9 @@ bool init(Mode m) {
+     const bool has_fma = shader_text.empty() || shader_text.find("override EXPLICIT_FMA") != std::string::npos;
+     const bool has_mip = shader_text.empty() || shader_text.find("override HAS_MIP") != std::string::npos;
+     const bool has_sharp = shader_text.empty() || shader_text.find("override SHARP") != std::string::npos;
++    const bool has_tent = shader_text.empty() || shader_text.find("override RT_TENT") != std::string::npos;
++    // rawdanger-recomp: PS2_RT_COPY_TENT=0: near 1:1 copies of a rendered picture keep its inner detail (gs.wgsl, RT_TENT)
++    static const double rt_tent = [] { const char *v = std::getenv("PS2_RT_COPY_TENT"); return v && *v == '0' ? 0.0 : 1.0; }();
+     const int scale = static_cast<int>(g_scale), tile = g_tile;
+     const std::uint32_t sharp = g_sharp_2d;
+     // `mip`: the draw program that reads mipmap levels (HAS_MIP in gs.wgsl); without it the program is the plain one
+@@ -4264,7 +4267,7 @@ bool init(Mode m) {
+         cd.compute.module = module;
+         cd.compute.entryPoint = view(kEntryPoints[entry]);
+         // a shader loaded with PS2_GS_SHADER may lack the later constants; each is listed only when the shader declares it
+-        WGPUConstantEntry constants[5];
++        WGPUConstantEntry constants[6];
+         std::size_t count = 0;
+         const auto set = [&](bool declared, const char *key, double value) {
+             if (!declared) return;
+@@ -4278,6 +4281,7 @@ bool init(Mode m) {
+         set(has_fma, "EXPLICIT_FMA", explicit_fma ? 1.0 : 0.0);
+         set(has_sharp, "SHARP", static_cast<double>(sharp));
+         set(has_mip, "HAS_MIP", mip ? 1.0 : 0.0);
++        set(has_tent, "RT_TENT", rt_tent);
+         cd.compute.constantCount = count;
+         cd.compute.constants = constants;
+         return wgpuDeviceCreateComputePipeline(g_device, &cd);
+@@ -4290,7 +4294,7 @@ bool init(Mode m) {
+         cd.layout = g_pipeline_layout;
+         cd.compute.module = module;
+         cd.compute.entryPoint = view(kEntryPoints[entry]);
+-        WGPUConstantEntry constants[5];
++        WGPUConstantEntry constants[6];
+         std::size_t count = 0;
+         const auto set = [&](bool declared, const char *key, double value) {
+             if (!declared) return;
+@@ -4304,6 +4308,7 @@ bool init(Mode m) {
+         set(has_fma, "EXPLICIT_FMA", explicit_fma ? 1.0 : 0.0);
+         set(has_sharp, "SHARP", static_cast<double>(g_sharp_2d));
+         set(has_mip, "HAS_MIP", mip ? 1.0 : 0.0);
++        set(has_tent, "RT_TENT", rt_tent);
+         cd.compute.constantCount = count;
+         cd.compute.constants = constants;
+         return wgpuDeviceCreateComputePipeline(g_device, &cd);
+diff --git a/runtime/src/gs/gpu/gs.wgsl b/runtime/src/gs/gpu/gs.wgsl
+index f6750e7..84cb0e3 100644
+--- a/runtime/src/gs/gpu/gs.wgsl
++++ b/runtime/src/gs/gpu/gs.wgsl
+@@ -842,8 +842,26 @@ fn sample_upscaled(s: Setup, uin: f32, vin: f32) -> u32 {
+     return blend4(tap_upscaled(s, x0, y0), tap_upscaled(s, x0 + 1, y0), tap_upscaled(s, x0, y0 + 1), tap_upscaled(s, x0 + 1, y0 + 1), u - f32(x0), v - f32(y0));
+ }
+ 
++// rawdanger-recomp: RT_TENT 0 (PS2_RT_COPY_TENT=0) reads a near 1:1 copy of a rendered picture by its own inner samples
++// (bilinear between them) instead of the console's one-texel tent: Raw Danger copies each finished picture into the shown buffer
++// with 449 rows from 448 (the tent then softened every edge by about one console pixel at any inner resolution); the tent was
++// kept for games that blend an almost 1:1 copy of the last frame over the next.
++override RT_TENT: u32 = 1u;
++
++fn sample_inner(s: Setup, uin: f32, vin: f32) -> u32 {
++    if (!has(s, F_BILINEAR)) {
++        return fetch_sub(s, i32(floor(uin * f32(SCALE))), i32(floor(vin * f32(SCALE))));
++    }
++    let c = bilinear_sub(s, uin * f32(SCALE) - 0.5, vin * f32(SCALE) - 0.5);
++    let o = vec4<u32>(clamp(c + vec4<f32>(0.5), vec4<f32>(0.0), vec4<f32>(255.0)));
++    return o.x | (o.y << 8u) | (o.z << 16u) | (o.w << 24u);
++}
++
+ fn sample(s: Setup, uin: f32, vin: f32, k: u32) -> u32 {
+     if (rt_copy) {
++        if (RT_TENT == 0u) {
++            return sample_inner(s, uin, vin);
++        }
+         return sample_scaled(s, uin, vin);
+     }
+     if (s.dec != 0xFFFFFFFFu) {
+diff --git a/runtime/src/gs/gs.cpp b/runtime/src/gs/gs.cpp
+index ffb41a5..3df34ba 100644
+--- a/runtime/src/gs/gs.cpp
++++ b/runtime/src/gs/gs.cpp
+@@ -759,9 +759,9 @@ void transfer(const State &s, std::uint64_t dir) {
+ }
+ 
+ // rawdanger-recomp: the cutscenes' black bars (Raw Danger draws them as two untextured opaque black sprites the width of the
+-// screen, 0-64 and 368-448 of 448): left out when set_hide_bars is on.
+-std::atomic<bool> g_hide_bars{[] { const char *v = std::getenv("PS2_HIDE_BARS"); return v && *v == '1'; }()};
+-// 0: not a bar, 1: the top bar, 2: the bottom bar (the subtitles' place)
++// screen, 0-64 and 368-448 of 448): drawn at the opacity set_bar_opacity asks for (0: left out).
++std::atomic<int> g_bar_opacity{[] { const char *v = std::getenv("PS2_BAR_OPACITY"); return v && *v ? std::clamp(std::atoi(v), 0, 100) : 100; }()};
++// 0: not a bar, 1: a bar drawn blended (its opacity can be lowered), 2: a bar drawn without blending (only left out or kept)
+ [[gnu::noinline]] static int cinema_bar(const State &s) {
+     std::uint64_t attr = s.prim;
+     if (!(s.prmodecont & 1u)) attr = (s.prim & 7u) | (s.prmode & ~7ull);
+@@ -774,9 +774,9 @@ std::atomic<bool> g_hide_bars{[] { const char *v = std::getenv("PS2_HIDE_BARS");
+     const int x0 = (static_cast<int>(std::min(a.x, b.x)) - ofx) >> 4, x1 = (static_cast<int>(std::max(a.x, b.x)) - ofx) >> 4;
+     const int y0 = (static_cast<int>(std::min(a.y, b.y)) - ofy) >> 4, y1 = (static_cast<int>(std::max(a.y, b.y)) - ofy) >> 4;
+     if (x0 > 0 || x1 < 512) return 0;
+-    if (y0 <= 0 && y1 >= 16 && y1 <= 120) return 1;
+-    if (y1 >= 400 && y0 >= 300 && y0 <= 432) return (attr & 0x40u) ? 2 : 1;   // blended: kept as a light shade under the subtitles
+-    return 0;
++    const bool bar = (y0 <= 0 && y1 >= 16 && y1 <= 120) || (y1 >= 400 && y0 >= 300 && y0 <= 432);
++    if (!bar) return 0;
++    return (attr & 0x40u) ? 1 : 2;
+ }
+ 
+ // rawdanger-recomp: where the game's 2D lies on the picture (its HUD, texts, subtitles, the cutscenes' bars), for the rain on
+@@ -883,16 +883,41 @@ unsigned ui_boxes(float *out) {
+     return ui::g_out_n;
+ }
+ 
++// The subtitles' halo: the font drawn in black at a low alpha, many times, in the bars' rows (Raw Danger: rgba 0,0,0,0x13)
++[[gnu::noinline]] static bool subtitle_shade(const State &s) {
++    std::uint64_t attr = s.prim;
++    if (!(s.prmodecont & 1u)) attr = (s.prim & 7u) | (s.prmode & ~7ull);
++    if (!(attr & 0x10u) || !(attr & 0x40u)) return false;   // textured and blended
++    const Vertex &a = s.queue[0], &b = s.queue[1];
++    if (b.r | b.g | b.b) return false;
++    if (b.a == 0 || b.a >= 0x40) return false;
++    const Context &c = s.ctx[(attr >> 9) & 1u];
++    const int ofy = static_cast<int>((c.xyoffset >> 32) & 0xFFFFu);
++    const int y0 = (static_cast<int>(std::min(a.y, b.y)) - ofy) >> 4, y1 = (static_cast<int>(std::max(a.y, b.y)) - ofy) >> 4;
++    return y0 >= 300 || y1 <= 120;
++}
++
+ // Inlined into the PACKED run (write_packed_run): as a call of its own it cost the ship about 0.15 ms of the drawing thread a frame.
+ [[gnu::always_inline]] static inline void kick(bool draw) {
+     State &s = g_state;
+     const std::uint32_t prim = static_cast<std::uint32_t>(s.prim) & 7u;
+     const int needed = prim == 0 ? 1 : (prim == 1 || prim == 2 || prim == 6) ? 2 : prim == 7 ? 1 : 3;
+     if (s.count < needed) return;
+-    if (draw && prim == 6 && g_hide_bars.load(std::memory_order_relaxed)) [[unlikely]] {
+-        const int bar = cinema_bar(s);
+-        if (bar == 1) draw = false;
+-        else if (bar == 2) s.queue[0].a = s.queue[1].a = 0x30;   // 3/8 dark: the subtitles stay readable
++    if (draw && prim == 6) {
++        const int opacity = g_bar_opacity.load(std::memory_order_relaxed);
++        if (opacity < 100) {
++            const int bar = cinema_bar(s);
++            if (!bar && subtitle_shade(s)) {
++                // the subtitles' dark halo, made for the black bar it sits on: over the picture it reads as a dark box, so it
++                // fades with the bar (down to half, which keeps the letters readable over bright scenes)
++                const int keep = 50 + 50 * opacity / 100;
++                s.queue[0].a = static_cast<std::uint8_t>(s.queue[0].a * keep / 100);
++                s.queue[1].a = static_cast<std::uint8_t>(s.queue[1].a * keep / 100);
++            }
++            if (bar && opacity == 0) draw = false;
++            else if (bar == 1) s.queue[0].a = s.queue[1].a = static_cast<std::uint8_t>(0x80 * opacity / 100);
++            else if (bar == 2 && opacity < 50) draw = false;
++        }
+     }
+     if (draw && ui::g_on.load(std::memory_order_relaxed)) [[unlikely]] ui::add(s, needed);
+     if (draw) {
+@@ -2159,6 +2184,6 @@ void state(ps2::state::Stream &s) {
+ }
+ 
+ namespace ps2 {
+-void set_hide_bars(bool on) { ps2::gs::g_hide_bars.store(on, std::memory_order_relaxed); }
++void set_bar_opacity(unsigned percent) { ps2::gs::g_bar_opacity.store(static_cast<int>(std::min(percent, 100u)), std::memory_order_relaxed); }
+ void set_ui_boxes(bool on) { ps2::gs::ui::g_on.store(on, std::memory_order_relaxed); }
+ }
+-- 
+2.43.0
+

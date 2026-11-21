@@ -1,0 +1,105 @@
+# Raw Danger PC - the cast shown in the launcher. One [block] per character; the block name is the picture's file name
+# without extension (f_shinohara -> f_shinohara.jpg or .png in a picture folder). Edit freely; a copy named characters.txt
+# next to the pictures replaces this one. Facts summarised from a Japanese character guide; US names from the US release.
+# Fields: picture (optional file name; default <block name>.png/.jpg), look (what the picture looks like, so a renamed
+# file is still recognised; RawDangerPC.exe --look <file> prints it), en, jp, kana, romaji, role_en, role_jp,
+# bio_en, bio_jp. Only characters whose picture is found are shown.
+
+[f_shinohara]
+look=303c3e3e3e3e3c3e3c3e7e3c34141430
+en=Joshua Harwell
+jp=篠原 一弥
+kana=しのはら かずや
+romaji=Kazuya Shinohara
+role_en=Playable  ·  Chapter 1  ·  Age 22  ·  Banquet waiter
+role_jp=主人公  ·  第1話  ·  22歳  ·  ウェイター
+bio_en=A college senior earning extra money at the Geo City opening banquet. He is the first to notice the hall filling with water, and goes back into the collapsing building for a co-worker everyone else left behind.
+bio_jp=ジオシティの記念パーティで働く大学4年生のアルバイト。会場の浸水にいち早く気づき、崩れ始めたビルへ取り残された仲間を探しに戻る。
+
+[f_fujimiya]
+look=181c1e1e1f1f3e3e3e3c3840000a0a06
+en=Stephanie McMurrough
+jp=藤宮 春香
+kana=ふじみや はるか
+romaji=Haruka Fujimiya
+role_en=Companion  ·  Chapter 1  ·  Age 21  ·  Banquet waitress
+role_jp=同行者  ·  第1話  ·  21歳  ·  ウェイトレス
+bio_en=A third-year student working the same banquet to prove she can stand on her own, though her family heads a powerful business group. Joshua finds her shut in the locker room as the floor floods.
+bio_jp=同じパーティで働く大学3年生。実家は有力な企業グループだが、自分の力で働いている。浸水するロッカールームに閉じ込められていたところを篠原に見つけられる。
+
+[f_saeki]
+look=30383e7e7e7efe3e3e14262222234141
+en=Amber Brazil
+jp=佐伯 優子
+kana=さえき ゆうこ
+romaji=Yuko Saeki
+role_en=Playable  ·  Chapter 2  ·  Age 20  ·  Murder suspect
+role_jp=主人公  ·  第2話  ·  20歳  ·  容疑者
+bio_en=A sophomore who came to town to see her brother and was locked up as the suspect in his murder. When the flood tears the police station apart she gets out, still in handcuffs, to learn who really killed him.
+bio_jp=兄に会いに来た大学2年生。兄殺しの容疑で留置されるが、洪水で崩れた警察署から手錠のまま抜け出し、本当の犯人を追う。
+
+[f_aoyama]
+look=1c143cefffff7e7e7e3e3e3634343466
+en=Aidan Chase
+jp=青山 透
+kana=あおやま とおる
+romaji=Toru Aoyama
+role_en=Companion  ·  Chapter 2  ·  Age 28  ·  Secretary
+role_jp=同行者  ·  第2話  ·  28歳  ·  秘書
+bio_en=The nervous personal secretary of the city's leader, along for the opening ceremony. Hardly a hero at first, he ends up helping Amber keep ahead of the police.
+bio_jp=式典に同行していた気弱な秘書。頼りなく見えるが、逃亡中の佐伯を助けて警察から逃れる手助けをする。
+
+[f_tsuge]
+look=406078f8fcfc7c3c3818183c37332060
+en=Isaac Schiller
+jp=柘植 明
+kana=つげ あきら
+romaji=Akira Tsuge
+role_en=Playable  ·  Chapter 3  ·  Age 36  ·  Taxi driver
+role_jp=主人公  ·  第3話  ·  36歳  ·  タクシー運転手
+bio_en=A cab driver taking a magazine break at a convenience store when a man in work clothes asks for a ride to the Geo Section. They are on the bridge over the river when the disaster hits.
+bio_jp=コンビニで一息ついていたタクシー運転手。作業服の男を乗せてジオセクションへ向かう途中、川に架かる橋の上で災害に巻き込まれる。
+
+[f_honda]
+look=1c1c08001e1e0e1e3e3e3636666666c6
+en=Ryoko Honda
+jp=本多 涼子
+kana=ほんだ りょうこ
+romaji=Ryoko Honda
+role_en=Companion  ·  Chapter 3  ·  Age 25  ·  Magazine editor
+role_jp=同行者  ·  第3話  ·  25歳  ·  雑誌編集者
+bio_en=An editor at a weekly news magazine who came to the Geo City opening party chasing a story of her own.
+bio_jp=週刊誌の編集者。ある取材の目的でジオシティの記念パーティに来ていた。
+
+[f_nishizaki]
+look=101818181c1c3c1c2e7f7f7fbeacc0c0
+en=Paige Meyer
+jp=西崎 佳奈
+kana=にしざき かな
+romaji=Kana Nishizaki
+role_en=Playable  ·  Chapter 4  ·  Age 17  ·  High school student
+role_jp=主人公  ·  第4話  ·  17歳  ·  高校1年生
+bio_en=A first-year high school student shut in a cleaning closet by classmates just as the evacuation was called. By the time she gets out, the wrecked school is empty and filling with water.
+bio_jp=避難放送の直後、クラスメイトに掃除用具入れへ閉じ込められた高校1年生。外に出た時、荒れた校舎には誰も残っていなかった。
+
+[f_higa]
+look=387c387cbcfc7c7c7c7c003632121330
+en=Natsumi Higa
+jp=比嘉 夏海
+kana=ひが なつみ
+romaji=Natsumi Higa
+role_en=Companion  ·  Chapter 4  ·  Age 22  ·  Student teacher
+role_jp=同行者  ·  第4話  ·  22歳  ·  教育実習生
+bio_en=A university student doing her teacher training at Paige's school, though she never studied there. She is a survivor from the first Disaster Report.
+bio_jp=西崎の高校に来ている教育実習生。ただしこの学校の出身ではないらしい。前作『絶体絶命都市』にも登場する。
+
+[f_tanabe]
+look=0c0c0e1fff7f3f3e3e3e1e1e1e0e0a1b
+en=Gavin Goldstein
+jp=田辺 宗一郎
+kana=たなべ そういちろう
+romaji=Soichiro Tanabe
+role_en=Age 56  ·  City leader
+role_jp=56歳  ·  知事
+bio_en=The man most credited with the city's rise: once its mayor, now leading the region. He is in town to open Geo City. (In the US version he is still the mayor.)
+bio_jp=富坂市を大きく発展させた人物。元市長で現在は知事。ジオシティの完成披露のために訪れている。
