@@ -9,5 +9,5 @@ mcs -nologo -optimize+ -target:winexe -nostdlib -lib:$A -r:$A/mscorlib.dll -r:$A
     -r:$A/System.Drawing.dll -r:$A/System.Windows.Forms.dll -win32icon:art/app.ico -out:../RawDangerPC.exe \
     -resource:art/app.ico,RawDangerLauncher.app.ico -resource:art/logo.png,RawDangerLauncher.logo.png -resource:art/logo_jp.png,RawDangerLauncher.logo_jp.png \
     -resource:art/characters.txt,RawDangerLauncher.characters.txt \
-    Launcher.cs WizardForm.cs Disc.cs Cast.cs Icons.cs Enhanced.cs Recomp.cs Music.cs Achievements.cs Flac.cs BuildTime.cs EngineUpdates.cs
+    Launcher.cs WizardForm.cs Disc.cs Cast.cs Icons.cs Enhanced.cs Recomp.cs Music.cs Achievements.cs Flac.cs BuildTime.cs EngineUpdates.cs BuildTools.cs
 echo "built: ../RawDangerPC.exe"

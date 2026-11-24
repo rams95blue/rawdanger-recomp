@@ -10,6 +10,7 @@
 
 #include <algorithm>
 #include <map>
+#include <string>
 #include <utility>
 #include <atomic>
 #include <cstdio>
@@ -198,6 +199,14 @@ bool g_code_dirty = true;
 std::map<std::pair<std::uint64_t, std::uint32_t>, std::uint64_t> g_counts;
 std::uint64_t g_total = 0;
 const bool g_on = [] { const char *v = std::getenv("PS2_VU1_STATS"); return v && *v == '1'; }();
+// what each program was given: the UNPACKs since the previous start, in order ("V4-32 x12 V2-16 x12 ..."), and how many
+std::string g_sig;
+std::uint32_t g_unpacks = 0;
+std::map<std::pair<std::uint64_t, std::uint32_t>, std::map<std::string, std::uint64_t>> g_sigs;
+void note_unpack(std::uint32_t op, std::uint32_t num) {
+    static const char *const kVn[] = {"S", "V2", "V3", "V4"}, *const kVl[] = {"32", "16", "8", "5"};
+    if (++g_unpacks <= 6) g_sig += std::string(g_sig.empty() ? "" : " ") + kVn[(op >> 2) & 3u] + "-" + kVl[op & 3u] + "x" + std::to_string(num ? num : 256u);
+}
 void count(std::uint32_t address) {
     if (g_code_dirty) {
         std::uint64_t h = 1469598103934665603ull;
@@ -205,9 +214,18 @@ void count(std::uint32_t address) {
         g_code_hash = h, g_code_dirty = false;
     }
     ++g_counts[{g_code_hash, address}];
+    ++g_sigs[{g_code_hash, address}][g_unpacks > 6 ? g_sig + " +" + std::to_string(g_unpacks - 6) : g_sig];
+    g_sig.clear(), g_unpacks = 0;
     if (++g_total % 20000u == 0) {
-        std::fprintf(stderr, "[vu1] %llu programs started; by code and address:\n", static_cast<unsigned long long>(g_total));
-        for (const auto &[k, n] : g_counts) std::fprintf(stderr, "[vu1]   code %016llX at %04X: %llu\n", static_cast<unsigned long long>(k.first), k.second, static_cast<unsigned long long>(n));
+        std::fprintf(stderr, "[vu1] %llu programs started; by code and address (and the UNPACKs given most often):\n", static_cast<unsigned long long>(g_total));
+        for (const auto &[k, n] : g_counts) {
+            const auto &m = g_sigs[k];
+            auto best = m.begin();
+            for (auto i = m.begin(); i != m.end(); ++i) if (i->second > best->second) best = i;
+            std::fprintf(stderr, "[vu1]   code %016llX at %04X: %llu  [%s] %llu%%\n", static_cast<unsigned long long>(k.first), k.second,
+                         static_cast<unsigned long long>(n), best == m.end() ? "" : best->first.c_str(),
+                         static_cast<unsigned long long>(best == m.end() ? 0 : best->second * 100 / n));
+        }
     }
 }
 }  // namespace vu1stats
@@ -553,7 +571,10 @@ void execute(int unit, std::uint32_t cmd, const std::uint32_t *data, const Ctx &
         else gif::transfer(2, reinterpret_cast<const std::uint8_t *>(data), imm ? imm : 0x10000u);
         break;
     default:
-        if ((op & 0x60u) == 0x60u) unpack(unit, cmd, data, c);
+        if ((op & 0x60u) == 0x60u) {
+            if (unit && vu1stats::g_on && !c.dry) vu1stats::note_unpack(op, (cmd >> 16) & 0xFFu);
+            unpack(unit, cmd, data, c);
+        }
         else note_unknown(unit, cmd);
         break;
     }

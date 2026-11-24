@@ -147,6 +147,8 @@
   stage (AREA 01's streets), ambient occlusion with fixed samples, the mouse wheel switches walk / run.
 - **0031-v0.8.5-filter-camera-vu1-stats** (rawdanger-recomp v0.8.5): the filter replay keeps eight writes, PS2_CAMERA_PITCH
   reads the camera block at a fixed address ("@"), the lens rain gets heavier looking up, PS2_VU1_STATS counts VU1 programs.
+- **0032-v0.8.6-fov-debug-wording** (rawdanger-recomp v0.8.6): keys.ini field_of_view through the camera's zoom factor
+  (PS2_CAMERA_ZOOM), FXAA in the Options list, the filter's name in sentence case, the debug menu notes, the UNPACKs in PS2_VU1_STATS.
 
 ## Goals of the fork
 

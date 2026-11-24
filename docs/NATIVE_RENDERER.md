@@ -58,3 +58,17 @@ What this says:
 Next: dump one frame's VIF input for the two main images (the unpacked vertex formats and the matrices the programs read), and
 match each start point to what it draws by turning it off in a test build.
 
+### What each program is given (v0.8.6)
+
+`PS2_VU1_STATS=1` now also prints the UNPACKs that arrive before each program most often:
+
+| Start | Given | What it likely is |
+| --- | --- | --- |
+| 0x0000 | 4 x V4-32 | one 4 x 4 matrix (the object's place on screen) |
+| 0x02F0 | 3 x V4-32, or nothing | a header: the GIF tag and the draw settings of the next batch |
+| 0x0318, 0x0618, 0x0578, 0x0FD8 | 2 x V4-32, then up to 190 x V4-16 | a batch of vertices, 16-bit fixed point (up to 190 in one batch: the VU1 memory's half for double buffering) |
+| 0x0A20, then 0x0A48 | 9 x V4-32, then up to 190 x V4-16 | characters: 9 vectors (bone matrices or lights) before the batch; the banquet (many people) runs these the most |
+
+So the models reach VU1 as compact 16-bit vertex arrays with a matrix per object: the native path can read the same arrays and
+matrices from the DMA lists and draw each object as one GPU draw, instead of 100-odd batches.
+

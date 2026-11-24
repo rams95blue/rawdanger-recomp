@@ -120,8 +120,8 @@ constexpr const char *kTabNames[Menu::kTabs] = {"DISPLAY", "PICTURE", "SOUND", "
 constexpr int kAchievementRows = 7;   // rawdanger-recomp: achievements lines shown at a time (bigger panel)
 constexpr Command kDisplay[] = {Command::scale, Command::window_size, Command::fullscreen, Command::widescreen, Command::integer_scale, Command::menu_game_runs, Command::pause_unfocused, Command::menu_skin, Command::popup_size, Command::back};
 constexpr const char *kDisplayKeys[] = {"", "", "F11", "", "", "", "", "", "", "Esc"};
-constexpr Command kPicture[] = {Command::look, Command::antialias, Command::sharpen, Command::sharp_2d, Command::game_blur, Command::filter_pass, Command::ambient_occlusion, Command::black_bars, Command::lens_rain, Command::back};
-constexpr const char *kPictureKeys[] = {"F2", "", "", "", "", "", "", "", "", "Esc"};
+constexpr Command kPicture[] = {Command::field_of_view, Command::look, Command::antialias, Command::sharpen, Command::sharp_2d, Command::game_blur, Command::filter_pass, Command::ambient_occlusion, Command::black_bars, Command::lens_rain, Command::back};
+constexpr const char *kPictureKeys[] = {"", "F2", "", "", "", "", "", "", "", "", "Esc"};
 constexpr Command kSound[] = {Command::master_volume, Command::reverb, Command::back};
 constexpr const char *kSoundKeys[] = {"", "", "Esc"};
 constexpr Command kControls[] = {Command::change_keys, Command::keys_on_screen, Command::mouse_look, Command::mouse_speed, Command::mouse_invert_x, Command::mouse_invert, Command::key_prompts, Command::back};
@@ -364,8 +364,8 @@ std::string entry_text(Command c, const Values &v, bool quit_armed) {
     case Command::graphics: return "Settings";
     case Command::window_size: return "Window size:  < " + (v.window_size.empty() ? std::string("?") : v.window_size) + " >";
     case Command::game_blur:
-        if (v.game_blur < 0) return "Original PS2 Post Processing Filter: as built";
-        return std::string("Original PS2 Post Processing Filter:  < ") + (v.game_blur ? "on" : "off") + " >";
+        if (v.game_blur < 0) return "PS2 post-processing filter: as built";
+        return std::string("PS2 post-processing filter:  < ") + (v.game_blur ? "on" : "off") + " >";
     case Command::mouse_look:
         if (v.mouse_look < 0) return "Mouse look: not in this game";
         return std::string("Mouse look (camera):  < ") + (v.mouse_look ? "on" : "off") + " >";
@@ -386,6 +386,8 @@ std::string entry_text(Command c, const Values &v, bool quit_armed) {
     case Command::black_bars: return "Cutscene black bars:  < " + (v.black_bars <= 0 ? std::string("removed") : std::to_string(v.black_bars) + " % opaque") + " >";
     case Command::reverb: return std::string("Reverb (rooms, tunnels):  < ") + (v.reverb ? "on" : "off") + " >";
     case Command::widescreen: return v.widescreen < 0 ? "Widescreen: not in this game" : std::string("Widescreen 16:9:  < ") + (v.widescreen ? "on" : "off") + " >";
+    case Command::field_of_view:
+        return std::string("Field of view:  < ") + (v.field_of_view == 100 ? std::string("100 % (as on the PS2)") : std::to_string(v.field_of_view) + " %") + " >";
     case Command::ambient_occlusion: {
         static const char *const kLevels[] = {"off", "light", "strong"};
         return std::string("Ambient occlusion (shading in corners):  < ") + kLevels[std::clamp(v.ambient_occlusion, 0, 2)] + " >";
@@ -621,7 +623,7 @@ Command Menu::side() const {
     return c == Command::look || c == Command::scale || c == Command::sharp_2d || c == Command::fullscreen || c == Command::widescreen || c == Command::pause_unfocused || c == Command::menu_game_runs ||
                    c == Command::master_volume || c == Command::integer_scale || c == Command::lens_rain || c == Command::antialias || c == Command::menu_skin ||
                    c == Command::window_size || c == Command::game_blur || c == Command::reverb || c == Command::key_prompts || c == Command::mouse_look || c == Command::black_bars || c == Command::sharpen ||
-                   c == Command::mouse_speed || c == Command::mouse_invert || c == Command::mouse_invert_x || c == Command::popup_size || c == Command::keys_on_screen || c == Command::filter_pass || c == Command::ambient_occlusion
+                   c == Command::mouse_speed || c == Command::mouse_invert || c == Command::mouse_invert_x || c == Command::popup_size || c == Command::keys_on_screen || c == Command::filter_pass || c == Command::ambient_occlusion || c == Command::field_of_view
                ? c : Command::none;
 }
 

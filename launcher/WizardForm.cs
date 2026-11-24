@@ -50,7 +50,7 @@ namespace RawDangerLauncher
         Label engineNote;
         EngineUpdates.Report engineReport;
         Label libInfo, chooseInfo, chooseTime, optionsInfo, buildTitle, buildStatus, buildTime, doneText, footer;
-        CheckBox fixBox, wideBox, filterBox, logosBox, shortcutBox, gentleBox;
+        CheckBox fixBox, wideBox, filterBox, logosBox, shortcutBox;
         HazardBar bar;
         TextBox log;
         Button doneDetails, chooseBack, libPlay, libReport, libOptions, libAch, libFaster, libRebuild, libShortcut, libFolder, detailsButton, stopButton;
@@ -223,6 +223,18 @@ namespace RawDangerLauncher
             return b;
         }
 
+        // a tab or a choice button, chosen (filled) or not (outlined)
+        static void Pick(Button b, bool on)
+        {
+            b.UseVisualStyleBackColor = false;
+            b.FlatAppearance.MouseDownBackColor = on ? Alarm : Theme.Pressed;
+            b.BackColor = on ? Accent : Back;
+            b.ForeColor = on ? Theme.OnAccent : Accent;
+            b.FlatAppearance.BorderSize = on ? 0 : 2;
+            b.FlatAppearance.MouseOverBackColor = on ? Theme.AccentHover : Theme.Hover;
+            b.Invalidate();
+        }
+
         static void Style(Button b, bool primary)
         {
             b.FlatStyle = FlatStyle.Flat;
@@ -251,7 +263,7 @@ namespace RawDangerLauncher
         void Go(Panel page)
         {
             foreach (Panel p in new Panel[] { library, choose, options, building, done }) p.Visible = p == page;
-            if (page == choose) { chooseBack.Visible = AnyBuilt(); chooseTime.Text = BuildTime.ForList(settings, Ticked()); }
+            if (page == choose) { chooseBack.Visible = AnyBuilt(); chooseTime.Text = BuildTime.ForList(settings, Ticked()); FillModern(); }
         }
 
         static Label Heading(Panel p, string text)
@@ -291,7 +303,11 @@ namespace RawDangerLauncher
             libPlay = MakeButton(library, Lang.L("Play", "プレイ"), x, 44, 200, 44, true, delegate { PlaySelected(); });
             libShortcut = MakeButton(library, Lang.L("Desktop shortcut", "デスクトップにショートカットを作成"), x, 100, 200, 34, false, delegate { ShortcutFor(SelectedDisc, true); });
             libFaster = MakeButton(library, Lang.L("Make it faster", "高速化"), x, 142, 200, 34, false, delegate { BuildDiscs(new List<DiscInfo> { SelectedDisc }, true); });
-            libRebuild = MakeButton(library, Lang.L("Rebuild", "再ビルド"), x, 184, 200, 34, false, delegate { SelectOnly(SelectedDisc); Go(options); });
+            libRebuild = MakeButton(library, Lang.L("Rebuild", "再ビルド"), x, 184, 200, 34, false, delegate
+            {
+                if (Enhanced.Is(SelectedDisc)) { Go(choose); ShowTab(true); return; }   // the MODERN tab: its disc list and the build button
+                SelectOnly(SelectedDisc); ShowTab(false); FillOptions(); Go(options);
+            });
             libFolder = MakeButton(library, Lang.L("Open its folder", "フォルダを開く"), x, 226, 200, 34, false, delegate { OpenFolder(SelectedDisc); });
             libReport = MakeButton(library, Lang.L("Performance report", "パフォーマンスレポート"), x, 268, 200, 34, false, delegate { PerformanceReport(); });
             libAch = MakeButton(library, Lang.L("Achievements", "実績"), x, 352, 200, 34, false, delegate
@@ -308,75 +324,186 @@ namespace RawDangerLauncher
             });
             Label tip = MakeLabel(Lang.L("Make it faster: rebuilds the game with the code it ran while you played, so it stutters less.\nEvery run adds a short line to logs\\<game>_performance.log. Performance report: a detailed log of one run.", "高速化：プレイ中に実行されたコードを組み込んで再ビルドし、カクつきを減らします。\n毎回のプレイの要約は logs\\<ゲーム>_performance.log に追記されます。パフォーマンスレポート：1回分の詳しいログ。"), x, 350, 200, 58, new Font(Lang.UiFont, 7.5f), Dim);
             library.Controls.Add(tip);
-            MakeButton(library, Lang.L("Add or build a disc  >", "ディスクを追加・ビルド  >"), 668, 410, 200, 34, false, delegate { Go(choose); });
+            MakeButton(library, Lang.L("Build a game  >", "ゲームをビルド  >"), 668, 410, 200, 34, false, delegate { Go(choose); ShowTab(true); });
         }
+
+        // The disc page has two tabs. MODERN (first, recommended): the Enhanced Edition, everything this project adds, built from the
+        // four discs. LEGACY: one disc as it is, converted to a PC program with a few options (the way the earlier versions built).
+        Panel modernPane, legacyPane;
+        Button tabModern, tabLegacy, modernBuild, modernFind, legacyNext;
+        Label modernDiscs, modernInfo, modernTime;
+        readonly List<Action> speedViews = new List<Action>();
 
         void BuildChoose()
         {
-            Heading(choose, Lang.L("Which discs do you want to build?", "どのディスクをビルドしますか？"));
-            choose.Controls.Add(MakeLabel(Lang.L("Discs found near this program (tick one or more). Your disc images are only read; they are never changed or shared.", "このプログラムの近くで見つかったディスクです（複数選択可）。ディスクイメージは読み込むだけで、変更や共有は一切しません。"), 28, 36, 840, 22, new Font(Lang.UiFont, 9f), Dim));
+            tabModern = MakeButton(choose, Lang.L("MODERN  -  Enhanced Edition", "モダン  -  強化版"), 28, 0, 420, 40, true, delegate { ShowTab(true); });
+            tabLegacy = MakeButton(choose, Lang.L("LEGACY  -  the PS2 game as it was", "レガシー  -  PS2版そのまま"), 452, 0, 416, 40, false, delegate { ShowTab(false); });
+            foreach (Button t in new Button[] { tabModern, tabLegacy }) t.Font = Lang.JP ? new Font(Lang.UiFont, 11f, FontStyle.Bold) : new Font(Display, 13f);
+            modernPane = new Panel(); legacyPane = new Panel();
+            foreach (Panel pane in new Panel[] { modernPane, legacyPane })
+            {
+                pane.Location = new Point(0, 46); pane.Size = new Size(900, 404); pane.BackColor = Back;
+                choose.Controls.Add(pane);
+            }
+
+            // MODERN
+            Label title = MakeLabel(Lang.L("RAW DANGER!  ENHANCED EDITION", "RAW DANGER!  強化版"), 26, 6, 560, 36, Lang.JP ? new Font(Lang.UiFont, 16f, FontStyle.Bold) : new Font(Display, 21f), Accent);
+            modernPane.Controls.Add(title);
+            Label badge = MakeLabel(Lang.L("RECOMMENDED", "おすすめ"), 600, 12, 130, 24, new Font(Lang.UiFont, 9.5f, FontStyle.Bold), Theme.OnAccent);
+            badge.BackColor = Alarm; badge.TextAlign = ContentAlignment.MiddleCenter;
+            modernPane.Controls.Add(badge);
+            modernPane.Controls.Add(MakeLabel(Lang.L(
+                "The PC port with everything this project adds, all switched in the game (F1):\n"
+                + "   - both voice tracks, English and the original Japanese (48 kHz), shouts and calls included\n"
+                + "   - the US or the original Japanese textures, logo and opening film (the US release by default)\n"
+                + "   - widescreen, higher resolution, anti-aliasing, the PS2's colour filter on the GPU, ambient occlusion, rain on the lens\n"
+                + "   - mouse and keyboard, a wider camera, achievements, fast loading, the debug menus\n"
+                + "Built from four discs: your US and Japanese game discs and the two Japanese demos. They are only read.",
+                "このプロジェクトのすべての機能を入れたPC版。すべてゲーム内（F1）で切り替えられます：\n"
+                + "   - 英語と日本語オリジナル（48 kHz）の両方の音声（叫び声や呼び声も）\n"
+                + "   - 北米版または日本版のテクスチャ・ロゴ・オープニング映像（初期設定は北米版）\n"
+                + "   - ワイド画面、高解像度、アンチエイリアス、GPUによるPS2の色フィルター、アンビエントオクルージョン、レンズの雨\n"
+                + "   - マウスとキーボード、広いカメラ、実績、高速ロード、デバッグメニュー\n"
+                + "北米版と日本版のゲームディスク、日本の体験版2枚の計4枚から作ります。ディスクは読み込むだけです。"),
+                28, 48, 840, 118, new Font(Lang.UiFont, 9.5f), Text1));
+            modernDiscs = MakeLabel("", 28, 172, 520, 88, new Font(Lang.UiFont, 9.5f), Text1);
+            modernPane.Controls.Add(modernDiscs);
+            modernFind = MakeButton(modernPane, Lang.L("Find the missing discs...", "足りないディスクを探す..."), 568, 176, 300, 34, false, delegate { LocateMissing(); });
+            modernBuild = MakeButton(modernPane, Lang.L("BUILD THE ENHANCED EDITION", "強化版をビルド"), 568, 218, 300, 48, true, delegate
+            {
+                DiscInfo plus = discs.Find(Enhanced.Is);
+                if (plus == null || plus.Error != "") return;
+                BuildDiscs(new List<DiscInfo> { plus }, false);
+            });
+            modernBuild.Font = Lang.JP ? new Font(Lang.UiFont, 11f, FontStyle.Bold) : new Font(Display, 12.5f);
+            modernTime = MakeLabel("", 568, 270, 300, 34, new Font(Lang.UiFont, 8.5f), Dim);
+            modernPane.Controls.Add(modernTime);
+            modernInfo = MakeLabel("", 28, 262, 520, 30, new Font(Lang.UiFont, 8.5f), Dim);
+            modernPane.Controls.Add(modernInfo);
+            SpeedPicker(modernPane, 28, 300);
+            MakeButton(modernPane, Lang.L("Build tools...", "ビルドツール..."), 708, 306, 160, 30, false, delegate { using (BuildToolsDialog d = new BuildToolsDialog(settings)) d.ShowDialog(this); FillModern(); });
+
+            // LEGACY
+            legacyPane.Controls.Add(MakeLabel(Lang.L("One disc, converted to a PC program as it is, with a few options. For everything this project adds, use MODERN.",
+                                                      "1枚のディスクをそのままPC用に変換します（オプション少なめ）。すべての機能を使うには「モダン」を。"), 28, 4, 840, 22, new Font(Lang.UiFont, 9f), Dim));
             discList = new CheckedListBox();
-            discList.Location = new Point(28, 64);
-            discList.Size = new Size(840, 250);
+            discList.Location = new Point(28, 30);
+            discList.Size = new Size(840, 220);
             discList.BackColor = Card;
             discList.ForeColor = Text1;
             discList.BorderStyle = BorderStyle.None;
             discList.CheckOnClick = true;
             discList.Font = new Font(Lang.UiFont, 10.5f);
             discList.SelectedIndexChanged += delegate { ShowDiscInfo(); };
-            // the Enhanced Edition needs all four discs: ticking it while some are missing asks for them
-            discList.ItemCheck += delegate(object o, ItemCheckEventArgs e)
-            {
-                DiscInfo d = ((DiscItem)discList.Items[e.Index]).Disc;
-                if (e.NewValue != CheckState.Checked || !Enhanced.Is(d) || d.Error == "" || locating) return;
-                e.NewValue = CheckState.Unchecked;
-                BeginInvoke((MethodInvoker)delegate { LocateMissing(); });
-            };
-            choose.Controls.Add(discList);
-            chooseInfo = MakeLabel("", 28, 320, 840, 70, new Font(Lang.UiFont, 9f), Dim);
-            choose.Controls.Add(chooseInfo);
-            MakeButton(choose, Lang.L("Browse for a disc image...", "ディスクイメージを参照..."), 28, 396, 240, 34, false, delegate { BrowseDisc(); });
-            chooseTime = MakeLabel("", 284, 404, 584, 22, new Font(Lang.UiFont, 9f), Dim);
-            choose.Controls.Add(chooseTime);
+            legacyPane.Controls.Add(discList);
+            chooseInfo = MakeLabel("", 28, 256, 840, 70, new Font(Lang.UiFont, 9f), Dim);
+            legacyPane.Controls.Add(chooseInfo);
+            MakeButton(legacyPane, Lang.L("Browse for a disc image...", "ディスクイメージを参照..."), 28, 334, 240, 34, false, delegate { BrowseDisc(); });
+            chooseTime = MakeLabel("", 284, 342, 584, 22, new Font(Lang.UiFont, 9f), Dim);
+            legacyPane.Controls.Add(chooseTime);
             discList.ItemCheck += delegate { BeginInvoke((MethodInvoker)delegate { chooseTime.Text = BuildTime.ForList(settings, Ticked()); }); };
+
             chooseBack = MakeButton(choose, Lang.L("<  Back", "<  戻る"), 28, 456, 120, 36, false, delegate { RefreshLibrary(); Go(AnyBuilt() ? library : choose); });
-            MakeButton(choose, Lang.L("Next  >", "次へ  >"), 748, 456, 120, 36, true, delegate { if (Ticked().Count == 0) { chooseInfo.Text = Lang.L("Tick at least one disc.", "ディスクを1つ以上選んでください。"); chooseInfo.ForeColor = Bad; return; } if (Ticked().TrueForAll(Enhanced.Is)) { BuildDiscs(Ticked(), false); return; }   // the Enhanced Edition has no build options: everything is in it, switched in the game
-                FillOptions(); Go(options); });
+            legacyNext = MakeButton(choose, Lang.L("Next  >", "次へ  >"), 748, 456, 120, 36, true, delegate
+            {
+                if (Ticked().Count == 0) { chooseInfo.Text = Lang.L("Tick at least one disc.", "ディスクを1つ以上選んでください。"); chooseInfo.ForeColor = Bad; return; }
+                FillOptions(); Go(options);
+            });
+            ShowTab(true);
+        }
+
+        void ShowTab(bool modern)
+        {
+            modernPane.Visible = modern; legacyPane.Visible = !modern; legacyNext.Visible = !modern;
+            foreach (Button t in new Button[] { tabModern, tabLegacy })
+            {
+                Pick(t, (t == tabModern) == modern);
+            }
+            if (modern) FillModern();
+        }
+
+        // The four discs the Enhanced Edition is made from, found or not, and the build button.
+        void FillModern()
+        {
+            if (modernDiscs == null) return;
+            string[][] want = {
+                new string[] { "RawDanger-US", Lang.L("Raw Danger! (USA), SLUS-21501", "Raw Danger!（北米版）SLUS-21501") },
+                new string[] { "ZZT2-JP", Lang.L("Zettai Zetsumei Toshi 2 (Japan), SLPS-25606", "絶体絶命都市2（日本版）SLPS-25606") },
+                new string[] { "ZZT2-DemoA", Lang.L("Zettai Zetsumei Toshi 2 demo Type-A", "絶体絶命都市2 体験版 Type-A") },
+                new string[] { "ZZT2-DemoB", Lang.L("Zettai Zetsumei Toshi 2 demo Type-B", "絶体絶命都市2 体験版 Type-B") } };
+            StringBuilder sb = new StringBuilder();
+            int found = 0;
+            foreach (string[] w in want)
+            {
+                bool here = discs.Exists(delegate(DiscInfo d) { return d.Error == "" && !d.Modified && d.GameName.StartsWith(w[0], StringComparison.OrdinalIgnoreCase); });
+                if (here) found++;
+                sb.AppendLine((here ? "\u2714  " : "\u2716  ") + w[1] + (here ? "" : Lang.L("   (missing)", "   （ありません）")));
+            }
+            modernDiscs.Text = sb.ToString();
+            modernDiscs.ForeColor = found == 4 ? Good : Text1;
+            DiscInfo plus = discs.Find(Enhanced.Is);
+            bool ready = plus != null && plus.Error == "";
+            modernBuild.Enabled = ready && current == null;
+            modernFind.Visible = !ready;
+            modernBuild.Text = ready && Built(plus) ? Lang.L("REBUILD THE ENHANCED EDITION", "強化版を再ビルド") : Lang.L("BUILD THE ENHANCED EDITION", "強化版をビルド");
+            modernTime.Text = (ready ? BuildTime.ForList(settings, new List<DiscInfo> { plus }) + "\n" : "") + BuildTools.Note(settings);
+            modernInfo.Text = ready ? (Built(plus) ? Lang.L("Built. Rebuilding keeps your saves and settings.", "ビルド済み。再ビルドしてもセーブと設定は残ります。") : "")
+                                    : Lang.L(found + " of 4 discs found. Without all four, the LEGACY tab can still build each disc on its own.", "4枚中" + found + "枚が見つかりました。そろわない場合も「レガシー」で1枚ずつビルドできます。");
+        }
+
+        // Build speed: three buttons (light, balanced, full) and what the choice does; every copy of it on the pages stays in step.
+        void SpeedPicker(Panel parent, int x, int y)
+        {
+            parent.Controls.Add(MakeLabel(Lang.L("Build speed", "ビルド速度"), x, y + 6, 110, 22, new Font(Lang.UiFont, 9.5f, FontStyle.Bold), Text1));
+            Button[] b = new Button[3];
+            string[] names = { Lang.L("Light", "軽め"), Lang.L("Balanced", "標準"), Lang.L("Full", "最大") };
+            int[] value = { 2, 1, 0 };
+            Label note = MakeLabel("", x, y + 38, 840, 40, new Font(Lang.UiFont, 8.5f), Dim);
+            parent.Controls.Add(note);
+            Action view = delegate
+            {
+                for (int i = 0; i < 3; i++)
+                {
+                    Pick(b[i], BuildLoad.Speed(settings) == value[i]);
+                }
+                note.Text = BuildLoad.Describe(settings);
+                if (modernTime != null && modernPane != null && modernPane.Visible) FillModern();
+                if (chooseTime != null) chooseTime.Text = BuildTime.ForList(settings, Ticked());
+            };
+            for (int i = 0; i < 3; i++)
+            {
+                int v = value[i];
+                b[i] = MakeButton(parent, names[i], x + 120 + i * 124, y, 118, 32, false, delegate
+                {
+                    settings.BuildGentle = v.ToString(); settings.Save();
+                    foreach (Action a in speedViews) a();
+                });
+            }
+            speedViews.Add(view);
+            view();
         }
 
         void BuildOptions()
         {
             Heading(options, Lang.L("Options", "オプション"));
             wideBox = new CheckBox(); wideBox.Text = Lang.L("Widescreen 16:9 (the game is drawn for wide monitors; can be switched in the game)", "ワイド画面 16:9（ワイドモニター向けに描画します。ゲーム内でも切替可）"); wideBox.Checked = true;
-            filterBox = new CheckBox(); filterBox.Text = Lang.L("Original PS2 Post Processing Filter (the console's glow, tint and haze; now one fast GPU pass; can be switched in the game)", "オリジナルPS2ポストプロセスフィルター（本体と同じ光彩・色調・霞。高速なGPU処理。ゲーム内でも切替可）"); filterBox.Checked = true;
+            filterBox = new CheckBox(); filterBox.Text = Lang.L("PS2 post-processing filter (the console's glow, tint and haze, drawn in one fast GPU pass; can be switched in the game)", "オリジナルPS2ポストプロセスフィルター（本体と同じ光彩・色調・霞。高速なGPU処理。ゲーム内でも切替可）"); filterBox.Checked = true;
             fixBox = new CheckBox(); fixBox.Text = Lang.L("Fast-loading fix (always on: without it, the game hangs on its first loading screen)", "高速ロード修正（常に有効：これがないと最初のロード画面で止まります）"); fixBox.Checked = true; fixBox.AutoCheck = false; fixBox.Cursor = Cursors.No;   // always on, but drawn normally so it stays readable
             logosBox = new CheckBox(); logosBox.Text = Lang.L("Skip the intro logos (Irem, Agetec): straight to the opening movie (can be switched in the game)", "起動時のロゴ（Irem、Agetec）を飛ばしてオープニングムービーへ（ゲーム内でも切替可）"); logosBox.Checked = false;
             shortcutBox = new CheckBox(); shortcutBox.Text = Lang.L("Add a desktop shortcut for each game", "各ゲームのショートカットをデスクトップに作成する"); shortcutBox.Checked = true;
-            gentleBox = new CheckBox();
-            gentleBox.Checked = BuildLoad.Gentle(settings);
-            GentleText();
-            gentleBox.CheckedChanged += delegate { settings.BuildGentle = gentleBox.Checked ? "1" : "0"; settings.Save(); GentleText(); };
             int y = 48;
-            foreach (CheckBox c in new CheckBox[] { fixBox, wideBox, filterBox, logosBox, shortcutBox, gentleBox })
+            foreach (CheckBox c in new CheckBox[] { fixBox, wideBox, filterBox, logosBox, shortcutBox })
             {
                 c.Location = new Point(32, y); c.Size = new Size(820, 30); c.ForeColor = Text1; c.BackColor = Back; c.Font = new Font(Lang.UiFont, 10.5f);
                 options.Controls.Add(c);
                 y += 38;
             }
-            optionsInfo = MakeLabel("", 32, 282, 830, 168, new Font(Lang.UiFont, 9.5f), Dim);
+            SpeedPicker(options, 32, 240);
+            optionsInfo = MakeLabel("", 32, 322, 830, 128, new Font(Lang.UiFont, 9.5f), Dim);
             options.Controls.Add(optionsInfo);
             MakeButton(options, Lang.L("<  Back", "<  戻る"), 28, 456, 120, 36, false, delegate { Go(choose); });
+            MakeButton(options, Lang.L("Build tools...", "ビルドツール..."), 168, 456, 160, 36, false, delegate { using (BuildToolsDialog d = new BuildToolsDialog(settings)) d.ShowDialog(this); FillOptions(); });
             MakeButton(options, Lang.L("Build", "ビルド"), 688, 456, 180, 36, true, delegate { BuildDiscs(Ticked(), false); });
-        }
-
-        void GentleText()
-        {
-            string n = BuildLoad.Jobs(settings).ToString(), all = Environment.ProcessorCount.ToString();
-            gentleBox.Text = gentleBox.Checked
-                ? Lang.L("Keep the PC usable while building (" + n + " compilers on " + all + " threads, low priority); untick for the fastest build",
-                         "ビルド中もPCを快適に使う（" + all + " スレッドでコンパイラー " + n + " 個、低優先度）。最速でビルドするならチェックを外す")
-                : Lang.L("Keep the PC usable while building (off: " + n + " compilers at full priority, the fastest build)",
-                         "ビルド中もPCを快適に使う（オフ：コンパイラー " + n + " 個を通常優先度で、最速）");
         }
 
         void BuildBuilding()
@@ -555,11 +682,13 @@ namespace RawDangerLauncher
             discList.Items.Clear();
             foreach (DiscInfo d in discs)
             {
+                if (Enhanced.Is(d)) continue;   // on the MODERN tab
                 string line = d.Title + "   -   " + (Enhanced.Is(d) ? (d.Error != "" ? d.Error : Lang.L("from all four discs", "4枚すべてのディスクから") + (Built(d) ? Lang.L(", built", "、ビルド済み") : ""))
                     : d.Modified ? Lang.L("NOT COMPATIBLE: modified disc (undub?)", "非対応：改造ディスク（音声差し替え版？）")
                     : d.Error != "" ? Lang.L("cannot be read", "読み込めません") : d.Region + ", " + d.Serial + (Built(d) ? Lang.L(", built", "、ビルド済み") : ""));
                 discList.Items.Add(new DiscItem(d, line), false);
             }
+            FillModern();
             if (discs.Count == 0) chooseInfo.Text = Lang.L("No disc images were found near this program. Use 'Browse for a disc image...' (.iso, or a .bin with its .cue).", "ディスクイメージが見つかりませんでした。「ディスクイメージを参照...」から選んでください（.iso、または .cue 付きの .bin）。");
         }
 
@@ -618,9 +747,7 @@ namespace RawDangerLauncher
                 DiscInfo plus = Enhanced.Make(discs, settings);
                 discs.Add(plus);
                 FillDiscList();
-                for (int i = 0; i < discList.Items.Count; i++)
-                    if (Enhanced.Is(((DiscItem)discList.Items[i]).Disc)) { discList.SelectedIndex = i; if (plus.Error == "") discList.SetItemChecked(i, true); }
-                if (plus.Error != "") { chooseInfo.ForeColor = Bad; chooseInfo.Text = plus.Error; }
+                ShowTab(true);
             }
             finally { locating = false; }
         }
@@ -689,21 +816,7 @@ namespace RawDangerLauncher
             optionsInfo.Text = sb.ToString();
         }
 
-        // The tools pack (engine\ps2-native-recomp\downloads): which of the build tools are already here.
-        string ToolsNote()
-        {
-            if (settings.PnrDir == "") return "";
-            if (File.Exists(Path.Combine(settings.PnrDir, Path.Combine("tools", Path.Combine("portable", "env.ps1"))))) return Lang.L("Build tools: already set up.", "ビルドツール：準備済みです。");
-            string dir = Path.Combine(settings.PnrDir, "downloads");
-            string[] all = { "llvm-mingw-20260908-ucrt-x86_64.zip", "cmake-4.4.4-windows-x86_64.zip", "ninja-win.zip", "MinGit-2.56.0.2-64-bit.zip",
-                             "wgpu-windows-x86_64-gnu-release.zip", "SDL2-devel-2.32.10-mingw.zip", "dxc_2026_09_29.zip",
-                             "python-3.13.16-embed-amd64.zip", "busybox-w64u-FRP-6075-g169694ebd.exe" };
-            int have = 0;
-            foreach (string f in all) if (File.Exists(Path.Combine(dir, f))) have++;
-            if (have == all.Length) return Lang.L("Build tools: all included (tools pack), no download needed.", "ビルドツール：すべて同梱済み（ツールパック）。ダウンロードは不要です。");
-            if (have > 0) return Lang.L("Build tools: " + have + " of " + all.Length + " included (tools pack); the rest is downloaded once.", "ビルドツール：" + all.Length + " 個中 " + have + " 個を同梱（ツールパック）。残りは初回のみダウンロードします。");
-            return Lang.L("Build tools: not included; they are downloaded once (about 330 MB).", "ビルドツール：同梱されていません。初回のみダウンロードします（約330 MB）。");
-        }
+        string ToolsNote() { return BuildTools.Note(settings); }
 
         // ---- play, shortcut, folder ----------------------------------------------------------------------------------------
 
@@ -801,6 +914,8 @@ namespace RawDangerLauncher
                 if (Enhanced.Is(d)) { list.Add(s); continue; }   // every feature built in; the switchable ones start as the patch file says and change in the game
                 if (s.IndexOf("fix", StringComparison.OrdinalIgnoreCase) >= 0) list.Add(s);
                 else if (s.StartsWith("Direct mouse look", StringComparison.OrdinalIgnoreCase)) list.Add(s);   // always built in: the mouse turns the camera itself (v0.7.9)
+                else if (s.StartsWith("Free camera tilt", StringComparison.OrdinalIgnoreCase)) list.Add(s);   // a switch, on by default (v0.8.6)
+                else if (s.StartsWith("Debug menu", StringComparison.OrdinalIgnoreCase)) list.Add(s);   // built in: the developers' menu answers Cross (v0.8.6)
                 else if (s.StartsWith("Widescreen", StringComparison.OrdinalIgnoreCase) && (wideBox.Checked || Enhanced.Is(d))) list.Add(s);
                 else if (s.IndexOf("post", StringComparison.OrdinalIgnoreCase) >= 0) list.Add(s);   // always built in: a switch (Original PS2 Post Processing Filter, on by default)
                 else if (s.StartsWith("Skip intro logos", StringComparison.OrdinalIgnoreCase) && (logosBox.Checked || Enhanced.Is(d))) list.Add(s);
@@ -813,6 +928,8 @@ namespace RawDangerLauncher
             if (settings.PnrDir == "") { MessageBox.Show(Lang.L("The engine folder (engine\\ps2-native-recomp) is missing next to this program.", "エンジンフォルダ（engine\\ps2-native-recomp）がこのプログラムの隣にありません。"), Program.AppName); return; }
             list.RemoveAll(delegate(DiscInfo d) { return d == null || d.Error != ""; });
             if (list.Count == 0) return;
+            int gathered = BuildTools.Gather(settings);   // build tools saved elsewhere on this PC: no download for those
+            if (gathered > 0) Program.Trace("build tools: copied " + gathered + " saved file(s) into the engine's downloads");
             finished.Clear();
             stopping = false;
             log.Clear();
@@ -845,7 +962,7 @@ namespace RawDangerLauncher
             DiscInfo d = job.Disc;
             StringBuilder s = new StringBuilder();
             if (BuildLoad.Gentle(settings))   // first, so every program the build starts (bash, cmake, ninja, clang) inherits it
-                s.AppendLine("try { (Get-Process -Id $PID).PriorityClass = 'BelowNormal' } catch { }");
+                s.AppendLine("try { (Get-Process -Id $PID).PriorityClass = '" + (BuildLoad.Speed(settings) == 2 ? "Idle" : "BelowNormal") + "' } catch { }");
             s.AppendLine("$ErrorActionPreference = 'Continue'");
             s.AppendLine("$ProgressPreference = 'SilentlyContinue'");
             s.AppendLine("Set-Location -LiteralPath " + Ps(pnr));
@@ -899,7 +1016,7 @@ namespace RawDangerLauncher
                 DiscInfo jp = Enhanced.Japanese(discs);
                 s.AppendLine("Write-Output '== launcher: making the Enhanced Edition disc (US disc + Japanese voices)'");
                 s.AppendLine("& python -I " + Ps(Path.Combine(Path.Combine(Settings.ExeDir, "tools"), "rd_hybrid.py")) + " --us " + Ps(d.ImagePath) + " --jp " + Ps(jp.ImagePath)
-                             + " --out " + Ps(job.Image) + " 2>&1 | ForEach-Object { \"$_\" }");
+                             + " --out " + Ps(job.Image) + " --version " + Ps(Program.Version) + " 2>&1 | ForEach-Object { \"$_\" }");
                 s.AppendLine("if ($LASTEXITCODE) { exit $LASTEXITCODE }");
                 // the Japanese pictures inside maps and models, as texture overrides (used while the Japanese faces are on)
                 s.AppendLine("Write-Output '== launcher: the Japanese pictures inside the maps and models'");
@@ -1028,8 +1145,8 @@ namespace RawDangerLauncher
                 job.Estimate = BuildTime.Estimate(settings, d.GameName, job.Faster, out job.EstimateKnown);
                 job.Clock = Stopwatch.StartNew();
                 p.Start();
-                if (BuildLoad.Gentle(settings)) try { p.PriorityClass = ProcessPriorityClass.BelowNormal; } catch (Exception) { }
-                Log("== launcher: " + psi.EnvironmentVariables["PS2_JOBS"] + " compiler jobs" + (BuildLoad.Gentle(settings) ? ", below-normal priority (Options: untick \"Keep the PC usable\" for full speed)" : ", full speed"));
+                if (BuildLoad.Gentle(settings)) try { p.PriorityClass = BuildLoad.Priority(settings); } catch (Exception) { }
+                Log("== launcher: build speed " + (BuildLoad.Speed(settings) == 0 ? "full" : BuildLoad.Speed(settings) == 2 ? "light" : "balanced") + ", " + psi.EnvironmentVariables["PS2_JOBS"] + " compiler jobs, " + BuildLoad.Priority(settings) + " priority");
                 p.BeginOutputReadLine();
                 p.BeginErrorReadLine();
                 job.Process = p;

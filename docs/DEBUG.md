@@ -50,3 +50,16 @@ while a developers' scene is on screen they are drawn at the font's own size (cr
 - The program prints "MAP Wether" and other debug strings that nothing shows; the engine reads the weather word it sets
   (0x48F310) for the rain on the lens.
 - SE TEST, TEX LIST and FLAG EDIT exist only inside DEBSEL.
+
+## The debug menu on the retail program (v0.8.6)
+
+DEBSEL (scene 40, Shift+F7) has three lines on the released game: MAP SELECT (scene 41), SOUND TEST (scene -1: nothing) and EXIT
+(scene 6, the logos). It read the pad all along, but took only Circle or Start to choose (the Japanese way), so it seemed dead;
+the pnach section [Debug menu answers Cross] adds Cross.
+
+The longer developers' menu (GATE, RESTART, PLAYER MOVE, R2 LAND PATH, LEVEL, RUCK, ITEM, FLAG / EFFECT / FOG / WATERPLANE EDIT,
+SYS and GAME INFO, DEATH, DAMAGE, MAP / BOX / RAIL DISP, LAND and OBJ HIT, COCKPIT, PAUSE, SKIP ICON, VIDEO MODE, DEPTH OF FIELD,
+TEX LIST, SE TEST, ADD ITEM, DRY_PLAYER, SHADOWMAP TEST...) is only a table of 37 lines of 56 bytes at 0x3BC810, set up at boot
+(0x187F60). The task that drew it is an empty function (0x187EF0), and of its values only line 5 (R2 LAND PATH) is still read
+(0x1666DC). The code behind the other lines was taken out before release, so those functions cannot be switched on.
+

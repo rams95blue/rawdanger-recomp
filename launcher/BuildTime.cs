@@ -19,13 +19,18 @@ namespace RawDangerLauncher
         struct MemoryStatus { public uint Length, Load; public ulong Total, Avail, TotalPage, AvailPage, TotalVirtual, AvailVirtual, AvailExtended; }
         [DllImport("kernel32.dll")] static extern bool GlobalMemoryStatusEx(ref MemoryStatus m);
 
+        // Build speed (launcher.ini BuildGentle): 0 = full (every thread, normal priority, the fastest build), 1 = balanced (the
+        // default: a quarter of the threads left free, below-normal priority), 2 = light (a quarter of the threads, idle priority:
+        // the PC stays quick for other work, the build takes about three times as long)
+        public static int Speed(Settings s) { return s.BuildGentle == "0" ? 0 : s.BuildGentle == "2" ? 2 : 1; }
+
         public static int Jobs(Settings s)
         {
             int fixedJobs;
             if (int.TryParse(s.BuildJobs, out fixedJobs) && fixedJobs > 0) return fixedJobs;
             int cores = Math.Max(1, Environment.ProcessorCount);
-            if (s.BuildGentle == "0") return cores + 2;
-            int jobs = cores <= 2 ? 1 : cores <= 4 ? cores - 1 : cores - Math.Max(2, cores / 4);
+            if (Speed(s) == 0) return cores + 2;
+            int jobs = Speed(s) == 2 ? Math.Max(1, cores / 4) : cores <= 2 ? 1 : cores <= 4 ? cores - 1 : cores - Math.Max(2, cores / 4);
             try
             {
                 MemoryStatus m = new MemoryStatus(); m.Length = (uint)Marshal.SizeOf(typeof(MemoryStatus));
@@ -39,7 +44,27 @@ namespace RawDangerLauncher
             return Math.Max(1, jobs);
         }
 
-        public static bool Gentle(Settings s) { return s.BuildGentle != "0"; }
+        public static bool Gentle(Settings s) { return Speed(s) != 0; }
+
+        public static System.Diagnostics.ProcessPriorityClass Priority(Settings s)
+        {
+            return Speed(s) == 2 ? System.Diagnostics.ProcessPriorityClass.Idle : Speed(s) == 1 ? System.Diagnostics.ProcessPriorityClass.BelowNormal : System.Diagnostics.ProcessPriorityClass.Normal;
+        }
+
+        public static string Describe(Settings s)
+        {
+            string n = Jobs(s).ToString(), all = Environment.ProcessorCount.ToString();
+            string c = Jobs(s) == 1 ? " compiler on " : " compilers on ";
+            switch (Speed(s))
+            {
+                case 0: return Lang.L("Full: " + n + c + all + " threads at normal priority. The fastest build; the PC is busy until it ends.",
+                                      "最大：" + all + " スレッドでコンパイラー " + n + " 個、通常優先度。最速ですが、終わるまでPCは重くなります。");
+                case 2: return Lang.L("Light: " + n + c + all + " threads at the lowest priority. The PC stays quick for other work; the build takes about three times as long.",
+                                      "軽め：" + all + " スレッドでコンパイラー " + n + " 個、最低優先度。PCは軽いままですが、ビルドに約3倍かかります。");
+                default: return Lang.L("Balanced: " + n + c + all + " threads at below-normal priority. Fast, and the PC stays usable.",
+                                       "標準：" + all + " スレッドでコンパイラー " + n + " 個、やや低い優先度。速く、PCも使えます。");
+            }
+        }
     }
 
     public static class BuildTime
@@ -86,6 +111,8 @@ namespace RawDangerLauncher
             if (t <= 0 && LogTimes().TryGetValue(game, out logged)) t = logged;
             if (t > 0) known = true; else t = Typical(game);
             if (faster) t = t * 3 / 4;   // "Make it faster" skips the test runs
+            if (BuildLoad.Speed(s) == 2) t = t * 3;   // light: a quarter of the threads at idle priority (a past time was likely balanced)
+            else if (BuildLoad.Speed(s) == 0) t = t * 4 / 5;
             return Math.Max(30, t);
         }
 

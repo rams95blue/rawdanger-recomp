@@ -236,9 +236,12 @@ std::atomic<int> g_master_volume{100};  // rawdanger-recomp: keys.ini master_vol
 std::vector<std::size_t> g_recomp_row_section;  // the Game options page's lines -> recomp::sections() (widescreen is on the Graphics page)
 // rawdanger-recomp: the developers' menus left on the disc. PS2_DEBUG_SCENES="ADDRESS;DEBUG;MAPSEL": the game's next-scene word
 // (Raw Danger: 0x48F48C, read by its scene switch at 0x16ED80; 0x48F488 is the scene it runs) and the numbers of its scenes
-// DEBSEL (40, the debug menu: map select, player move, flags, fog, info, item, sound test...) and MAP SEL (41); 0 leaves one out.
-// The retail disc lacks the debug menu's font (its lines come out as stray pictures), so the launcher offers the map select only
-// ("0x48F48C;0;41"). Opened from Settings > Game (lines at the end) or F7 (map select; Shift+F7 the debug menu when offered).
+// DEBSEL (40, the debug menu) and MAP SEL (41); 0 leaves one out. On the retail program DEBSEL has three lines: MAP SELECT, SOUND
+// TEST (its scene is -1: it does nothing) and EXIT (back to the logos); its text reads through PS2_SJIS_TEXT, and it takes Circle or
+// Start (Cross too with the pnach section [Debug menu answers Cross]). The longer developers' menu (player move, flags, fog, info,
+// item...) is only a table of values in the retail program (0x3BC810, 37 lines of 56 bytes): the code that drew it was taken out
+// before release, and of its values only line 5 (R2 LAND PATH) is still read. The launcher offers both ("0x48F48C;40;41").
+// Opened from Settings > Game (lines at the end), F7 (map select) or Shift+F7 (the debug menu).
 // In the map select: up / down the line, left / right the value, Cross loads the map at that gate.
 constexpr std::size_t kDebugRow = static_cast<std::size_t>(-2), kMapSelRow = static_cast<std::size_t>(-3);
 struct DebugScenes { std::uint32_t address = 0, debug = 0, mapsel = 0, from = 0; bool set = false; };
@@ -335,7 +338,7 @@ std::string g_key_note;  // the keys page's message line: what the last change d
 std::string g_recomp_note;  // the Recomp options page's message line
 
 // rawdanger-recomp: the game's switchable post processing (recomp.ini "Original PS2 Post Processing Filter", on = the filter; builds
-// before v0.8.0: "No post-processing filter", on = no filter), shown as Settings > Picture > Original PS2 Post Processing Filter;
+// before v0.8.0: "No post-processing filter", on = no filter), shown as Settings > Picture > PS2 post-processing filter;
 // -1 when the build has none
 bool post_filter_on();  // below
 int blur_section() {
@@ -1396,6 +1399,7 @@ void menu_paint(bool show_again) {
         v.popup_size = g_keys.popup_size;
         v.filter_pass = ps2::game_filter_pass();
         v.ambient_occlusion = ps2::ambient_occlusion();
+        v.field_of_view = g_keys.field_of_view;
         v.keys_on_screen = g_keys.keys_on_screen != 0;
         v.game_waits = g_menu_hold.load();
         v.master_volume = g_master_volume;
@@ -1611,7 +1615,8 @@ void open_debug_scene(bool map_select) {
     }   // already there (it has no way out but loading a map: going back to the game scene leaves it running)
     g_scene_before_debug = now;
     g_scene_request = target;
-    set_notice(map_select ? "Map select: up/down a line, left/right its value, Cross loads the map" : "The developers' debug menu");
+    set_notice(map_select ? "Map select: up/down a line, left/right its value, Cross loads the map"
+                          : "Debug menu: up/down a line, Cross or Circle chooses (Sound test does nothing on the released game)");
     g_scene_request_until = SDL_GetTicks() + 3000;
     ps2::st32(d.address, g_scene_request);
 }
@@ -2156,9 +2161,12 @@ void native_option_rows() {
             static const char *const kFilters[] = {"RAW", "SOFT", "SHARP", "FSR 1"};
             return std::string(kFilters[std::clamp(g_look / 2, 0, 3)]);
         }, [](int d) { cycle_look(d); });
+    spin("Field of view", "How wide the camera sees", [] {
+            return g_keys.field_of_view == 100 ? std::string("100 % (PS2)") : std::to_string(g_keys.field_of_view) + " %";
+        }, command(Command::field_of_view));
     spin("Anti-aliasing", "Smooth edges", [] {
-            static const char *const kAa[] = {"OFF", "EDGES", "SMAA LOW", "SMAA MEDIUM", "SMAA HIGH", "SMAA ULTRA"};
-            return std::string(kAa[std::clamp(g_keys.smaa ? 1 + g_keys.smaa : (g_look & 1) ? 1 : 0, 0, 5)]);
+            static const char *const kAa[] = {"OFF", "EDGES", "SMAA LOW", "SMAA MEDIUM", "SMAA HIGH", "SMAA ULTRA", "FXAA"};
+            return std::string(kAa[std::clamp(g_keys.smaa ? 1 + g_keys.smaa : (g_look & 1) ? 1 : 0, 0, 6)]);
         }, command(Command::antialias));
     spin("Sharpen", "Contrast-adaptive sharpening", [] {
             static const char *const kLevels[] = {"OFF", "LOW", "MEDIUM", "HIGH"};
@@ -2308,7 +2316,7 @@ void menu_command(quickmenu::Command c, int step) {
         const int blur = blur_section();
         if (blur < 0) break;
         recomp::toggle(static_cast<std::size_t>(blur), g_recomp_note), sync_jp_textures();
-        set_notice(post_filter_on() ? "Original PS2 Post Processing Filter: on (as on the console)" : "Original PS2 Post Processing Filter: off");
+        set_notice(post_filter_on() ? "PS2 post-processing filter: on (as on the console)" : "PS2 post-processing filter: off");
         break;
     }
     case Command::mouse_look:
@@ -2394,6 +2402,11 @@ void menu_command(quickmenu::Command c, int step) {
         set_notice(v == 0 ? std::string("Master volume: muted") : "Master volume: " + std::to_string(v) + "%");
         break;
     }
+    case Command::field_of_view:
+        g_keys.field_of_view = std::clamp(g_keys.field_of_view + (step < 0 ? -10 : 10), 80, 150);
+        rewrite_keys_file([](const std::string &t) { return keymap::with_field_of_view(t, g_keys.field_of_view); }, "field of view");
+        set_notice("Field of view: " + std::to_string(g_keys.field_of_view) + " %" + (g_keys.field_of_view == 100 ? " (as on the PS2)" : ""));
+        break;
     case Command::ambient_occlusion: {
         static const char *const kLevels[] = {"off", "light", "strong"};
         g_keys.ambient_occlusion = (g_keys.ambient_occlusion + (step < 0 ? 2 : 1)) % 3;
@@ -2949,6 +2962,31 @@ void poll() {
             recomp::set_defer_textures(in_area);
         }
     }
+    // rawdanger-recomp: the field of view (keys.ini field_of_view, % of the game's). PS2_CAMERA_ZOOM="@BLOCK,ZOOM,STATE": the camera
+    // block, the offset of its zoom factor (a float, 1.0 normally: the projection's screen distance is 768 times it) and of the byte
+    // that is non-zero while the game animates a zoom of its own. The factor is written only while the game's zoom is idle and
+    // the factor is the game's 1.0 or the one written here last, so the game's own zooms play as they are.
+    {
+        static bool parsed = false, set = false;
+        static std::uint32_t block = 0, zoom = 0, state = 0;
+        static float written = 1.0f;
+        if (!parsed) {
+            parsed = true;
+            if (const char *v = std::getenv("PS2_CAMERA_ZOOM"); v && *v == '@')
+                set = std::sscanf(v + 1, "%x,%x,%x", &block, &zoom, &state) == 3;
+        }
+        if (set) {
+            const auto get = [](std::uint32_t a) { const std::uint32_t w = ps2::ld32(a); float f; std::memcpy(&f, &w, 4); return f; };
+            const float want = 100.0f / static_cast<float>(std::clamp(g_keys.field_of_view, 80, 150));
+            const float now = get(block + zoom);
+            if ((ps2::ld32(block + state) & 0xFFu) == 0 && (now == 1.0f || now == written) && now != want) {
+                std::uint32_t w; std::memcpy(&w, &want, 4);
+                ps2::st32(block + zoom, w);
+                written = want;
+            }
+        }
+    }
+
     // rawdanger-recomp: the camera's up / down range (PS2_CAMERA_PITCH="POINTER,LOW,HIGH,GAME_LOW,GAME_HIGH,NEW_LOW,NEW_HIGH": a word
     // holding the camera block's address, or "@" and the block itself, the offsets of its two limits (floats), the game's values and the
     // wider ones; written only while the block holds the game's values, so other cameras keep theirs. Raw Danger's follow camera tilts by

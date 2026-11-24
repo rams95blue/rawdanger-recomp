@@ -57,6 +57,7 @@ namespace RawDangerLauncher
             StringBuilder sb = new StringBuilder();
             sb.AppendLine("# Game options - rawdanger-recomp. Shared by RawDangerPC.exe and the game's F1 menu (Game options, F3).");
             sb.AppendLine("# live = 1: switched in the game or the launcher (on = 1 / 0). live = 0: built in, changed by building again.");
+            sb.AppendLine(UsDefaultsMark);
             foreach (RecompOption o in options)
             {
                 sb.AppendLine();
@@ -80,6 +81,13 @@ namespace RawDangerLauncher
             string file = PathOf(s, game);
             Dictionary<string, bool> before = new Dictionary<string, bool>();
             foreach (RecompOption o in Read(file)) before[o.Name] = o.On;
+            // v0.8.6: the regional choices start as the US release (English voices, US textures, logo and film). A file written
+            // before that keeps its other choices but takes the US ones for these once; after that, the player's choice stays.
+            bool marked = false;
+            try { marked = File.Exists(file) && File.ReadAllText(file).Contains(UsDefaultsMark); } catch (Exception) { }
+            if (!marked)
+                foreach (string k in new List<string>(before.Keys))
+                    if (k == VoicesSection || k.StartsWith("Textures: ") || k.StartsWith("Media: ")) before.Remove(k);
             byte[] elf = null;
             try { if (File.Exists(originalElf)) elf = File.ReadAllBytes(originalElf); } catch (Exception) { }
             Dictionary<string, List<string>> body = Sections(pnach);
@@ -146,6 +154,7 @@ namespace RawDangerLauncher
         }
 
         public const string VoicesSection = "Voices: Japanese";
+        const string UsDefaultsMark = "# defaults: the US release (regional options start off)";
 
         // The Enhanced Edition's disc carries the English and the Japanese recordings in two areas with the same layout
         // (tools\rd_hybrid.py writes hybrid.iso.layout). The game reads the Japanese area; switched off, the engine sends
@@ -180,7 +189,7 @@ namespace RawDangerLauncher
             o.Name = VoicesSection;
             o.Label = "Japanese voices (off: English)";
             o.Live = true;
-            o.On = true;
+            o.On = false;   // the US release's English voices by default
             o.RemapOff = jp + " " + en + " " + n;
             o.RemapOff2 = banks;   // English voices: the English shouts too
             return o;

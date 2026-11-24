@@ -28,7 +28,7 @@ namespace RawDangerLauncher
 {
     public static class Program
     {
-        public const string Version = "0.8.5";
+        public const string Version = "0.8.6";
         public const string AppName = "Raw Danger PC";
         public static bool Restart;
 
@@ -103,9 +103,11 @@ namespace RawDangerLauncher
             string x = section.ToLowerInvariant();
             if (x.Contains("fast loading")) return Lang.L("fast-loading fix", "高速ロード修正");
             if (x.StartsWith("widescreen")) return Lang.L("widescreen 16:9", "ワイド画面 16:9");
-            if (x.Contains("original ps2 post processing")) return Lang.L("Original PS2 Post Processing Filter", "オリジナルPS2ポストプロセスフィルター");
+            if (x.Contains("original ps2 post processing")) return Lang.L("PS2 post-processing filter", "PS2ポストプロセスフィルター");
             if (x.Contains("post-processing") || x.Contains("post processing")) return Lang.L("no blur filter", "ぼかし無効");
             if (x.StartsWith("skip intro logos")) return Lang.L("no intro logos", "起動ロゴなし");
+            if (x.StartsWith("free camera tilt")) return Lang.L("free camera tilt (look further up and down)", "カメラの上下を広く");
+            if (x.StartsWith("direct mouse look")) return Lang.L("direct mouse look", "マウスで直接視点操作");
             if (x.Contains("debug")) return Lang.L("debug text", "デバッグ表示");
             if (x.StartsWith("voices: japanese")) return Lang.L("Japanese voices (off: English)", "日本語音声（オフ：英語）");
             return section;
@@ -567,6 +569,7 @@ namespace RawDangerLauncher
                     psi.EnvironmentVariables["PS2_LENS_YAW"] = "0x5FDBAC";   // the camera's angle: the drops slant when it turns
                     psi.EnvironmentVariables["PS2_LENS_MOTION"] = "@5FD7D0,310,1B0";   // the player's movement seen from the camera
                     psi.EnvironmentVariables["PS2_CAMERA_PITCH"] = "@5FD7D0,14,18,2.5,6.5,0.5,10";   // the camera's up / down range, wider
+                    psi.EnvironmentVariables["PS2_CAMERA_ZOOM"] = "@5FD7D0,450,448";   // field of view (keys.ini field_of_view): the camera's zoom factor
                     // the game's own Options list (from the title and from the in-game menu's Options tab) gets real PC rows of its
                     // own (every setting of the F1 menu's Settings, and the live Game options of recomp.ini, in a list that scrolls):
                     // PS2_NATIVE_OPTIONS, set with the key
@@ -574,7 +577,7 @@ namespace RawDangerLauncher
                     // mouse look: the camera's angle (radians, 0x5FDBAC) and height offset (0x5FDB88, -3.6 to 1.2) in the US program's camera
                     // block; the right stick turns them 0.001565 rad / 0.00358 per game step for each unit past 59 (measured in the banquet hall)
                     psi.EnvironmentVariables["PS2_MOUSE_LOOK_YAW"] = "0x5FDBAC,0.001565,59.1";
-                    psi.EnvironmentVariables["PS2_MOUSE_LOOK_PITCH"] = "0x5FDB88,0.00358,59,-3.6,1.2";
+                    psi.EnvironmentVariables["PS2_MOUSE_LOOK_PITCH"] = "0x5FDB88,0.00358,59,-9,12";   // v0.8.6: -9 (about 55 degrees up, with [Free camera tilt]) to 12 (about 65 down); the game: -3.6 to 1.2
                     psi.EnvironmentVariables["PS2_MOUSE_LOOK_WHEN"] = "0x48F488=21";
                     // (v0.8.1 made texture switches wait for the next area load; v0.8.3 found the real cause of the garbled
                     // characters, the Japanese pictures' headers, and they switch at once again: no PS2_AREA_LOAD)
@@ -582,9 +585,9 @@ namespace RawDangerLauncher
                     // the float at 0x7F10 to its turn of each step); a game built before that is turned through the stick as before
                     psi.EnvironmentVariables["PS2_MOUSE_LOOK_DIRECT"] = "0x7F10,0x176FD0=C4027F10";
                     // the developers' map select left on the disc (F7, or F1 -> Settings -> Game): the game's next-scene word and
-                    // its scene MAP SEL (41); the debug menu (DEBSEL, 40) is not offered: its text now reads (PS2_SJIS_TEXT below: it
-                    // printed Shift-JIS through the US font), but on the retail program it does not answer the pad
-                    psi.EnvironmentVariables["PS2_DEBUG_SCENES"] = "0x48F48C;0;41;21";   // (from the game itself, scene 21)
+                    // its scene MAP SEL (41); and the debug menu (DEBSEL, 40: map select, sound test, exit), whose text reads through
+                    // PS2_SJIS_TEXT below and which took only Circle or Start until [Debug menu answers Cross] (v0.8.6)
+                    psi.EnvironmentVariables["PS2_DEBUG_SCENES"] = "0x48F48C;40;41;21";   // v0.8.6: the debug menu too (Shift+F7; it answers Cross with [Debug menu answers Cross])   // (from the game itself, scene 21)
                     // the developers' text through the US font sheet (texture base 3592): Shift-JIS strings shown in ASCII, and the map
                     // select's letters at the font's own size (engine patch 0024, gs.cpp sjis)
                     psi.EnvironmentVariables["PS2_SJIS_TEXT"] = "3592";

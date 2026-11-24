@@ -239,6 +239,114 @@ def with_tims(usd, jpd, which, name):
     return bytes(out)
 
 
+# ---- "ENHANCED EDITION" and the build number on the title screen (v0.8.6) ----
+
+def load_title_art(path):
+    d = open(path, "rb").read()
+    if d[:4] != b"RDTA":
+        return None
+    n = struct.unpack_from("<H", d, 6)[0]
+    p, art = 8, {}
+    for _ in range(n):
+        ch, size, w, h = struct.unpack_from("<BBBB", d, p); p += 4
+        stride = (w + 7) // 8
+        rows = []
+        for y in range(h):
+            row = d[p + y * stride:p + (y + 1) * stride]
+            rows.append([(row[x // 8] >> (7 - x % 8)) & 1 for x in range(w)])
+        p += stride * h
+        art[(chr(ch), size)] = rows
+    return art
+
+
+def title_words(dat, version, art_path):
+    """TITLE.DAT with "ENHANCED EDITION" and the build number under the RAW DANGER logo (picture 8, 640 x 448, 8 bits a pixel
+    with a 256-colour palette, drawn over the whole title screen). The letters are filled with the logo's own yellow (copied
+    from inside its letters, so it has the same grain), with its red rim and a dark edge inside, and every colour is one of the
+    picture's palette; nothing changes when the picture is not the expected one."""
+    art = load_title_art(art_path) if os.path.exists(art_path) else None
+    if art is None:
+        return dat
+    tims, p = [], 0
+    while True:
+        p = dat.find(b"TIM2", p)
+        if p < 0: break
+        tims.append(p); p += 4
+    if len(tims) < 9:
+        return dat
+    t = tims[8]
+    q = t + (16 if dat[t + 5] == 0 else 128)
+    total, clut, img, hsz, ncol, fmt, mip, ctype, itype, w, h = struct.unpack_from("<IIIHHBBBBHH", dat, q)
+    if (w, h, itype, ctype & 0x1F, ncol) != (640, 448, 5, 3, 256):
+        return dat
+    pix, pal_at = q + hsz, q + hsz + img
+    raw = [tuple(dat[pal_at + 4 * i:pal_at + 4 * i + 4]) for i in range(256)]
+    # CSM1 order: the index in the pixels picks entry i with bits 3 and 4 swapped
+    def entry(i): return raw[(i & ~0x18) | ((i & 0x08) << 1) | ((i & 0x10) >> 1)]
+    colours = [entry(i) for i in range(256)]
+    out = bytearray(dat)
+    W, H = w, h
+    at = lambda x, y: out[pix + y * W + x]
+
+    def nearest(rgb):
+        best, bi = None, 0
+        for i, (r, g, b, a) in enumerate(colours):
+            if a < 0x70: continue
+            dd = (r - rgb[0]) ** 2 + (g - rgb[1]) ** 2 + (b - rgb[2]) ** 2
+            if best is None or dd < best: best, bi = dd, i
+        return bi
+
+    # the logo's yellow, with its grain: the yellow pixels inside its letters (x 368..621, y 363..420)
+    yellow = []
+    for y in range(363, 421):
+        for x in range(368, 622):
+            r, g, b, a = colours[at(x, y)]
+            if a >= 0x70 and r > 200 and g > 190 and b < 90: yellow.append(at(x, y))
+    if len(yellow) < 200:
+        return dat
+    red, dark = nearest((236, 0, 0)), nearest((96, 82, 0))
+
+    def line(text, size):
+        glyphs = [art.get((c, size)) or art.get((c.upper(), size)) for c in text]
+        if any(g is None for g in glyphs): return None
+        gh = len(glyphs[0]); width = sum(len(g[0]) for g in glyphs) + (len(glyphs) - 1)
+        mask = [[0] * width for _ in range(gh)]
+        x0 = 0
+        for g in glyphs:
+            for y in range(gh):
+                for x, bit in enumerate(g[y]):
+                    if bit: mask[y][x0 + x] = 1
+            x0 += len(g[0]) + 1
+        return mask
+
+    words, build = line("ENHANCED EDITION", 0), line("v" + version, 1)
+    if words is None:
+        return dat
+    # placed under the logo, right edge with the logo's, leaning like it (one pixel up every 40 to the right)
+    right, base = 618, 441
+    parts = [(words, 0)]
+    if build: parts.append((build, 0))
+    total_w = sum(len(m[0]) for m, _ in parts) + 6 * (len(parts) - 1)
+    x = right - total_w
+    k = 0
+    for m, _ in parts:
+        mh, mw = len(m), len(m[0])
+        top = base - mh
+        def on(xx, yy): return 0 <= yy < mh and 0 <= xx < mw and m[yy][xx]
+        for yy in range(-2, mh + 2):
+            for xx in range(-2, mw + 2):
+                X = x + xx; Y = top + yy - (X - (right - total_w)) // 40
+                if not (0 <= X < W and 0 <= Y < H): continue
+                if on(xx, yy):
+                    inner_edge = not on(xx + 1, yy) or not on(xx, yy + 1)
+                    out[pix + Y * W + X] = dark if inner_edge else yellow[(k * 7919) % len(yellow)]
+                    k += 1
+                elif any(on(xx + dx, yy + dy) for dx in (-1, 0, 1) for dy in (-1, 0, 1)) or any(on(xx + dx, yy + dy) for dx, dy in ((2, 0), (-2, 0), (0, 2), (0, -2))):
+                    out[pix + Y * W + X] = red
+        x += mw + 6
+    return bytes(out)
+
+
 def plan_textures(us, jp):
     """The textures with a US and a Japanese version (tools/jp_textures.txt), as {"fat": the new ROOT.FAT, "groups": [{"name",
     "count", "items": [(name, offset in the new ROOT.DAT, slot bytes, US data, JP data)]}]}, or None when the list is missing.
@@ -343,6 +451,8 @@ def main(argv=None):
     ap.add_argument("--to-24k", action="store_true", help="make the Japanese 48 kHz lines 24 kHz like the English ones (not needed: the "
                     "US program plays 48 kHz lines; kept for comparison)")
     ap.add_argument("--no-convert", action="store_true", help=argparse.SUPPRESS)   # the default since v4
+    ap.add_argument("--version", default="", help="the build number written under the title screen's logo with ENHANCED EDITION "
+                    "(tools/title_art.bin); none: no words")
     ap.add_argument("--jp-textures", default="", help="texture groups (faces, signs) that start switched on in the game; both "
                     "groups are always on the disc")
     a = ap.parse_args(argv)
@@ -483,6 +593,10 @@ def main(argv=None):
                     group["us_start"] = out.tell() // SECTOR
                     for name, off, slot, usd, jpd in group["items"]:
                         assert out.tell() - start == off
+                        if name.upper().endswith("TITLE\\TITLE.DAT") and a.version:
+                            stamped = title_words(usd, a.version, os.path.join(os.path.dirname(os.path.abspath(__file__)), "title_art.bin"))
+                            print(f"  {name}: " + ("ENHANCED EDITION v" + a.version + " under the logo" if stamped != usd else "the title words did not fit, left out"))
+                            usd = stamped
                         out.write(usd + b"\0" * (slot - len(usd)))
                 size = out.tell() - start
             out.write(b"\0" * ((-out.tell()) % SECTOR))
@@ -520,7 +634,7 @@ def main(argv=None):
     with open(a.out + ".layout", "w", encoding="ascii") as f:
         tex = "".join((f"sounds_jp_slots = {g['us_start']} {g['jp_start']} {g['sectors']} {g['count']}\n" if g["name"] == "sounds" else
                        f"textures_{g['name']} = {g['us_start']} {g['jp_start']} {g['sectors']} {g['count']}\n") for g in (swaps["groups"] if swaps else []))
-        f.write(f"version = 4\nmedia = 2\ntextures_start_on = {a.jp_textures}\n{tex}voices_jp_start = {jp_start}\nvoices_en_start = {en_start}\nvoices_sectors = {area // SECTOR}\n"
+        f.write(f"version = 4\nmedia = 2\ntitle_words = {a.version or '-'}\ntextures_start_on = {a.jp_textures}\n{tex}voices_jp_start = {jp_start}\nvoices_en_start = {en_start}\nvoices_sectors = {area // SECTOR}\n"
                 f"voices_converted = {len(convert)}\n")
     print(f"voice areas: Japanese at sector {jp_start} (STR.DAT), English at {en_start}, {area // SECTOR} sectors each")
     print(f"hybrid disc: {a.out}  ({total * SECTOR / 1e9:.2f} GB)")

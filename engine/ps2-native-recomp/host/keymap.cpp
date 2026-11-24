@@ -232,6 +232,10 @@ const char *sharp_2d_word(int sharp) {
 
 std::string with_master_volume(const std::string &file_text, int percent) { return with_line(file_text, "mastervolume", "master_volume = " + std::to_string(percent)); }
 std::string with_filter_pass(const std::string &file_text, int fast) { return with_line(file_text, "postprocessing", std::string("post_processing = ") + (fast ? "fast" : "original")); }
+std::string with_field_of_view(const std::string &file_text, int percent) {
+    return with_line(file_text, "fieldofview", "field_of_view = " + std::to_string(std::clamp(percent, 80, 150)));
+}
+
 std::string with_ambient_occlusion(const std::string &file_text, int level) {
     static const char *const kNames[] = {"off", "light", "strong"};
     return with_line(file_text, "ambientocclusion", std::string("ambient_occlusion = ") + kNames[level < 0 ? 0 : level > 2 ? 2 : level]);
@@ -485,6 +489,13 @@ void parse(const std::string &text, Config &config, std::vector<std::string> &pr
             if (v == "fast" || v == "1") config.filter_pass = 1;
             else if (v == "original" || v == "0") config.filter_pass = 0;
             else bad("post_processing is fast or original, ignored");
+            continue;
+        }
+        if (name == "fieldofview" || name == "fov") {
+            char *end = nullptr;
+            const long v = std::strtol(value.c_str(), &end, 10);
+            if (end != value.c_str() && v >= 80 && v <= 150) config.field_of_view = static_cast<int>(v);
+            else bad("field_of_view is a number from 80 to 150 (per cent of the game's), ignored");
             continue;
         }
         if (name == "popupsize") {

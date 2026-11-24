@@ -41,6 +41,7 @@ struct Config {
 
     int menu_game_runs = 1;    // rawdanger-recomp: the game goes on behind the quick menu (off: it waits, as before)
     int filter_pass = -1;      // rawdanger-recomp: the post processing in one GPU pass (1) or drawn the game's way (0); -1: as the launcher says
+    int field_of_view = 100;   // rawdanger-recomp: the camera's field of view, % of the game's (80 to 150; 100 = as on the PS2)
     int ambient_occlusion = 1; // rawdanger-recomp: 0 off, 1 light, 2 strong (the game's depth, before its colour filter)
     int popup_size = 1;        // rawdanger-recomp: pop-ups (achievements, notes, the keys on screen): 0 small, 1 normal, 2 large, 3 huge
     int keys_on_screen = 0;    // rawdanger-recomp: the list of the player's keys stays on the screen while playing (F10)
@@ -77,6 +78,7 @@ const char *sharp_2d_word(int sharp);  // "soft", "sharp", "sharpest"
 std::string with_menu_game_runs(const std::string &file_text, int on);  // the 'menu_game_runs' line
 std::string with_popup_size(const std::string &file_text, int size);
 std::string with_filter_pass(const std::string &file_text, int fast);
+std::string with_field_of_view(const std::string &file_text, int percent);  // the 'field_of_view' line
 std::string with_ambient_occlusion(const std::string &file_text, int level);  // the 'ambient_occlusion' line: off / light / strong  // the 'post_processing' line: fast / original    // the 'popup_size' line: small / normal / large / huge
 std::string with_keys_on_screen(const std::string &file_text, int on);  // the 'keys_on_screen' line
 std::string with_pause_unfocused(const std::string &file_text, int on);  // the 'pause_unfocused' line

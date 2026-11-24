@@ -73,3 +73,17 @@ as a later option.
 
 Sources: TCRF "Raw Danger" page; PCSX2 wiki (Raw Danger!); PCSX2/pcsx2_patches;
 retrogametalk.com description of the C&P-kyun USA+UNDUB patch.
+
+## Every other file that differs (v0.8.6 sweep)
+
+All 6,000-odd files of ROOT.DAT compared, voices and textures left out (both already switch in the Enhanced Edition):
+
+| Files | Differ | How | Can it be a toggle? |
+|---|---|---|---|
+| Character models (`IMD\CHR\...`: heads, hair, hands of the six heroes and 25 other characters) | 86 of 1,273 | Most differ only in a few bytes: the number of the texture they draw with (the US release points to its renamed copies, for example 22001 for Japan's 10004). PL02's hair is a different shape (11,842 bytes differ). | Yes, next to "Japanese faces and hair". First the Japan-only textures they point to (10004, 10017, ...) must go on the disc too, or the swapped models would point to textures the US disc does not have. |
+| Columbia items (`ITEM_0137/0138` backpacks, `ITEM_0139` whistle, `ITEM_0404` compass) | 4 + 10 hero copies | One texture number each: the Japanese release shows the Columbia logo | Yes, with the models above (same reason). |
+| Maps (`AREA01`-`AREA06`: `M*_*.DAT`, `ATL_*.DAT`) | 231 of 3,248 | 100 differ only in their pictures (signs, already swapped by the "Japanese signs" overrides); 131 differ in size: map data and the scripts with their text | No: the scripts carry the text, in Japanese. This is where the open area near Downtown Station and the lower water in Japan are; they could only come over piece by piece. |
+| Menus (`IMENU`, `OPTION`, `TITLE`, `NAVI`, `MEMORIES`, `GAMERESULT`, ...) | 30 | The pictures of the words, in Japanese | Only as "Japanese text" (pending item 4), together with the font (`FONT\FONTALL`, Japan only) |
+| Sound banks (`SE\*.HD/.BD/.SQ`) | 69 | Voices inside effects banks | Done: they switch with the voices since v0.7.5 |
+| Overlays (`OVERLAY\DISC\*.BIN`) | 79 of 79 | Program code | No: code of each release's own program |
+| Movies | 2 | The opening film and 1-1-5 | Done: "Japanese opening film" (v0.8.1) |

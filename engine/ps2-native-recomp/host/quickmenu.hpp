@@ -38,6 +38,7 @@ enum class Command {
     widescreen,    // Graphics page: the game's widescreen option (its recomp.ini section with aspect = 16:9)
     menu_game_runs,   // Settings > Display: the game goes on behind this menu (off: it waits)
     popup_size,       // Settings > Display: the size of the pop-ups (small / normal / large / huge)
+    field_of_view,    // Settings > Picture: the camera's field of view (80 % to 150 % of the game's)
     ambient_occlusion, // Settings > Picture: shading in creases and corners from the game's depth (off / light / strong)
     filter_pass,      // Settings > Picture: the post processing in one GPU pass or drawn the game's way (to compare)
     keys_on_screen,   // Settings > Controls: the player's keys at the left of the screen while playing (F10)
@@ -73,6 +74,7 @@ struct Values {
     int widescreen = -1;           // the game's widescreen option: -1 the game has none, 0 off, 1 on
     bool menu_game_runs = true;    // the game goes on behind this menu
     int popup_size = 1;            // 0 small, 1 normal, 2 large, 3 huge
+    int field_of_view = 100;       // % of the game's
     int ambient_occlusion = 1;     // 0 off, 1 light, 2 strong
     int filter_pass = 1;           // 1 one GPU pass, 0 the game's own draws
     bool keys_on_screen = false;   // the keys at the left of the screen while playing

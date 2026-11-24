@@ -7,14 +7,17 @@ both Japanese demos, made from your own discs with our fork of
 
 ## Play (Windows)
 
-Run **RawDangerPC.exe**. Pick your disc images, choose the patches, and it builds each game into a native program
-(the first build downloads the compiler tools into `engine\ps2-native-recomp\downloads`, kept for later builds). Then
-press Play, or make a desktop shortcut.
+Run **RawDangerPC.exe**. It has two tabs. **MODERN** (first, recommended) builds the **Enhanced Edition**: everything this
+project adds, from your four discs. **LEGACY** converts one disc as it is, with a few options. Choose the **build speed**
+(Light keeps the PC quick for other work, Balanced, Full is the fastest), build, then press Play or make a desktop shortcut.
+The first build downloads the nine build tools from their official pages once (about 330 MB); already have them? **Build
+tools...** lists them with their links and where they are found (docs/BUILD_TOOLS.md).
 
 - **Games**: US, JP, JP demo Type-A, JP demo Type-B, and the **Enhanced Edition** (built from the US disc, with the
-  Japanese voices from the JP disc; offered once all four discs are found).
+  Japanese voices from the JP disc; offered once all four discs are found). It starts as the US release (English voices, US
+  pictures, logo and film); its title screen reads ENHANCED EDITION with the build number under the logo.
 - **Recomp options**: every patch as an option, in the launcher and in the game (F1 -> Recomp options, or F3). They
-  switch while you play: widescreen, intro logos, the Original PS2 Post Processing Filter, and in the Enhanced Edition **Japanese / English
+  switch while you play: widescreen, intro logos, the PS2 post-processing filter, and in the Enhanced Edition **Japanese / English
   voices**, **Japanese faces and hair** and **Japanese signs** (the 151 textures the US release redrew, from the JP disc).
   The Enhanced Edition has no build options: everything is in it and switched in the game.
 - **Achievements** (US, Japanese and Enhanced): offline, unlock pop-up with the badge in the game, list on F1 ->
@@ -28,7 +31,7 @@ press Play, or make a desktop shortcut.
   *Settings* has tabs (Tab / Q / E, L1 / R1 or the mouse): **Display** (internal resolution 1x-6x, 8x or auto, at once;
   window size, full screen, widescreen, whole-number scaling, pause in the background, menu look), **Picture** (upscale
   filter: raw pixels, soft, sharp or FSR 1; anti-aliasing: smooth edges or SMAA low to ultra; **sharpen the picture** (off,
-  low, medium, high; off by default: the picture is crisp by itself); text and menus; the **Original PS2 Post Processing Filter** (the
+  low, medium, high; off by default: the picture is crisp by itself); text and menus; **field of view** (80 % to 150 % of the game's); the **PS2 post-processing filter** (the
   game's own glow, tint and haze; on by default: now one GPU-friendly pass, as cheap as off, and without the blurry picture
   it used to bring); **cutscene black bars** by opacity, 100 % (as the game draws them) down to 0 (removed: the picture fills the
   screen); rain on the lens (on by default, as hard as it rains, in gusts, heavier when the camera looks up),
@@ -42,7 +45,8 @@ press Play, or make a desktop shortcut.
   F1 menu** (Settings -> Display -> *Game runs behind this menu*; off: it waits). See docs/GRAPHICS.md.
 - **Keys**: F1 menu, F2 picture look, F3 game options, F4 achievements, F5 / F8 quick save / load, **F6 held: fast
   forward** (skips through cutscenes, talks and walks at the game's top speed), **F7: the developers' map select** left on
-  the disc (up / down a line, left / right its value, Cross loads the map; docs/DEBUG.md), F9 report, **F10 your keys on screen**, F11 full screen. The camera tilts further up and down than on the PS2 (since v0.8.5). The mouse wheel sets
+  the disc (up / down a line, left / right its value, Cross loads the map; docs/DEBUG.md), F9 report, **F10 your keys on screen**, F11 full screen, **Shift+F7 the debug menu** (map select, exit; Cross or Circle). The camera tilts much further up and down
+  than on the PS2 (free tilt since v0.8.6, a switch in F3). The mouse wheel sets
   walk or run for the walk keys (up runs, down walks) when no button is put on the wheel. The memory-card
   check at start is not shown at all (the card is still read).
 - **Language** (F1 -> Language): restarts in the other language with your saves carried over (US / Enhanced <-> the JP

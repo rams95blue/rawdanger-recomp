@@ -1,0 +1,315 @@
+From 71c74f276e7ef0662d90ad462794a5ca018e7d1a Mon Sep 17 00:00:00 2001
+From: rawdanger-recomp <rawdanger-recomp@users.noreply.github.com>
+Date: Tue, 24 Nov 2026 21:03:23 +0000
+Subject: [PATCH] v0.8.6: field of view, debug menu notes, wording, VU1 input
+ formats
+
+keys.ini field_of_view (80-150 % of the game's), in Settings > Picture and the
+Options list: written to the camera's zoom factor (PS2_CAMERA_ZOOM) while the
+game's own zoom is idle. The Options list shows FXAA. The filter's menu name
+in sentence case. The debug menu's hint and notes (it answers Cross with the
+pnach section of v0.8.6; the longer developers' menu is only a table).
+PS2_VU1_STATS also prints the UNPACKs each program is given most often.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01QNLFPekqhcU2dj7B3Utmea
+---
+ host/keymap.cpp     | 11 +++++++++
+ host/keymap.hpp     |  2 ++
+ host/quickmenu.cpp  | 12 +++++-----
+ host/quickmenu.hpp  |  2 ++
+ host/window.cpp     | 54 ++++++++++++++++++++++++++++++++++++++-------
+ runtime/src/vif.cpp | 27 ++++++++++++++++++++---
+ 6 files changed, 92 insertions(+), 16 deletions(-)
+
+diff --git a/host/keymap.cpp b/host/keymap.cpp
+index e59052c..e98722e 100644
+--- a/host/keymap.cpp
++++ b/host/keymap.cpp
+@@ -232,6 +232,10 @@ const char *sharp_2d_word(int sharp) {
+ 
+ std::string with_master_volume(const std::string &file_text, int percent) { return with_line(file_text, "mastervolume", "master_volume = " + std::to_string(percent)); }
+ std::string with_filter_pass(const std::string &file_text, int fast) { return with_line(file_text, "postprocessing", std::string("post_processing = ") + (fast ? "fast" : "original")); }
++std::string with_field_of_view(const std::string &file_text, int percent) {
++    return with_line(file_text, "fieldofview", "field_of_view = " + std::to_string(std::clamp(percent, 80, 150)));
++}
++
+ std::string with_ambient_occlusion(const std::string &file_text, int level) {
+     static const char *const kNames[] = {"off", "light", "strong"};
+     return with_line(file_text, "ambientocclusion", std::string("ambient_occlusion = ") + kNames[level < 0 ? 0 : level > 2 ? 2 : level]);
+@@ -487,6 +491,13 @@ void parse(const std::string &text, Config &config, std::vector<std::string> &pr
+             else bad("post_processing is fast or original, ignored");
+             continue;
+         }
++        if (name == "fieldofview" || name == "fov") {
++            char *end = nullptr;
++            const long v = std::strtol(value.c_str(), &end, 10);
++            if (end != value.c_str() && v >= 80 && v <= 150) config.field_of_view = static_cast<int>(v);
++            else bad("field_of_view is a number from 80 to 150 (per cent of the game's), ignored");
++            continue;
++        }
+         if (name == "popupsize") {
+             const std::string v = squash(value);
+             if (v == "small" || v == "0") config.popup_size = 0;
+diff --git a/host/keymap.hpp b/host/keymap.hpp
+index 807732f..1271a83 100644
+--- a/host/keymap.hpp
++++ b/host/keymap.hpp
+@@ -41,6 +41,7 @@ struct Config {
+ 
+     int menu_game_runs = 1;    // rawdanger-recomp: the game goes on behind the quick menu (off: it waits, as before)
+     int filter_pass = -1;      // rawdanger-recomp: the post processing in one GPU pass (1) or drawn the game's way (0); -1: as the launcher says
++    int field_of_view = 100;   // rawdanger-recomp: the camera's field of view, % of the game's (80 to 150; 100 = as on the PS2)
+     int ambient_occlusion = 1; // rawdanger-recomp: 0 off, 1 light, 2 strong (the game's depth, before its colour filter)
+     int popup_size = 1;        // rawdanger-recomp: pop-ups (achievements, notes, the keys on screen): 0 small, 1 normal, 2 large, 3 huge
+     int keys_on_screen = 0;    // rawdanger-recomp: the list of the player's keys stays on the screen while playing (F10)
+@@ -77,6 +78,7 @@ const char *sharp_2d_word(int sharp);  // "soft", "sharp", "sharpest"
+ std::string with_menu_game_runs(const std::string &file_text, int on);  // the 'menu_game_runs' line
+ std::string with_popup_size(const std::string &file_text, int size);
+ std::string with_filter_pass(const std::string &file_text, int fast);
++std::string with_field_of_view(const std::string &file_text, int percent);  // the 'field_of_view' line
+ std::string with_ambient_occlusion(const std::string &file_text, int level);  // the 'ambient_occlusion' line: off / light / strong  // the 'post_processing' line: fast / original    // the 'popup_size' line: small / normal / large / huge
+ std::string with_keys_on_screen(const std::string &file_text, int on);  // the 'keys_on_screen' line
+ std::string with_pause_unfocused(const std::string &file_text, int on);  // the 'pause_unfocused' line
+diff --git a/host/quickmenu.cpp b/host/quickmenu.cpp
+index e551595..f4265d7 100644
+--- a/host/quickmenu.cpp
++++ b/host/quickmenu.cpp
+@@ -120,8 +120,8 @@ constexpr const char *kTabNames[Menu::kTabs] = {"DISPLAY", "PICTURE", "SOUND", "
+ constexpr int kAchievementRows = 7;   // rawdanger-recomp: achievements lines shown at a time (bigger panel)
+ constexpr Command kDisplay[] = {Command::scale, Command::window_size, Command::fullscreen, Command::widescreen, Command::integer_scale, Command::menu_game_runs, Command::pause_unfocused, Command::menu_skin, Command::popup_size, Command::back};
+ constexpr const char *kDisplayKeys[] = {"", "", "F11", "", "", "", "", "", "", "Esc"};
+-constexpr Command kPicture[] = {Command::look, Command::antialias, Command::sharpen, Command::sharp_2d, Command::game_blur, Command::filter_pass, Command::ambient_occlusion, Command::black_bars, Command::lens_rain, Command::back};
+-constexpr const char *kPictureKeys[] = {"F2", "", "", "", "", "", "", "", "", "Esc"};
++constexpr Command kPicture[] = {Command::field_of_view, Command::look, Command::antialias, Command::sharpen, Command::sharp_2d, Command::game_blur, Command::filter_pass, Command::ambient_occlusion, Command::black_bars, Command::lens_rain, Command::back};
++constexpr const char *kPictureKeys[] = {"", "F2", "", "", "", "", "", "", "", "", "Esc"};
+ constexpr Command kSound[] = {Command::master_volume, Command::reverb, Command::back};
+ constexpr const char *kSoundKeys[] = {"", "", "Esc"};
+ constexpr Command kControls[] = {Command::change_keys, Command::keys_on_screen, Command::mouse_look, Command::mouse_speed, Command::mouse_invert_x, Command::mouse_invert, Command::key_prompts, Command::back};
+@@ -364,8 +364,8 @@ std::string entry_text(Command c, const Values &v, bool quit_armed) {
+     case Command::graphics: return "Settings";
+     case Command::window_size: return "Window size:  < " + (v.window_size.empty() ? std::string("?") : v.window_size) + " >";
+     case Command::game_blur:
+-        if (v.game_blur < 0) return "Original PS2 Post Processing Filter: as built";
+-        return std::string("Original PS2 Post Processing Filter:  < ") + (v.game_blur ? "on" : "off") + " >";
++        if (v.game_blur < 0) return "PS2 post-processing filter: as built";
++        return std::string("PS2 post-processing filter:  < ") + (v.game_blur ? "on" : "off") + " >";
+     case Command::mouse_look:
+         if (v.mouse_look < 0) return "Mouse look: not in this game";
+         return std::string("Mouse look (camera):  < ") + (v.mouse_look ? "on" : "off") + " >";
+@@ -386,6 +386,8 @@ std::string entry_text(Command c, const Values &v, bool quit_armed) {
+     case Command::black_bars: return "Cutscene black bars:  < " + (v.black_bars <= 0 ? std::string("removed") : std::to_string(v.black_bars) + " % opaque") + " >";
+     case Command::reverb: return std::string("Reverb (rooms, tunnels):  < ") + (v.reverb ? "on" : "off") + " >";
+     case Command::widescreen: return v.widescreen < 0 ? "Widescreen: not in this game" : std::string("Widescreen 16:9:  < ") + (v.widescreen ? "on" : "off") + " >";
++    case Command::field_of_view:
++        return std::string("Field of view:  < ") + (v.field_of_view == 100 ? std::string("100 % (as on the PS2)") : std::to_string(v.field_of_view) + " %") + " >";
+     case Command::ambient_occlusion: {
+         static const char *const kLevels[] = {"off", "light", "strong"};
+         return std::string("Ambient occlusion (shading in corners):  < ") + kLevels[std::clamp(v.ambient_occlusion, 0, 2)] + " >";
+@@ -621,7 +623,7 @@ Command Menu::side() const {
+     return c == Command::look || c == Command::scale || c == Command::sharp_2d || c == Command::fullscreen || c == Command::widescreen || c == Command::pause_unfocused || c == Command::menu_game_runs ||
+                    c == Command::master_volume || c == Command::integer_scale || c == Command::lens_rain || c == Command::antialias || c == Command::menu_skin ||
+                    c == Command::window_size || c == Command::game_blur || c == Command::reverb || c == Command::key_prompts || c == Command::mouse_look || c == Command::black_bars || c == Command::sharpen ||
+-                   c == Command::mouse_speed || c == Command::mouse_invert || c == Command::mouse_invert_x || c == Command::popup_size || c == Command::keys_on_screen || c == Command::filter_pass || c == Command::ambient_occlusion
++                   c == Command::mouse_speed || c == Command::mouse_invert || c == Command::mouse_invert_x || c == Command::popup_size || c == Command::keys_on_screen || c == Command::filter_pass || c == Command::ambient_occlusion || c == Command::field_of_view
+                ? c : Command::none;
+ }
+ 
+diff --git a/host/quickmenu.hpp b/host/quickmenu.hpp
+index 3fa0a9f..8770278 100644
+--- a/host/quickmenu.hpp
++++ b/host/quickmenu.hpp
+@@ -38,6 +38,7 @@ enum class Command {
+     widescreen,    // Graphics page: the game's widescreen option (its recomp.ini section with aspect = 16:9)
+     menu_game_runs,   // Settings > Display: the game goes on behind this menu (off: it waits)
+     popup_size,       // Settings > Display: the size of the pop-ups (small / normal / large / huge)
++    field_of_view,    // Settings > Picture: the camera's field of view (80 % to 150 % of the game's)
+     ambient_occlusion, // Settings > Picture: shading in creases and corners from the game's depth (off / light / strong)
+     filter_pass,      // Settings > Picture: the post processing in one GPU pass or drawn the game's way (to compare)
+     keys_on_screen,   // Settings > Controls: the player's keys at the left of the screen while playing (F10)
+@@ -73,6 +74,7 @@ struct Values {
+     int widescreen = -1;           // the game's widescreen option: -1 the game has none, 0 off, 1 on
+     bool menu_game_runs = true;    // the game goes on behind this menu
+     int popup_size = 1;            // 0 small, 1 normal, 2 large, 3 huge
++    int field_of_view = 100;       // % of the game's
+     int ambient_occlusion = 1;     // 0 off, 1 light, 2 strong
+     int filter_pass = 1;           // 1 one GPU pass, 0 the game's own draws
+     bool keys_on_screen = false;   // the keys at the left of the screen while playing
+diff --git a/host/window.cpp b/host/window.cpp
+index e27bc06..a4800da 100644
+--- a/host/window.cpp
++++ b/host/window.cpp
+@@ -236,9 +236,12 @@ std::atomic<int> g_master_volume{100};  // rawdanger-recomp: keys.ini master_vol
+ std::vector<std::size_t> g_recomp_row_section;  // the Game options page's lines -> recomp::sections() (widescreen is on the Graphics page)
+ // rawdanger-recomp: the developers' menus left on the disc. PS2_DEBUG_SCENES="ADDRESS;DEBUG;MAPSEL": the game's next-scene word
+ // (Raw Danger: 0x48F48C, read by its scene switch at 0x16ED80; 0x48F488 is the scene it runs) and the numbers of its scenes
+-// DEBSEL (40, the debug menu: map select, player move, flags, fog, info, item, sound test...) and MAP SEL (41); 0 leaves one out.
+-// The retail disc lacks the debug menu's font (its lines come out as stray pictures), so the launcher offers the map select only
+-// ("0x48F48C;0;41"). Opened from Settings > Game (lines at the end) or F7 (map select; Shift+F7 the debug menu when offered).
++// DEBSEL (40, the debug menu) and MAP SEL (41); 0 leaves one out. On the retail program DEBSEL has three lines: MAP SELECT, SOUND
++// TEST (its scene is -1: it does nothing) and EXIT (back to the logos); its text reads through PS2_SJIS_TEXT, and it takes Circle or
++// Start (Cross too with the pnach section [Debug menu answers Cross]). The longer developers' menu (player move, flags, fog, info,
++// item...) is only a table of values in the retail program (0x3BC810, 37 lines of 56 bytes): the code that drew it was taken out
++// before release, and of its values only line 5 (R2 LAND PATH) is still read. The launcher offers both ("0x48F48C;40;41").
++// Opened from Settings > Game (lines at the end), F7 (map select) or Shift+F7 (the debug menu).
+ // In the map select: up / down the line, left / right the value, Cross loads the map at that gate.
+ constexpr std::size_t kDebugRow = static_cast<std::size_t>(-2), kMapSelRow = static_cast<std::size_t>(-3);
+ struct DebugScenes { std::uint32_t address = 0, debug = 0, mapsel = 0, from = 0; bool set = false; };
+@@ -335,7 +338,7 @@ std::string g_key_note;  // the keys page's message line: what the last change d
+ std::string g_recomp_note;  // the Recomp options page's message line
+ 
+ // rawdanger-recomp: the game's switchable post processing (recomp.ini "Original PS2 Post Processing Filter", on = the filter; builds
+-// before v0.8.0: "No post-processing filter", on = no filter), shown as Settings > Picture > Original PS2 Post Processing Filter;
++// before v0.8.0: "No post-processing filter", on = no filter), shown as Settings > Picture > PS2 post-processing filter;
+ // -1 when the build has none
+ bool post_filter_on();  // below
+ int blur_section() {
+@@ -1396,6 +1399,7 @@ void menu_paint(bool show_again) {
+         v.popup_size = g_keys.popup_size;
+         v.filter_pass = ps2::game_filter_pass();
+         v.ambient_occlusion = ps2::ambient_occlusion();
++        v.field_of_view = g_keys.field_of_view;
+         v.keys_on_screen = g_keys.keys_on_screen != 0;
+         v.game_waits = g_menu_hold.load();
+         v.master_volume = g_master_volume;
+@@ -1611,7 +1615,8 @@ void open_debug_scene(bool map_select) {
+     }   // already there (it has no way out but loading a map: going back to the game scene leaves it running)
+     g_scene_before_debug = now;
+     g_scene_request = target;
+-    set_notice(map_select ? "Map select: up/down a line, left/right its value, Cross loads the map" : "The developers' debug menu");
++    set_notice(map_select ? "Map select: up/down a line, left/right its value, Cross loads the map"
++                          : "Debug menu: up/down a line, Cross or Circle chooses (Sound test does nothing on the released game)");
+     g_scene_request_until = SDL_GetTicks() + 3000;
+     ps2::st32(d.address, g_scene_request);
+ }
+@@ -2156,9 +2161,12 @@ void native_option_rows() {
+             static const char *const kFilters[] = {"RAW", "SOFT", "SHARP", "FSR 1"};
+             return std::string(kFilters[std::clamp(g_look / 2, 0, 3)]);
+         }, [](int d) { cycle_look(d); });
++    spin("Field of view", "How wide the camera sees", [] {
++            return g_keys.field_of_view == 100 ? std::string("100 % (PS2)") : std::to_string(g_keys.field_of_view) + " %";
++        }, command(Command::field_of_view));
+     spin("Anti-aliasing", "Smooth edges", [] {
+-            static const char *const kAa[] = {"OFF", "EDGES", "SMAA LOW", "SMAA MEDIUM", "SMAA HIGH", "SMAA ULTRA"};
+-            return std::string(kAa[std::clamp(g_keys.smaa ? 1 + g_keys.smaa : (g_look & 1) ? 1 : 0, 0, 5)]);
++            static const char *const kAa[] = {"OFF", "EDGES", "SMAA LOW", "SMAA MEDIUM", "SMAA HIGH", "SMAA ULTRA", "FXAA"};
++            return std::string(kAa[std::clamp(g_keys.smaa ? 1 + g_keys.smaa : (g_look & 1) ? 1 : 0, 0, 6)]);
+         }, command(Command::antialias));
+     spin("Sharpen", "Contrast-adaptive sharpening", [] {
+             static const char *const kLevels[] = {"OFF", "LOW", "MEDIUM", "HIGH"};
+@@ -2308,7 +2316,7 @@ void menu_command(quickmenu::Command c, int step) {
+         const int blur = blur_section();
+         if (blur < 0) break;
+         recomp::toggle(static_cast<std::size_t>(blur), g_recomp_note), sync_jp_textures();
+-        set_notice(post_filter_on() ? "Original PS2 Post Processing Filter: on (as on the console)" : "Original PS2 Post Processing Filter: off");
++        set_notice(post_filter_on() ? "PS2 post-processing filter: on (as on the console)" : "PS2 post-processing filter: off");
+         break;
+     }
+     case Command::mouse_look:
+@@ -2394,6 +2402,11 @@ void menu_command(quickmenu::Command c, int step) {
+         set_notice(v == 0 ? std::string("Master volume: muted") : "Master volume: " + std::to_string(v) + "%");
+         break;
+     }
++    case Command::field_of_view:
++        g_keys.field_of_view = std::clamp(g_keys.field_of_view + (step < 0 ? -10 : 10), 80, 150);
++        rewrite_keys_file([](const std::string &t) { return keymap::with_field_of_view(t, g_keys.field_of_view); }, "field of view");
++        set_notice("Field of view: " + std::to_string(g_keys.field_of_view) + " %" + (g_keys.field_of_view == 100 ? " (as on the PS2)" : ""));
++        break;
+     case Command::ambient_occlusion: {
+         static const char *const kLevels[] = {"off", "light", "strong"};
+         g_keys.ambient_occlusion = (g_keys.ambient_occlusion + (step < 0 ? 2 : 1)) % 3;
+@@ -2949,6 +2962,31 @@ void poll() {
+             recomp::set_defer_textures(in_area);
+         }
+     }
++    // rawdanger-recomp: the field of view (keys.ini field_of_view, % of the game's). PS2_CAMERA_ZOOM="@BLOCK,ZOOM,STATE": the camera
++    // block, the offset of its zoom factor (a float, 1.0 normally: the projection's screen distance is 768 times it) and of the byte
++    // that is non-zero while the game animates a zoom of its own. The factor is written only while the game's zoom is idle and
++    // the factor is the game's 1.0 or the one written here last, so the game's own zooms play as they are.
++    {
++        static bool parsed = false, set = false;
++        static std::uint32_t block = 0, zoom = 0, state = 0;
++        static float written = 1.0f;
++        if (!parsed) {
++            parsed = true;
++            if (const char *v = std::getenv("PS2_CAMERA_ZOOM"); v && *v == '@')
++                set = std::sscanf(v + 1, "%x,%x,%x", &block, &zoom, &state) == 3;
++        }
++        if (set) {
++            const auto get = [](std::uint32_t a) { const std::uint32_t w = ps2::ld32(a); float f; std::memcpy(&f, &w, 4); return f; };
++            const float want = 100.0f / static_cast<float>(std::clamp(g_keys.field_of_view, 80, 150));
++            const float now = get(block + zoom);
++            if ((ps2::ld32(block + state) & 0xFFu) == 0 && (now == 1.0f || now == written) && now != want) {
++                std::uint32_t w; std::memcpy(&w, &want, 4);
++                ps2::st32(block + zoom, w);
++                written = want;
++            }
++        }
++    }
++
+     // rawdanger-recomp: the camera's up / down range (PS2_CAMERA_PITCH="POINTER,LOW,HIGH,GAME_LOW,GAME_HIGH,NEW_LOW,NEW_HIGH": a word
+     // holding the camera block's address, or "@" and the block itself, the offsets of its two limits (floats), the game's values and the
+     // wider ones; written only while the block holds the game's values, so other cameras keep theirs. Raw Danger's follow camera tilts by
+diff --git a/runtime/src/vif.cpp b/runtime/src/vif.cpp
+index 9b07cac..106c609 100644
+--- a/runtime/src/vif.cpp
++++ b/runtime/src/vif.cpp
+@@ -10,6 +10,7 @@
+ 
+ #include <algorithm>
+ #include <map>
++#include <string>
+ #include <utility>
+ #include <atomic>
+ #include <cstdio>
+@@ -198,6 +199,14 @@ bool g_code_dirty = true;
+ std::map<std::pair<std::uint64_t, std::uint32_t>, std::uint64_t> g_counts;
+ std::uint64_t g_total = 0;
+ const bool g_on = [] { const char *v = std::getenv("PS2_VU1_STATS"); return v && *v == '1'; }();
++// what each program was given: the UNPACKs since the previous start, in order ("V4-32 x12 V2-16 x12 ..."), and how many
++std::string g_sig;
++std::uint32_t g_unpacks = 0;
++std::map<std::pair<std::uint64_t, std::uint32_t>, std::map<std::string, std::uint64_t>> g_sigs;
++void note_unpack(std::uint32_t op, std::uint32_t num) {
++    static const char *const kVn[] = {"S", "V2", "V3", "V4"}, *const kVl[] = {"32", "16", "8", "5"};
++    if (++g_unpacks <= 6) g_sig += std::string(g_sig.empty() ? "" : " ") + kVn[(op >> 2) & 3u] + "-" + kVl[op & 3u] + "x" + std::to_string(num ? num : 256u);
++}
+ void count(std::uint32_t address) {
+     if (g_code_dirty) {
+         std::uint64_t h = 1469598103934665603ull;
+@@ -205,9 +214,18 @@ void count(std::uint32_t address) {
+         g_code_hash = h, g_code_dirty = false;
+     }
+     ++g_counts[{g_code_hash, address}];
++    ++g_sigs[{g_code_hash, address}][g_unpacks > 6 ? g_sig + " +" + std::to_string(g_unpacks - 6) : g_sig];
++    g_sig.clear(), g_unpacks = 0;
+     if (++g_total % 20000u == 0) {
+-        std::fprintf(stderr, "[vu1] %llu programs started; by code and address:\n", static_cast<unsigned long long>(g_total));
+-        for (const auto &[k, n] : g_counts) std::fprintf(stderr, "[vu1]   code %016llX at %04X: %llu\n", static_cast<unsigned long long>(k.first), k.second, static_cast<unsigned long long>(n));
++        std::fprintf(stderr, "[vu1] %llu programs started; by code and address (and the UNPACKs given most often):\n", static_cast<unsigned long long>(g_total));
++        for (const auto &[k, n] : g_counts) {
++            const auto &m = g_sigs[k];
++            auto best = m.begin();
++            for (auto i = m.begin(); i != m.end(); ++i) if (i->second > best->second) best = i;
++            std::fprintf(stderr, "[vu1]   code %016llX at %04X: %llu  [%s] %llu%%\n", static_cast<unsigned long long>(k.first), k.second,
++                         static_cast<unsigned long long>(n), best == m.end() ? "" : best->first.c_str(),
++                         static_cast<unsigned long long>(best == m.end() ? 0 : best->second * 100 / n));
++        }
+     }
+ }
+ }  // namespace vu1stats
+@@ -553,7 +571,10 @@ void execute(int unit, std::uint32_t cmd, const std::uint32_t *data, const Ctx &
+         else gif::transfer(2, reinterpret_cast<const std::uint8_t *>(data), imm ? imm : 0x10000u);
+         break;
+     default:
+-        if ((op & 0x60u) == 0x60u) unpack(unit, cmd, data, c);
++        if ((op & 0x60u) == 0x60u) {
++            if (unit && vu1stats::g_on && !c.dry) vu1stats::note_unpack(op, (cmd >> 16) & 0xFFu);
++            unpack(unit, cmd, data, c);
++        }
+         else note_unknown(unit, cmd);
+         break;
+     }
+-- 
+2.43.0
+

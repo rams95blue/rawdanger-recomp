@@ -55,3 +55,30 @@ description=The mouse turns the camera itself, as far as it moved and as fast, w
 patch=1,EE,00176FD0,word,C4027F10
 patch=1,EE,00176FD4,word,AC007F10
 patch=1,EE,00176FEC,word,4602B580
+
+[Free camera tilt]
+description=The camera can look much further up and down (rawdanger-recomp v0.8.6). The game aims its follow camera at the player plus a height offset (camera +0x3B8, which the mouse and the right stick change) and stops that aim from going higher than 0.4 above the player, so the camera could hardly look up. This moves that stop to 12, in the four camera modes that have it; the mouse's up / down range is widened with it (RawDangerPC.exe). Switch it in the game (F1 -> Game options) or in RawDangerPC.exe.
+// recomp: live switch 00007F08
+// 0x00170B70, 0x001714B8, 0x00172888, 0x0017754C: lui $v0, 0xBECC (with ori 0xCCCD: -0.4, the highest aim) -> lui $v0, 0xC140
+// (-12.05) while the variable at 0x7F08 is 0, as on the disc while it is 1.
+patch=1,EE,E0010000,extended,00007F08
+patch=1,EE,00170B70,word,3C02C140
+patch=1,EE,E0010001,extended,00007F08
+patch=1,EE,00170B70,word,3C02BECC
+patch=1,EE,E0010000,extended,00007F08
+patch=1,EE,001714B8,word,3C02C140
+patch=1,EE,E0010001,extended,00007F08
+patch=1,EE,001714B8,word,3C02BECC
+patch=1,EE,E0010000,extended,00007F08
+patch=1,EE,00172888,word,3C02C140
+patch=1,EE,E0010001,extended,00007F08
+patch=1,EE,00172888,word,3C02BECC
+patch=1,EE,E0010000,extended,00007F08
+patch=1,EE,0017754C,word,3C02C140
+patch=1,EE,E0010001,extended,00007F08
+patch=1,EE,0017754C,word,3C02BECC
+
+[Debug menu answers Cross]
+description=The developers' debug menu (DEBSEL, Shift+F7) takes Circle or Start to choose a line, the Japanese way, and nothing else, so Cross did nothing and it seemed not to answer at all (rawdanger-recomp v0.8.6). This adds Cross. Built in (code).
+// 0x00187FE8: addiu $a1, $zero, 0x0820 (Start | Circle, the pad check at 0x2DAE00) -> 0x4820 (Start | Circle | Cross)
+patch=1,EE,00187FE8,word,24054820

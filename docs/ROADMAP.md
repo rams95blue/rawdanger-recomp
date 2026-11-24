@@ -117,7 +117,8 @@ ROOT.FAT); if it does, they are candidates for the Enhanced Edition.
 | v0.8.3 changes | ✅ | **Japanese textures fixed for good**: the Japanese picture files carry other GS settings (how wide the game takes them) for 98 textures, which garbled clothes (the cook boy's shirt, the waitress); the disc now puts the Japanese pictures into the US files and keeps the US settings (16 pictures of another size stay US). They switch at once again. **Japanese title**: the logo no longer lands on the menu's words (START GAME with Japanese letters). **FXAA** in the anti-aliasing list (SMAA works but changes little). Ambient occlusion stronger. Rain on the lens follows the camera turning in every camera, short wet marks instead of long lines. Mouse speed 1.0 by default. The disc is made again at the next build. Engine patch 0029 |
 | v0.8.4 changes | ✅ | Post processing: the flooded streets of AREA 01 (MAP01-04 and others) use a third version of the filter with no brightness stage; it was drawn the slow way (the 20 fps drops), now one pass with a byte-identical frame. Ambient occlusion without grain (the same samples for every pixel). The mouse wheel switches walk / run (the game has only these two paces). Engine patch 0030 |
 | v0.8.5 changes | ✅ | Post processing: all 36 maps checked; every version of the game's colour filter (including an eight-step one) now goes through the one-pass GPU path. Camera: the follow camera tilts about 25 degrees up and 30 down (the game: 8 and 13), and the rain on the lens gets up to four times heavier when looking up. Frame rate: the game's logic steps a fixed 20 times a second, so a higher frame rate is done by drawing in-between frames (native renderer, phase 3). Native renderer started: plan and VU1 program counts (docs/NATIVE_RENDERER.md). Engine patch 0031 |
-| **Pending (v0.8.5)** | ⏳ | See the list below |
+| v0.8.6 changes | ✅ | Launcher: two tabs, MODERN (the Enhanced Edition, recommended) and LEGACY (one disc as it is); build speed Light / Balanced / Full; Build tools... lists the nine tools with their links and finds copies saved on the PC (docs/BUILD_TOOLS.md). Regional options start as the US release (English voices included). Title screen: ENHANCED EDITION and the build number under the logo, in its own yellow and red. Camera: free tilt (the game's look-up stop moved, the mouse's range widened) and a field of view setting (80-150 %). The debug menu answers Cross (Shift+F7). Every other file that differs between the US and Japanese discs listed, with what can become a toggle (docs/VERSION_DIFFERENCES.md). The data each VU1 program is given (docs/NATIVE_RENDERER.md). Engine patch 0032 |
+| **Pending (v0.8.6)** | ⏳ | See the list below |
 | Still open after v0.7.4 | ✅ | All three done: direct mouse look (v0.7.9), the debug menus' text (v0.7.8), saves without the memory card (v0.7.8) |
 | Keyboard prompts | ✅ | v0.7.1: key caps with the player's keys in the game's own font (see *PC keys in the game's texts*) |
 | In-game menu for Raw Danger | ✅ | Engine patch 0005: Resume, Quick save/load, Game options (F3), Graphics page (look, resolution, text filter, full screen, widescreen, pause in the background), Achievements (F4), Key card, Change keys, **Quit to desktop**, hazard-tape look with the game's name. Next: options inside the game's own Options screen (see below) |
@@ -134,11 +135,11 @@ Code patches go into `patches\pnach\SLUS-21501_2905C5C6.pnach` as named sections
 compiled in at build time (the native engine ignores runtime writes to code). Each one is verified on a headless build
 of the same engine: boot or a save state, frames captured every N frames, compared with the unpatched build.
 
-## Pending (as of v0.8.5)
+## Pending (as of v0.8.6)
 
 Asked for and not done yet, roughly by size:
 
-1. **Camera pitch**: done in v0.8.5 for the follow camera (25 up, 30 down; lower or higher puts the camera inside the hero or the ground). The first-person view keeps the game's range.
+1. **Orbit camera**: the camera moving around the hero (up over him, down under), not only tilting. v0.8.6 has the free tilt and the field of view; the orbit needs a code change where the stick moves the camera (0x1772FC: its sideways move set from the height, -(h/d) times the step), with room for the new code.
 2. **First-person mouse**: Triangle (right mouse button) is the first-person view; the mouse there is not confirmed yet.
 3. **Japanese title**: a few stray pixels on the copyright line.
 4. **Japanese text** for the menus and subtitles (an option, like the voices).
@@ -146,10 +147,10 @@ Asked for and not done yet, roughly by size:
 6. **The hero's voice switching at once** (his lines are in sound banks loaded per area; the other characters' switch at once).
 7. **Detail distance**: the pop-in (the crowd's flat cut-outs, map pieces loaded by zone); the setting has not been found yet (the disc has no lower-detail models).
 8. **Minimap** from the game's own map (R3).
-9. **Uncapped frame rate**: the game steps a fixed 20 times a second (its logic never reads the vblank counters, so every step is 1/20 s); more frames on screen come from drawing in-between frames in the native renderer (phase 3).
+9. **Uncapped frame rate**: the game steps a fixed 20 times a second; more frames on screen come from drawing in-between frames in the native renderer (phase 3).
 10. **Water**: movement and reflections.
 11. **Lights**: smoother light sources, dynamic shadows.
-12. **A PC port's engine, not an emulated PS2** (started in v0.8.5, docs/NATIVE_RENDERER.md): draw the 3D scene natively from the game's models and lights instead of reproducing the PS2's graphics chip, which is what 10 and 11 need, and what lifts the limits of the PS2's memory and draw calls.
+12. **A PC port's engine, not an emulated PS2** (docs/NATIVE_RENDERER.md): phase 1 (what the game draws) in progress.
 13. Anti-aliasing: SMAA works but changes little (FXAA added in v0.8.3).
-14. The developers' debug menu (DEBSEL) does not answer the controller.
+14. **More regional toggles**: the Japanese character models and the Columbia items (docs/VERSION_DIFFERENCES.md: they need the Japan-only textures on the disc first).
 
