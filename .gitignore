@@ -10,3 +10,5 @@ SLPS_*
 __pycache__/
 /recomp/game/rd_build_info.h
 /recomp/game/rd_patch_table.inc
+!/tools/options_art.bin
+!/tools/title_art.bin
