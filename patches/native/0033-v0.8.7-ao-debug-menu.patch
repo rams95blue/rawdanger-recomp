@@ -1,0 +1,188 @@
+From 74a94cf3bb29dcac1b7261e24130e6e03776656d Mon Sep 17 00:00:00 2001
+From: rawdanger-recomp <rawdanger-recomp@users.noreply.github.com>
+Date: Wed, 25 Nov 2026 00:02:52 +0000
+Subject: [PATCH] v0.8.7: stronger ambient occlusion, the debug menu in the PC
+ font
+
+Ambient occlusion: radius 80 (was 38), creases from 0.4 %, gain 3, light 170
+and strong 245: it hardly showed. The developers' debug menu (DEBSEL) drawn
+over the window in the PC font with its three lines and the cursor followed
+from the pad (its own text came out as stray pictures with widescreen on).
+The menu canvas no longer writes past its picture for a fill wholly off its
+side.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01QNLFPekqhcU2dj7B3Utmea
+---
+ host/quickmenu.cpp         | 28 ++++++++++++++++++++++++++++
+ host/quickmenu.hpp         |  3 +++
+ host/window.cpp            | 23 ++++++++++++++++++++++-
+ runtime/src/gs/gpu/gs.wgsl |  6 +++---
+ runtime/src/gs/gs.cpp      |  2 +-
+ 5 files changed, 57 insertions(+), 5 deletions(-)
+
+diff --git a/host/quickmenu.cpp b/host/quickmenu.cpp
+index f4265d7..48d4192 100644
+--- a/host/quickmenu.cpp
++++ b/host/quickmenu.cpp
+@@ -229,6 +229,7 @@ struct Canvas {
+     }
+     void fill(int x, int y, int w, int h, std::uint32_t color) {
+         const int x0 = std::max(0, x), y0 = std::max(0, y), x1 = std::min(p.width, x + w), y1 = std::min(p.height, y + h);
++        if (x1 <= x0) return;   // wholly off the picture at the side (std::fill with its end before its start wrote past it)
+         for (int j = y0; j < y1; ++j) std::fill(p.rgba.begin() + j * p.width + x0, p.rgba.begin() + j * p.width + x1, color);
+     }
+     // one letter is 5 x 8 pixels of the font, each `s` x `s` screen pixels; a letter is 6 font pixels wide with its gap
+@@ -1067,6 +1068,33 @@ void Menu::draw_keys_on_screen(int window_width, int window_height, const std::v
+     if (!note.empty()) c.text(x, y + 2 * s, s, note.substr(0, static_cast<std::size_t>(name_chars + 1 + key_chars)), kDim);
+ }
+ 
++void Menu::draw_debug_menu(int window_width, int window_height, int cursor, Picture &out) {
++    static const char *const kLines[] = {"MAP SELECT", "SOUND TEST", "EXIT"};
++    static const char *const kWhat[] = {"Pick an area, a map and a gate, and go there", "Not in the released game: it does nothing",
++                                        "Back to the start (the logos)"};
++    static const char kHint[] = "Up / Down: choose    Cross or Circle: go    F1: the PC menu";
++    out.x = 0, out.y = 0, out.width = std::max(1, window_width), out.height = std::max(1, window_height);
++    out.rgba.assign(static_cast<std::size_t>(out.width) * out.height, (kPanel & 0x00FFFFFFu) | 0xF4000000u);
++    Canvas c{out};
++    // the scale: the longest line (the hint, 6 pixels a letter) within three quarters of the width, 21 rows of 8 within the height
++    const int s = std::clamp(std::min(window_width * 3 / 4 / (static_cast<int>(sizeof kHint) * 6), window_height / 200), 1, 10);
++    const int x = std::max(0, (window_width - static_cast<int>(sizeof kHint) * 6 * s) / 2), w = static_cast<int>(sizeof kHint) * 6 * s;
++    int y = std::max(0, window_height / 2 - 70 * s);
++    c.text(x, y, s * 2, "DEBUG MENU", kTitle);
++    y += 20 * s;
++    c.text(x, y, s, "The developers' scene select, left on the disc (DEBSEL)", kDim);
++    y += 16 * s;
++    for (int i = 0; i < 3; ++i) {
++        const bool on = i == std::clamp(cursor, 0, 2);
++        if (on) c.fill(std::max(0, x - 4 * s), y - 3 * s, std::min(w + 8 * s, window_width - std::max(0, x - 4 * s)), 26 * s, kBar);
++        c.text(x, y, s * 3 / 2 > 0 ? s * 3 / 2 : 1, kLines[i], on ? kBarText : kText);
++        c.text(x, y + 13 * s, s, kWhat[i], on ? kBarDim : kDim);
++        y += 30 * s;
++    }
++    y += 4 * s;
++    c.text(x, y, s, kHint, kDim);
++}
++
+ void Menu::draw_note(int window_width, int window_height, const std::string &text, Picture &out) {
+     const int pad = 5;
+     const int units_w = 2 * pad + static_cast<int>(text.size()) * 6, units_h = 2 * pad + 8;
+diff --git a/host/quickmenu.hpp b/host/quickmenu.hpp
+index 8770278..8fc2490 100644
+--- a/host/quickmenu.hpp
++++ b/host/quickmenu.hpp
+@@ -171,6 +171,9 @@ public:
+     void draw(int window_width, int window_height, const Values &values, Picture &out);
+     // A small panel with one line of text at the top of the window (for a few seconds after the menu is closed: "Saved", "Loaded")
+     static void draw_note(int window_width, int window_height, const std::string &text, Picture &out);
++    // rawdanger-recomp: the developers' scene select (DEBSEL) drawn in the PC font over the whole window (its own text came out as
++    // stray pictures): its lines, the one the cursor is on, what each does
++    static void draw_debug_menu(int window_width, int window_height, int cursor, Picture &out);
+     // rawdanger-recomp: the player's keys at the left of the screen while playing (F10); note: a line under it, may be empty
+     static void draw_keys_on_screen(int window_width, int window_height, const std::vector<std::pair<std::string, std::string>> &rows,
+                                     const std::string &note, Picture &out);
+diff --git a/host/window.cpp b/host/window.cpp
+index a4800da..6aebf03 100644
+--- a/host/window.cpp
++++ b/host/window.cpp
+@@ -245,6 +245,10 @@ std::vector<std::size_t> g_recomp_row_section;  // the Game options page's lines
+ // In the map select: up / down the line, left / right the value, Cross loads the map at that gate.
+ constexpr std::size_t kDebugRow = static_cast<std::size_t>(-2), kMapSelRow = static_cast<std::size_t>(-3);
+ struct DebugScenes { std::uint32_t address = 0, debug = 0, mapsel = 0, from = 0; bool set = false; };
++// the debug menu (DEBSEL) on screen, and the line its cursor is on: followed here from the pad (the game moves it one line per
++// new press of up or down, from 0 to 2 without wrapping: 0x188088-0x1880C0), as its own cursor is in a block made at run time
++std::atomic<bool> g_debug_menu_on{false};
++std::atomic<int> g_debug_cursor{0};
+ const DebugScenes &debug_scenes() {
+     static const DebugScenes d = [] {
+         DebugScenes r;
+@@ -1310,6 +1314,13 @@ void poll_port(int port) {
+                      static_cast<unsigned long long>(ps2::frames_run()), port + 1, pressed, names.empty() ? " none" : names.c_str(), lx, ly, rx, ry,
+                      pressed & kL2 ? l2 : 0, pressed & kR2 ? r2 : 0);
+     }
++    if (port == 0 && g_debug_menu_on.load(std::memory_order_relaxed)) {   // the debug menu's cursor, as the game moves it
++        static bool was_up = false, was_down = false;
++        const bool up = (pressed & (1u << 4)) || ly < 0x40, down = (pressed & (1u << 6)) || ly > 0xC0;
++        if (up && !was_up) g_debug_cursor.store(std::max(0, g_debug_cursor.load() - 1));
++        if (down && !was_down) g_debug_cursor.store(std::min(2, g_debug_cursor.load() + 1));
++        was_up = up, was_down = down;
++    }
+     ps2::set_pad_pressure(8, l2, port);
+     ps2::set_pad_pressure(9, r2, port);
+     ps2::set_pad_buttons(pressed, port);
+@@ -1375,7 +1386,7 @@ bool keys_on_screen_now() { return g_keys.keys_on_screen != 0; }
+ 
+ void menu_paint(bool show_again) {
+     if (show_again) g_menu_redraw = true;
+-    g_overlay_on = g_menu.is_open() || !g_note_text.empty() || g_native_hint || keys_on_screen_now();
++    g_overlay_on = g_menu.is_open() || !g_note_text.empty() || g_native_hint || keys_on_screen_now() || g_debug_menu_on.load(std::memory_order_relaxed);
+     if (!g_overlay_on) {
+ #ifdef PS2_GPU
+         if (g_gpu_present) ps2::gs::gpu::set_overlay(nullptr, 0, 0, 0, 0);
+@@ -1504,6 +1515,8 @@ void menu_paint(bool show_again) {
+         std::string key = "SELECT";
+         if (!g_keys.inputs[keymap::Select].empty()) key += " / " + keymap::input_name(g_keys.inputs[keymap::Select].front());
+         quickmenu::Menu::draw_native_hint(w, h, key + "   PC settings", g_menu_picture);
++    } else if (g_debug_menu_on.load(std::memory_order_relaxed)) {
++        quickmenu::Menu::draw_debug_menu(w, h, g_debug_cursor.load(), g_menu_picture);
+     } else if (g_toast) {
+         quickmenu::Menu::draw_toast(w, h, "ACHIEVEMENT UNLOCKED", g_toast_title, g_toast_icon, g_toast_w, g_toast_h, g_menu_picture);
+     } else if (g_note_text.empty()) {
+@@ -2802,6 +2815,14 @@ void poll() {
+         static bool was = false;
+         const bool on = (d.mapsel && scene == d.mapsel) || (d.debug && scene == d.debug);
+         if (on != was) ps2::set_debug_text(was = on);
++        const bool menu = d.debug && scene == d.debug;
++        static int shown_cursor = -1;
++        if (menu && !g_debug_menu_on.load()) g_debug_cursor.store(0);   // the menu starts on its first line
++        if (menu != g_debug_menu_on.load() || (menu && shown_cursor != g_debug_cursor.load())) {
++            g_debug_menu_on.store(menu);
++            shown_cursor = menu ? g_debug_cursor.load() : -1;
++            menu_paint();   // the panel drawn again (or taken away)
++        }
+     }
+     native_option_rows();
+     nopt::frame();
+diff --git a/runtime/src/gs/gpu/gs.wgsl b/runtime/src/gs/gpu/gs.wgsl
+index 525acea..7c0a9f0 100644
+--- a/runtime/src/gs/gpu/gs.wgsl
++++ b/runtime/src/gs/gpu/gs.wgsl
+@@ -1784,7 +1784,7 @@ fn game_ao(@builtin(global_invocation_id) gid: vec3<u32>) {
+     if (z0 < 64.0) {
+         return;   // nothing drawn (sky, cleared)
+     }
+-    let radius = clamp(f32(prm(7u)) * z0 / 65536.0, 1.5, 28.0);
++    let radius = clamp(f32(prm(7u)) * z0 / 65536.0, 2.0, 40.0);
+     // v0.8.4: the same 8 directions at 2 distances for every pixel (no random turn per pixel: that was the grain)
+     var occluded = 0.0;
+     var counted = 0.0;
+@@ -1803,11 +1803,11 @@ fn game_ao(@builtin(global_invocation_id) gid: vec3<u32>) {
+         }
+         let crease = ((zp + zm) * 0.5 - z0) / z0;
+         let ahead = max(zp, zm) / z0 - 1.0;
+-        occluded = occluded + smoothstep(0.006, 0.05, crease) * (1.0 - smoothstep(0.04, 0.15, ahead));
++        occluded = occluded + smoothstep(0.004, 0.035, crease) * (1.0 - smoothstep(0.04, 0.15, ahead));   // v0.8.7: stronger (it hardly showed)
+         counted = counted + 1.0;
+     }
+     occluded = select(0.0, occluded / counted * 6.0, counted > 0.0);
+-    let ao = 1.0 - f32(prm(6u)) / 256.0 * smoothstep(0.0, 1.0, clamp(occluded / 6.0 * 1.4, 0.0, 1.0));
++    let ao = 1.0 - f32(prm(6u)) / 256.0 * smoothstep(0.0, 1.0, clamp(occluded / 6.0 * 3.0, 0.0, 1.0));
+     let fl = locate(0u, prm(0u), prm(1u), x, y);
+     let c = load_at(fl, k);
+     let cr = u32(f32(c & 255u) * ao);
+diff --git a/runtime/src/gs/gs.cpp b/runtime/src/gs/gs.cpp
+index ef6f7f1..2774894 100644
+--- a/runtime/src/gs/gs.cpp
++++ b/runtime/src/gs/gs.cpp
+@@ -1166,7 +1166,7 @@ bool step(const State &s, std::uint64_t attr) {
+ #ifdef PS2_GPU
+         // ambient occlusion on the 3D picture before the filter tints it (only with the GPU)
+         if (const int ao = g_ao.load(std::memory_order_relaxed); ao > 0 && gpu_on() && g_scene_bp && g_scene_bw >= 8 && g_scene_bw <= 16) {
+-            const std::uint32_t p[8] = {g_scene_bp, g_scene_bw, g_scene_bw * 64u, 448u, zbp, w.zpsm, ao >= 2 ? 230u : 160u, 38u};
++            const std::uint32_t p[8] = {g_scene_bp, g_scene_bw, g_scene_bw * 64u, 448u, zbp, w.zpsm, ao >= 2 ? 245u : 170u, 80u};   // v0.8.7: radius 80 (38 hardly showed)
+             gpu::game_ao(p);
+         }
+ #endif
+-- 
+2.43.0
+

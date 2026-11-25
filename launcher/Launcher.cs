@@ -28,7 +28,7 @@ namespace RawDangerLauncher
 {
     public static class Program
     {
-        public const string Version = "0.8.6";
+        public const string Version = "0.8.7";
         public const string AppName = "Raw Danger PC";
         public static bool Restart;
 
@@ -603,6 +603,9 @@ namespace RawDangerLauncher
                     psi.EnvironmentVariables["PS2_NATIVE_MENU"] = "0x48E008=16";
                     psi.EnvironmentVariables["PS2_AUTO_CROSS"] = "0x48E008=3";
                     psi.EnvironmentVariables["PS2_SKIP_SCENE"] = "0x48E008=3";
+                    // v0.8.7: the developers' map select (F7) and debug menu (Shift+F7) here too: the same scenes (40, 41) and the
+                    // scene request at gp - 0x49E4 as on the US program (0x16EAE4), 0x48E00C; the debug menu is drawn in the PC font
+                    psi.EnvironmentVariables["PS2_DEBUG_SCENES"] = "0x48E00C;40;41;21";
                 }
             }
             catch (Exception) { }   // the F1 menu's Recomp options page

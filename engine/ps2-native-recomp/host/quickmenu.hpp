@@ -171,6 +171,9 @@ public:
     void draw(int window_width, int window_height, const Values &values, Picture &out);
     // A small panel with one line of text at the top of the window (for a few seconds after the menu is closed: "Saved", "Loaded")
     static void draw_note(int window_width, int window_height, const std::string &text, Picture &out);
+    // rawdanger-recomp: the developers' scene select (DEBSEL) drawn in the PC font over the whole window (its own text came out as
+    // stray pictures): its lines, the one the cursor is on, what each does
+    static void draw_debug_menu(int window_width, int window_height, int cursor, Picture &out);
     // rawdanger-recomp: the player's keys at the left of the screen while playing (F10); note: a line under it, may be empty
     static void draw_keys_on_screen(int window_width, int window_height, const std::vector<std::pair<std::string, std::string>> &rows,
                                     const std::string &note, Picture &out);

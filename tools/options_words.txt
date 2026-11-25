@@ -10,6 +10,7 @@ L	Pause in background
 L	Game runs behind F1
 L	Menu look
 L	Pop-up size
+L	Field of view
 L	Upscale filter
 L	Anti-aliasing
 L	Sharpen
@@ -102,3 +103,12 @@ V	LARGE
 V	HUGE
 B	NORMAL
 B	INVERTED
+V	FXAA
+V	80 %
+V	90 %
+V	100 % (PS2)
+V	110 %
+V	120 %
+V	130 %
+V	140 %
+V	150 %

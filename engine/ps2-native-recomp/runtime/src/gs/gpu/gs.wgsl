@@ -1784,7 +1784,7 @@ fn game_ao(@builtin(global_invocation_id) gid: vec3<u32>) {
     if (z0 < 64.0) {
         return;   // nothing drawn (sky, cleared)
     }
-    let radius = clamp(f32(prm(7u)) * z0 / 65536.0, 1.5, 28.0);
+    let radius = clamp(f32(prm(7u)) * z0 / 65536.0, 2.0, 40.0);
     // v0.8.4: the same 8 directions at 2 distances for every pixel (no random turn per pixel: that was the grain)
     var occluded = 0.0;
     var counted = 0.0;
@@ -1803,11 +1803,11 @@ fn game_ao(@builtin(global_invocation_id) gid: vec3<u32>) {
         }
         let crease = ((zp + zm) * 0.5 - z0) / z0;
         let ahead = max(zp, zm) / z0 - 1.0;
-        occluded = occluded + smoothstep(0.006, 0.05, crease) * (1.0 - smoothstep(0.04, 0.15, ahead));
+        occluded = occluded + smoothstep(0.004, 0.035, crease) * (1.0 - smoothstep(0.04, 0.15, ahead));   // v0.8.7: stronger (it hardly showed)
         counted = counted + 1.0;
     }
     occluded = select(0.0, occluded / counted * 6.0, counted > 0.0);
-    let ao = 1.0 - f32(prm(6u)) / 256.0 * smoothstep(0.0, 1.0, clamp(occluded / 6.0 * 1.4, 0.0, 1.0));
+    let ao = 1.0 - f32(prm(6u)) / 256.0 * smoothstep(0.0, 1.0, clamp(occluded / 6.0 * 3.0, 0.0, 1.0));
     let fl = locate(0u, prm(0u), prm(1u), x, y);
     let c = load_at(fl, k);
     let cr = u32(f32(c & 255u) * ao);

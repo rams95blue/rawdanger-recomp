@@ -97,6 +97,10 @@ where surfaces meet: feet on the floor, under tables, corners, folds. It is work
 touched. The game's depth is about 1 / distance, which is linear across the screen on a flat surface: for pairs of points on
 opposite sides of a pixel, a floor or a wall gives exactly the pixel's own depth on average, while a crease gives a nearer one.
 Only that difference darkens, so flat surfaces stay clean, and points much nearer (a person far in front of a wall) do not count,
-which keeps the dark halos of a plain screen-space AO away. The GPU renderer only, and it needs the Original PS2 Post Processing
-Filter on (it runs where the filter starts).
+which keeps the dark halos of a plain screen-space AO away. The GPU renderer only, and it needs the PS2 post-processing filter
+on (it runs where the filter starts: with the filter off there is no point where the 3D picture is done and the HUD not yet drawn).
+
+v0.8.7: stronger, as it hardly showed (in the banquet hall, 0.3 % of the picture changed): it looks 80 pixels out at the nearest
+depth (was 38, up to 40 pixels), counts creases from 0.4 % (was 0.6 %), with a gain of 3 (was 1.4); light darkens up to 66 %,
+strong up to 96 %. Now feet stand on the floor and the tables' edges sit on it.
 

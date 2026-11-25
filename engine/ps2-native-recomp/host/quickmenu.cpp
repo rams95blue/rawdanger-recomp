@@ -229,6 +229,7 @@ struct Canvas {
     }
     void fill(int x, int y, int w, int h, std::uint32_t color) {
         const int x0 = std::max(0, x), y0 = std::max(0, y), x1 = std::min(p.width, x + w), y1 = std::min(p.height, y + h);
+        if (x1 <= x0) return;   // wholly off the picture at the side (std::fill with its end before its start wrote past it)
         for (int j = y0; j < y1; ++j) std::fill(p.rgba.begin() + j * p.width + x0, p.rgba.begin() + j * p.width + x1, color);
     }
     // one letter is 5 x 8 pixels of the font, each `s` x `s` screen pixels; a letter is 6 font pixels wide with its gap
@@ -1065,6 +1066,33 @@ void Menu::draw_keys_on_screen(int window_width, int window_height, const std::v
         y += line_h * s;
     }
     if (!note.empty()) c.text(x, y + 2 * s, s, note.substr(0, static_cast<std::size_t>(name_chars + 1 + key_chars)), kDim);
+}
+
+void Menu::draw_debug_menu(int window_width, int window_height, int cursor, Picture &out) {
+    static const char *const kLines[] = {"MAP SELECT", "SOUND TEST", "EXIT"};
+    static const char *const kWhat[] = {"Pick an area, a map and a gate, and go there", "Not in the released game: it does nothing",
+                                        "Back to the start (the logos)"};
+    static const char kHint[] = "Up / Down: choose    Cross or Circle: go    F1: the PC menu";
+    out.x = 0, out.y = 0, out.width = std::max(1, window_width), out.height = std::max(1, window_height);
+    out.rgba.assign(static_cast<std::size_t>(out.width) * out.height, (kPanel & 0x00FFFFFFu) | 0xF4000000u);
+    Canvas c{out};
+    // the scale: the longest line (the hint, 6 pixels a letter) within three quarters of the width, 21 rows of 8 within the height
+    const int s = std::clamp(std::min(window_width * 3 / 4 / (static_cast<int>(sizeof kHint) * 6), window_height / 200), 1, 10);
+    const int x = std::max(0, (window_width - static_cast<int>(sizeof kHint) * 6 * s) / 2), w = static_cast<int>(sizeof kHint) * 6 * s;
+    int y = std::max(0, window_height / 2 - 70 * s);
+    c.text(x, y, s * 2, "DEBUG MENU", kTitle);
+    y += 20 * s;
+    c.text(x, y, s, "The developers' scene select, left on the disc (DEBSEL)", kDim);
+    y += 16 * s;
+    for (int i = 0; i < 3; ++i) {
+        const bool on = i == std::clamp(cursor, 0, 2);
+        if (on) c.fill(std::max(0, x - 4 * s), y - 3 * s, std::min(w + 8 * s, window_width - std::max(0, x - 4 * s)), 26 * s, kBar);
+        c.text(x, y, s * 3 / 2 > 0 ? s * 3 / 2 : 1, kLines[i], on ? kBarText : kText);
+        c.text(x, y + 13 * s, s, kWhat[i], on ? kBarDim : kDim);
+        y += 30 * s;
+    }
+    y += 4 * s;
+    c.text(x, y, s, kHint, kDim);
 }
 
 void Menu::draw_note(int window_width, int window_height, const std::string &text, Picture &out) {

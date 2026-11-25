@@ -149,6 +149,8 @@
   reads the camera block at a fixed address ("@"), the lens rain gets heavier looking up, PS2_VU1_STATS counts VU1 programs.
 - **0032-v0.8.6-fov-debug-wording** (rawdanger-recomp v0.8.6): keys.ini field_of_view through the camera's zoom factor
   (PS2_CAMERA_ZOOM), FXAA in the Options list, the filter's name in sentence case, the debug menu notes, the UNPACKs in PS2_VU1_STATS.
+- **0033-v0.8.7-ao-debug-menu** (rawdanger-recomp v0.8.7): stronger ambient occlusion; the developers' debug menu drawn in
+  the PC font with its cursor followed from the pad; a menu canvas fill wholly off its picture no longer writes past it.
 
 ## Goals of the fork
 

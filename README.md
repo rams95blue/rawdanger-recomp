@@ -15,7 +15,10 @@ tools...** lists them with their links and where they are found (docs/BUILD_TOOL
 
 - **Games**: US, JP, JP demo Type-A, JP demo Type-B, and the **Enhanced Edition** (built from the US disc, with the
   Japanese voices from the JP disc; offered once all four discs are found). It starts as the US release (English voices, US
-  pictures, logo and film); its title screen reads ENHANCED EDITION with the build number under the logo.
+  pictures, logo and film); its title screen reads ENHANCED EDITION with the build number by the logo, in the US logo's yellow
+  or the Japanese logo's white. To redraw those words: `python tools/rd_title_art_source.py psd <TITLE.DAT> us|jp out.psd`
+  makes a layered PSD at 8 times the size; export the words as `tools/title_art_us.png` / `title_art_jp.png` (2720 x 944,
+  the guide and the build number hidden) and build again.
 - **Recomp options**: every patch as an option, in the launcher and in the game (F1 -> Recomp options, or F3). They
   switch while you play: widescreen, intro logos, the PS2 post-processing filter, and in the Enhanced Edition **Japanese / English
   voices**, **Japanese faces and hair** and **Japanese signs** (the 151 textures the US release redrew, from the JP disc).
@@ -45,7 +48,7 @@ tools...** lists them with their links and where they are found (docs/BUILD_TOOL
   F1 menu** (Settings -> Display -> *Game runs behind this menu*; off: it waits). See docs/GRAPHICS.md.
 - **Keys**: F1 menu, F2 picture look, F3 game options, F4 achievements, F5 / F8 quick save / load, **F6 held: fast
   forward** (skips through cutscenes, talks and walks at the game's top speed), **F7: the developers' map select** left on
-  the disc (up / down a line, left / right its value, Cross loads the map; docs/DEBUG.md), F9 report, **F10 your keys on screen**, F11 full screen, **Shift+F7 the debug menu** (map select, exit; Cross or Circle). The camera tilts much further up and down
+  the disc (up / down a line, left / right its value, Cross loads the map; docs/DEBUG.md), F9 report, **F10 your keys on screen**, F11 full screen, **Shift+F7 the debug menu** (map select, exit; drawn in the PC font; Cross or Circle). The camera tilts much further up and down
   than on the PS2 (free tilt since v0.8.6, a switch in F3). The mouse wheel sets
   walk or run for the walk keys (up runs, down walks) when no button is put on the wheel. The memory-card
   check at start is not shown at all (the card is still read).

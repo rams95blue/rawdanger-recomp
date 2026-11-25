@@ -71,12 +71,21 @@ def words(recomp):
         kind, text = line.rstrip("\n").split("\t", 1)
         out.append((kind, text))
     if recomp and os.path.exists(recomp):
+        # the rows are the live sections only (built-in ones are not switched in the game), named by their label (the
+        # engine asks for the label first, the section's name when the label has no picture)
+        sections, cur = [], None
         for line in open(recomp, encoding="utf-8", errors="replace"):
             line = line.strip()
             if line.startswith("[") and line.endswith("]"):
-                out.append(("L", line[1:-1]))
-            elif line.lower().startswith("label") and "=" in line:
-                out.append(("L", line.split("=", 1)[1].strip()))
+                cur = {"name": line[1:-1], "label": "", "live": True}
+                sections.append(cur)
+            elif cur is not None and "=" in line:
+                k, v = (t.strip() for t in line.split("=", 1))
+                if k.lower() == "label": cur["label"] = v
+                elif k.lower() == "live": cur["live"] = v != "0"
+        for sec in sections:
+            if sec["live"]:
+                out.append(("L", sec["label"] or sec["name"]))
     seen, uniq = set(), []
     for k, t in out:
         if (k, t) not in seen:
@@ -112,8 +121,12 @@ def art(recomp):
                 break
             r += 1
             if r == len(regions):
-                sys.exit("rd_options.py: the words do not fit the Options pictures")
+                break
             x, y = regions[r][1], regions[r][2]
+        if r == len(regions):   # full: the words left over are not painted (those rows show no name) and the rest still works
+            left = [n for n, _, _ in items[items.index((name, w, img)):]]
+            print("rd_options.py: no room left for " + str(len(left)) + " words: " + ", ".join(left), file=sys.stderr)
+            break
         layout.append((name, tex, x, y, w, img))
         x += w + 1
     return layout

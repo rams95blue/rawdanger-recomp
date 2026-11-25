@@ -245,6 +245,10 @@ std::vector<std::size_t> g_recomp_row_section;  // the Game options page's lines
 // In the map select: up / down the line, left / right the value, Cross loads the map at that gate.
 constexpr std::size_t kDebugRow = static_cast<std::size_t>(-2), kMapSelRow = static_cast<std::size_t>(-3);
 struct DebugScenes { std::uint32_t address = 0, debug = 0, mapsel = 0, from = 0; bool set = false; };
+// the debug menu (DEBSEL) on screen, and the line its cursor is on: followed here from the pad (the game moves it one line per
+// new press of up or down, from 0 to 2 without wrapping: 0x188088-0x1880C0), as its own cursor is in a block made at run time
+std::atomic<bool> g_debug_menu_on{false};
+std::atomic<int> g_debug_cursor{0};
 const DebugScenes &debug_scenes() {
     static const DebugScenes d = [] {
         DebugScenes r;
@@ -1310,6 +1314,13 @@ void poll_port(int port) {
                      static_cast<unsigned long long>(ps2::frames_run()), port + 1, pressed, names.empty() ? " none" : names.c_str(), lx, ly, rx, ry,
                      pressed & kL2 ? l2 : 0, pressed & kR2 ? r2 : 0);
     }
+    if (port == 0 && g_debug_menu_on.load(std::memory_order_relaxed)) {   // the debug menu's cursor, as the game moves it
+        static bool was_up = false, was_down = false;
+        const bool up = (pressed & (1u << 4)) || ly < 0x40, down = (pressed & (1u << 6)) || ly > 0xC0;
+        if (up && !was_up) g_debug_cursor.store(std::max(0, g_debug_cursor.load() - 1));
+        if (down && !was_down) g_debug_cursor.store(std::min(2, g_debug_cursor.load() + 1));
+        was_up = up, was_down = down;
+    }
     ps2::set_pad_pressure(8, l2, port);
     ps2::set_pad_pressure(9, r2, port);
     ps2::set_pad_buttons(pressed, port);
@@ -1375,7 +1386,7 @@ bool keys_on_screen_now() { return g_keys.keys_on_screen != 0; }
 
 void menu_paint(bool show_again) {
     if (show_again) g_menu_redraw = true;
-    g_overlay_on = g_menu.is_open() || !g_note_text.empty() || g_native_hint || keys_on_screen_now();
+    g_overlay_on = g_menu.is_open() || !g_note_text.empty() || g_native_hint || keys_on_screen_now() || g_debug_menu_on.load(std::memory_order_relaxed);
     if (!g_overlay_on) {
 #ifdef PS2_GPU
         if (g_gpu_present) ps2::gs::gpu::set_overlay(nullptr, 0, 0, 0, 0);
@@ -1504,6 +1515,8 @@ void menu_paint(bool show_again) {
         std::string key = "SELECT";
         if (!g_keys.inputs[keymap::Select].empty()) key += " / " + keymap::input_name(g_keys.inputs[keymap::Select].front());
         quickmenu::Menu::draw_native_hint(w, h, key + "   PC settings", g_menu_picture);
+    } else if (g_debug_menu_on.load(std::memory_order_relaxed)) {
+        quickmenu::Menu::draw_debug_menu(w, h, g_debug_cursor.load(), g_menu_picture);
     } else if (g_toast) {
         quickmenu::Menu::draw_toast(w, h, "ACHIEVEMENT UNLOCKED", g_toast_title, g_toast_icon, g_toast_w, g_toast_h, g_menu_picture);
     } else if (g_note_text.empty()) {
@@ -2802,6 +2815,14 @@ void poll() {
         static bool was = false;
         const bool on = (d.mapsel && scene == d.mapsel) || (d.debug && scene == d.debug);
         if (on != was) ps2::set_debug_text(was = on);
+        const bool menu = d.debug && scene == d.debug;
+        static int shown_cursor = -1;
+        if (menu && !g_debug_menu_on.load()) g_debug_cursor.store(0);   // the menu starts on its first line
+        if (menu != g_debug_menu_on.load() || (menu && shown_cursor != g_debug_cursor.load())) {
+            g_debug_menu_on.store(menu);
+            shown_cursor = menu ? g_debug_cursor.load() : -1;
+            menu_paint();   // the panel drawn again (or taken away)
+        }
     }
     native_option_rows();
     nopt::frame();

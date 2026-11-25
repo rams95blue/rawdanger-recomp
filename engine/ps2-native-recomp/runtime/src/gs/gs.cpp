@@ -1166,7 +1166,7 @@ bool step(const State &s, std::uint64_t attr) {
 #ifdef PS2_GPU
         // ambient occlusion on the 3D picture before the filter tints it (only with the GPU)
         if (const int ao = g_ao.load(std::memory_order_relaxed); ao > 0 && gpu_on() && g_scene_bp && g_scene_bw >= 8 && g_scene_bw <= 16) {
-            const std::uint32_t p[8] = {g_scene_bp, g_scene_bw, g_scene_bw * 64u, 448u, zbp, w.zpsm, ao >= 2 ? 230u : 160u, 38u};
+            const std::uint32_t p[8] = {g_scene_bp, g_scene_bw, g_scene_bw * 64u, 448u, zbp, w.zpsm, ao >= 2 ? 245u : 170u, 80u};   // v0.8.7: radius 80 (38 hardly showed)
             gpu::game_ao(p);
         }
 #endif

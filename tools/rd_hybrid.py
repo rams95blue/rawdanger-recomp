@@ -259,11 +259,27 @@ def load_title_art(path):
     return art
 
 
+# The title words' canvas for art made by hand (tools/title_art_us.png, title_art_jp.png: RGBA PNG, the words only, on a clear
+# background): the title picture's corner from x 300, y 330 to its edge (340 x 118) at 8 times the size, 2720 x 944. The PSD that
+# tools/rd_title_art_source.py makes has that canvas, with the logo as a guide layer. The build number is still drawn here.
+TITLE_ART_AT, TITLE_ART_SCALE = (300, 330), 8
+
+
+def read_rgba_png(path):
+    try:
+        from rd_options import read_png   # (pure Python: the embedded Python has no Pillow)
+    except Exception:
+        return None
+    got = read_png(path)
+    return got if got and got[0] == 340 * TITLE_ART_SCALE and got[1] == 118 * TITLE_ART_SCALE else None
+
+
 def title_words(dat, version, art_path):
-    """TITLE.DAT with "ENHANCED EDITION" and the build number under the RAW DANGER logo (picture 8, 640 x 448, 8 bits a pixel
-    with a 256-colour palette, drawn over the whole title screen). The letters are filled with the logo's own yellow (copied
-    from inside its letters, so it has the same grain), with its red rim and a dark edge inside, and every colour is one of the
-    picture's palette; nothing changes when the picture is not the expected one."""
+    """TITLE.DAT with "ENHANCED EDITION" and the build number by the title logo (picture 8, 640 x 448, 8 bits a pixel with a
+    256-colour palette, drawn over the whole title screen), in that logo's look: under the US RAW DANGER logo in its own yellow
+    (copied from inside its letters, so it has the same grain) with its red rim and a dark edge inside, leaning like it; over the
+    Japanese logo (white on the blue title, with a soft dark edge) in its white and grey. Every colour is one of the picture's
+    palette; nothing changes when the picture is not one of the two."""
     art = load_title_art(art_path) if os.path.exists(art_path) else None
     if art is None:
         return dat
@@ -288,23 +304,34 @@ def title_words(dat, version, art_path):
     W, H = w, h
     at = lambda x, y: out[pix + y * W + x]
 
-    def nearest(rgb):
+    def nearest(rgba, solid=True):
         best, bi = None, 0
         for i, (r, g, b, a) in enumerate(colours):
-            if a < 0x70: continue
-            dd = (r - rgb[0]) ** 2 + (g - rgb[1]) ** 2 + (b - rgb[2]) ** 2
+            if solid and a < 0x70: continue
+            dd = (r - rgba[0]) ** 2 + (g - rgba[1]) ** 2 + (b - rgba[2]) ** 2 + (0 if solid else 4 * (a - rgba[3]) ** 2)
             if best is None or dd < best: best, bi = dd, i
         return bi
 
-    # the logo's yellow, with its grain: the yellow pixels inside its letters (x 368..621, y 363..420)
-    yellow = []
-    for y in range(363, 421):
+    # which logo: the US one's yellow (x 368..621, y 363..420), or the Japanese one's white (x 378..621, y 362..435)
+    yellow, white = [], 0
+    for y in range(362, 436):
         for x in range(368, 622):
             r, g, b, a = colours[at(x, y)]
-            if a >= 0x70 and r > 200 and g > 190 and b < 90: yellow.append(at(x, y))
-    if len(yellow) < 200:
+            if a >= 0x70 and r > 200 and g > 190 and b < 90 and y <= 420: yellow.append(at(x, y))
+            if a >= 0x70 and r > 240 and g > 240 and b > 240: white += 1
+    if len(yellow) >= 200:
+        style = "us"
+        fill = lambda k: yellow[(k * 7919) % len(yellow)]
+        rim, edge = nearest((236, 0, 0, 0x80)), nearest((96, 82, 0, 0x80))
+        right, base, lean, rim_w = 618, 441, 40, 2
+    elif white >= 500:
+        style = "jp"
+        solid_white = nearest((255, 255, 255, 0x80))
+        fill = lambda k: solid_white
+        rim, edge = nearest((24, 24, 32, 0x30), solid=False), nearest((200, 204, 214, 0x80))
+        right, base, lean, rim_w = 618, 360, 0, 1
+    else:
         return dat
-    red, dark = nearest((236, 0, 0)), nearest((96, 82, 0))
 
     def line(text, size):
         glyphs = [art.get((c, size)) or art.get((c.upper(), size)) for c in text]
@@ -319,30 +346,59 @@ def title_words(dat, version, art_path):
             x0 += len(g[0]) + 1
         return mask
 
-    words, build = line("ENHANCED EDITION", 0), line("v" + version, 1)
-    if words is None:
-        return dat
-    # placed under the logo, right edge with the logo's, leaning like it (one pixel up every 40 to the right)
-    right, base = 618, 441
-    parts = [(words, 0)]
-    if build: parts.append((build, 0))
-    total_w = sum(len(m[0]) for m, _ in parts) + 6 * (len(parts) - 1)
-    x = right - total_w
+    build = line("v" + version, 1) if version else None
+    # art made by hand for this logo: its pixels, made small (8 x 8 to one), each the nearest colour of the palette
+    hand = read_rgba_png(os.path.join(os.path.dirname(os.path.abspath(__file__)), "title_art_" + style + ".png"))
+    if hand:
+        hw, hh, rows = hand
+        S = TITLE_ART_SCALE
+        cells, x_max = {}, -1
+        for cy in range(hh // S):
+            for cx in range(hw // S):
+                tr = tg = tb = ta = 0
+                for yy in range(S):
+                    row = rows[cy * S + yy]
+                    for xx in range(S):
+                        o = (cx * S + xx) * 4
+                        a = row[o + 3]
+                        tr += row[o] * a; tg += row[o + 1] * a; tb += row[o + 2] * a; ta += a
+                if ta >= 128 * S * S:   # mostly covered
+                    cells[(cx, cy)] = nearest((tr // ta, tg // ta, tb // ta, 0x80))
+                    x_max = max(x_max, cx)
+        room = (W - 3) - (TITLE_ART_AT[0] + x_max) - (len(build[0]) + 6 if build else 0)
+        shift = min(0, room)   # moved left when the build number would not fit after it
+        for (cx, cy), idx in cells.items():
+            X, Y = TITLE_ART_AT[0] + cx + shift, TITLE_ART_AT[1] + cy
+            if 0 <= X < W and 0 <= Y < H: out[pix + Y * W + X] = idx
+        print("  the title words from tools/title_art_" + style + ".png")
+        if not build:
+            return bytes(out)
+        bottom = max(cy for _, cy in cells) if cells else base - TITLE_ART_AT[1]
+        parts, x, base, lean = [build], TITLE_ART_AT[0] + x_max + shift + 6, TITLE_ART_AT[1] + bottom + 1, 0
+        start_x = x
+    else:
+        words = line("ENHANCED EDITION", 0)
+        if words is None:
+            return dat
+        parts = [words] + ([build] if build else [])
+        total_w = sum(len(m[0]) for m in parts) + 6 * (len(parts) - 1)
+        x = start_x = right - total_w
     k = 0
-    for m, _ in parts:
+    for m in parts:
         mh, mw = len(m), len(m[0])
         top = base - mh
         def on(xx, yy): return 0 <= yy < mh and 0 <= xx < mw and m[yy][xx]
-        for yy in range(-2, mh + 2):
-            for xx in range(-2, mw + 2):
-                X = x + xx; Y = top + yy - (X - (right - total_w)) // 40
+        for yy in range(-rim_w, mh + rim_w):
+            for xx in range(-rim_w, mw + rim_w):
+                X = x + xx; Y = top + yy - ((X - start_x) // lean if lean else 0)
                 if not (0 <= X < W and 0 <= Y < H): continue
                 if on(xx, yy):
                     inner_edge = not on(xx + 1, yy) or not on(xx, yy + 1)
-                    out[pix + Y * W + X] = dark if inner_edge else yellow[(k * 7919) % len(yellow)]
+                    out[pix + Y * W + X] = edge if inner_edge else fill(k)
                     k += 1
-                elif any(on(xx + dx, yy + dy) for dx in (-1, 0, 1) for dy in (-1, 0, 1)) or any(on(xx + dx, yy + dy) for dx, dy in ((2, 0), (-2, 0), (0, 2), (0, -2))):
-                    out[pix + Y * W + X] = red
+                elif any(on(xx + dx, yy + dy) for dx in (-1, 0, 1) for dy in (-1, 0, 1)) or \
+                        (rim_w >= 2 and any(on(xx + dx, yy + dy) for dx, dy in ((2, 0), (-2, 0), (0, 2), (0, -2)))):
+                    out[pix + Y * W + X] = rim
         x += mw + 6
     return bytes(out)
 
@@ -591,12 +647,15 @@ def main(argv=None):
                 out.write(b"\0" * ((-out.tell()) % SECTOR))
                 for group in swaps["groups"]:
                     group["us_start"] = out.tell() // SECTOR
-                    for name, off, slot, usd, jpd in group["items"]:
+                    for n_item, (name, off, slot, usd, jpd) in enumerate(group["items"]):
                         assert out.tell() - start == off
                         if name.upper().endswith("TITLE\\TITLE.DAT") and a.version:
-                            stamped = title_words(usd, a.version, os.path.join(os.path.dirname(os.path.abspath(__file__)), "title_art.bin"))
-                            print(f"  {name}: " + ("ENHANCED EDITION v" + a.version + " under the logo" if stamped != usd else "the title words did not fit, left out"))
-                            usd = stamped
+                            letters = os.path.join(os.path.dirname(os.path.abspath(__file__)), "title_art.bin")
+                            stamped, stamped_jp = title_words(usd, a.version, letters), title_words(jpd, a.version, letters)
+                            print(f"  {name}: ENHANCED EDITION v{a.version} by the US logo: {'yes' if stamped != usd else 'no'}, "
+                                  f"by the Japanese logo: {'yes' if stamped_jp != jpd else 'no'}")
+                            usd, jpd = stamped, stamped_jp
+                            group["items"][n_item] = (name, off, slot, usd, jpd)   # (the Japanese copy is written later)
                         out.write(usd + b"\0" * (slot - len(usd)))
                 size = out.tell() - start
             out.write(b"\0" * ((-out.tell()) % SECTOR))
