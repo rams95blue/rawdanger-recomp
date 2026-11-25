@@ -89,5 +89,6 @@ else:
 | Wet look: wetness shown | The game's, or 0 / 25 / 50 / 75 / 100 % for the look only |
 | Wet look: show the hero's capsules | The parts of the screen the wet look treats, in blue |
 | Head follows camera: a fixed turn | Off, or the head held at -60 / -30 / 30 / 60 degrees |
+| Game steps a second (v0.9.8) | The game's, 20, 30 or 60: a test of the pacing (everything runs faster; docs/FRAMERATE.md) |
 | Developers' debug menu, map select | The disc's own menus (Shift+F7, F7) |
 

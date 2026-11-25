@@ -179,6 +179,8 @@
   degrees in a bone's local turn goes half the way each step; the spine and chest get breathing standing still, a hunch when
   wet, shivering when cold and a lean into turns, turned in the world after they are built (the head and arms follow).
   Settings > Controls > Livelier hero (keys.ini anim_layers, on); Settings > Debug: the layers x4.
+- **0043-debug-game-steps** (rawdanger-recomp v0.9.8): PS2_DEBUG_STEPS names the word of vblanks a step waits for; Settings >
+  Debug forces 20, 30 or 60 steps a second (a fixed-step game: everything runs faster), for the uncapped frame rate.
 
 ## Goals of the fork
 

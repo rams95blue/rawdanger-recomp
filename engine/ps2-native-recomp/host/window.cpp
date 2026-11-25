@@ -248,7 +248,8 @@ constexpr std::size_t kDebugRow = static_cast<std::size_t>(-2), kMapSelRow = sta
                       // v0.9.5: the Debug tab's test switches
                       kDryRow = static_cast<std::size_t>(-7), kSoakRow = static_cast<std::size_t>(-8), kWetForceRow = static_cast<std::size_t>(-9),
                       kWetShowRow = static_cast<std::size_t>(-10), kHeadTestRow = static_cast<std::size_t>(-11),
-                      kViewRow = static_cast<std::size_t>(-12), kStatsRow = static_cast<std::size_t>(-13), kAnimGainRow = static_cast<std::size_t>(-14);
+                      kViewRow = static_cast<std::size_t>(-12), kStatsRow = static_cast<std::size_t>(-13), kAnimGainRow = static_cast<std::size_t>(-14),
+                      kStepsRow = static_cast<std::size_t>(-15);
 // rawdanger-recomp (v0.9.2): the hero's two bars. PS2_DEBUG_HERO="TABLE,PLAYER,COUNT,NOW1,MOST1,NOW2,MOST2" (hex: the table of the
 // characters' addresses, the word with the player's number, how many the table has, and two pairs of offsets: a value and its
 // most). Raw Danger: 0x5EAC80, 0x48F3E4, 235; health (+0x368 of +0x36C, 100) and body temperature (+0x370 of +0x374, 30000: it
@@ -404,6 +405,19 @@ bool g_look_forced = false;
 std::string g_speed_title = "ps2-native-recomp";
 // rawdanger-recomp (v0.9.6, Settings > Debug): the stats at the left of the picture, once a second
 bool g_stats_on = false;
+// rawdanger-recomp (v0.9.7, Settings > Debug): the game's steps a second forced (a test of the uncapped frame rate, docs/FRAMERATE.md
+// in rawdanger-recomp): PS2_DEBUG_STEPS="POINTER,OFFSET" names the word of vblanks a step waits for (*POINTER + OFFSET)
+int g_force_vblanks = 0;   // 0 the game's, else 3, 2 or 1 vblanks a step
+struct DebugSteps { std::uint32_t pointer = 0, offset = 0; bool set = false; };
+const DebugSteps &debug_steps() {
+    static const DebugSteps d = [] {
+        DebugSteps r;
+        unsigned long p = 0, o = 0;
+        if (const char *v = std::getenv("PS2_DEBUG_STEPS"); v && std::sscanf(v, "%lx,%lx", &p, &o) == 2) r = {static_cast<std::uint32_t>(p), static_cast<std::uint32_t>(o), true};
+        return r;
+    }();
+    return d;
+}
 std::vector<std::pair<std::string, std::string>> g_stats_rows;
 std::string g_game_title;  // optional PS2_WINDOW_TITLE, supplied by the launcher
 std::string g_notice_text;
@@ -1279,6 +1293,10 @@ void read_keyboard(std::uint16_t &pressed, std::uint8_t &lx, std::uint8_t &ly, s
     ps2::set_head_follow(g_keys.head_follow != 0);
     ps2::set_wet_look_on(g_keys.wet_look != 0);
     ps2::set_anim_layers(g_keys.anim_layers != 0);
+    if (g_force_vblanks > 0 && debug_steps().set) {
+        const std::uint32_t g = ps2::ld32(debug_steps().pointer);
+        if (g >= 0x100000u && g < 0x2000000u) ps2::st32(g + debug_steps().offset, static_cast<std::uint32_t>(g_force_vblanks));
+    }
     if (g_keep_hero) heal_hero();
     {
         static bool was = false;
@@ -1622,6 +1640,8 @@ void menu_paint(bool show_again) {
                     debug_row(kAnimGainRow, "Livelier hero: the layers' size", ps2::anim_gain() > 1.5f ? "<  x4 (to see them)  >" : "<  as made  >");
                     debug_row(kHeadTestRow, "Head follows camera: a fixed turn", t == 0.0f ? "<  off  >" : "<  " + std::to_string(static_cast<int>(std::lround(t * 57.29578f))) + " deg  >");
                 }
+                if (debug_steps().set)
+                    debug_row(kStepsRow, "Game steps a second (a test: everything faster)", g_force_vblanks == 0 ? "<  the game's  >" : "<  " + std::to_string(60 / g_force_vblanks) + "  >");
                 if (debug_scenes().set) {
                     if (debug_scenes().debug) debug_row(kDebugRow, "Developers' debug menu (on the disc; Shift+F7)", "open");
                     if (debug_scenes().mapsel) debug_row(kMapSelRow, "Developers' map select (on the disc; F7)", "open");
@@ -2660,6 +2680,21 @@ void menu_command(quickmenu::Command c, int step) {
             const int k = (ps2::debug_view() + (step < 0 ? 3 : 1)) % 4;
             ps2::set_debug_view(k);
             g_recomp_note = kViews[k];
+            break;
+        }
+        if (row < g_recomp_row_section.size() && g_recomp_row_section[row] == kStepsRow) {
+            // the game's, 20, 30, 60 (vblanks a step 3, 2, 1)
+            static const int kOrder[] = {0, 3, 2, 1};
+            int k = 0;
+            while (k < 4 && kOrder[k] != g_force_vblanks) ++k;
+            k = ((k == 4 ? 0 : k) + (step < 0 ? 3 : 1)) % 4;
+            g_force_vblanks = kOrder[k];
+            if (g_force_vblanks == 0 && debug_steps().set) {
+                const std::uint32_t g = ps2::ld32(debug_steps().pointer);
+                if (g >= 0x100000u && g < 0x2000000u) ps2::st32(g + debug_steps().offset, 3u);   // the US disc's
+            }
+            g_recomp_note = g_force_vblanks == 0 ? "Game steps: the game's own (20 a second)"
+                                                 : "Game steps: " + std::to_string(60 / g_force_vblanks) + " a second: a fixed-step game, everything runs faster (a test)";
             break;
         }
         if (row < g_recomp_row_section.size() && g_recomp_row_section[row] == kAnimGainRow) {

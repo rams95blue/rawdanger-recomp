@@ -129,7 +129,8 @@ ROOT.FAT); if it does, they are candidates for the Enhanced Edition.
 | v0.9.5 changes | ✅ | **The wet look**: the hero darkens and the colours deepen as the clothes get wet, and lighten again as they dry, from the game's own wetness (the worn clothes' 0-100, what the HUD's drops show). The hero's limbs are projected with the game's own world-to-screen matrix into capsules on the screen, and the GPU's AO pass darkens only the pixels inside them at the hero's depth, so nothing behind or in front is touched (Settings > Picture > Wet look, on by default). **Settings > Debug**: every test switch in one tab, kept in every build: Where am I (now with the clothes' wetness), Heal, warm and dry the hero, Keep the hero healthy and warm, Dry / Soak the hero's clothes, Wet look: wetness shown (the game's, 0 to 100 %), Wet look: show the capsules (in blue), Head follows camera: a fixed turn, and the developers' debug menu and map select. Engine patch 0040 |
 | v0.9.6 changes | ✅ | **Graphics debug in Settings > Debug**: *Picture shown* switches the 3D picture between the game's, the ambient occlusion alone (white: none, dark: shaded), the depth (grey by distance: 1 m white, 60 m and the sky black) and the wet look's capsules in blue; *Stats on screen* puts FPS, CPU / GPU, memory, scene and camera mode, the clothes' wetness, the view and the frame at the left, once a second. Engine patch 0041 |
 | v0.9.7 changes | ✅ | **A livelier hero** (the animation plan's steps 1 and 2, first pass): on the game's own animation the hero breathes standing still (faster when cold), hunches a little as the clothes get wet, shivers when the body temperature drops, and leans into turns when running; a clip that snaps to the next (a bone turning more than 23 degrees in one step) is taken half the way each step. Settings > Controls > Livelier hero (on); Settings > Debug: the layers four times bigger, to see them. Engine patch 0042 (docs/ANIMATION.md) |
-| **Pending (v0.9.7)** | ⏳ | See the list below |
+| v0.9.8 changes | ✅ | **The uncapped frame rate, first findings** (docs/FRAMERATE.md): the word that paces the game (3 vblanks a step) and proof that it is a fixed-step game (at 30 or 60 steps everything runs 1.5 or 3 times as fast). Settings > Debug > Game steps a second forces 20, 30 or 60, as a test. Engine patch 0043 |
+| **Pending (v0.9.8)** | ⏳ | See the list below |
 | Still open after v0.7.4 | ✅ | All three done: direct mouse look (v0.7.9), the debug menus' text (v0.7.8), saves without the memory card (v0.7.8) |
 | Keyboard prompts | ✅ | v0.7.1: key caps with the player's keys in the game's own font (see *PC keys in the game's texts*) |
 | In-game menu for Raw Danger | ✅ | Engine patch 0005: Resume, Quick save/load, Game options (F3), Graphics page (look, resolution, text filter, full screen, widescreen, pause in the background), Achievements (F4), Key card, Change keys, **Quit to desktop**, hazard-tape look with the game's name. Next: options inside the game's own Options screen (see below) |
@@ -146,7 +147,7 @@ Code patches go into `patches\pnach\SLUS-21501_2905C5C6.pnach` as named sections
 compiled in at build time (the native engine ignores runtime writes to code). Each one is verified on a headless build
 of the same engine: boot or a save state, frames captured every N frames, compared with the unpatched build.
 
-## Pending (as of v0.9.7)
+## Pending (as of v0.9.8)
 
 Asked for and not done yet, roughly by size:
 
@@ -158,7 +159,7 @@ Asked for and not done yet, roughly by size:
 6. **The hero's voice switching at once** (his lines are in sound banks loaded per area; the other characters' switch at once).
 7. **Detail distance**: the pop-in (the crowd's flat cut-outs, map pieces loaded by zone); the setting has not been found yet (the disc has no lower-detail models). v0.9.4: eleven global words that look like distances (0x48C0B8, 0x48C0F0, 0x48D714, 0x48FA44, 0x48C9BC/C0, 0x48BFB8, 0x48C1FC, 0x48DCD8, 0x48DC78, 0x48E9CC, 0x48C254/0x48C1B0) raised two to three times changed no pixel in a street, a raised view of the city and a captioned scene. Next: a place where things visibly pop in (an F9 report there), then the culling code itself.
 8. **Minimap** from the game's own map (R3).
-9. **Uncapped frame rate**: the game steps a fixed 20 times a second; more frames on screen come from drawing in-between frames in the native renderer (phase 3).
+9. **Uncapped frame rate**: now worked on next to the animation (21). See 21b.
 10. **Water**: movement and reflections.
 11. **Lights**: smoother light sources, dynamic shadows.
 12. **A PC port's engine, not an emulated PS2** (docs/NATIVE_RENDERER.md): phase 1 (what the game draws) in progress.
@@ -182,6 +183,11 @@ Asked for and not done yet, roughly by size:
        The whole game steps 20 times a second (the picture too), so in-between frames wait for the uncapped frame rate (9, 12).
     3. *New clips*: the game's animation format decoded and new motion (from a source you can use) retargeted to its 48-bone
        skeleton. Days of work, in steps.
+21b. **Uncapped frame rate** (moved up, next to the animation): docs/FRAMERATE.md. Found: the step waits G+0x24C vblanks
+    (3 on the US disc; G = *(gp-0x3E70)); 2 or 1 makes the game step 30 or 60 times a second, but it is a fixed-step game
+    (everything 1.5 or 3 times as fast: measured). Two ways: the frame-rate constants changed with it (the European program,
+    compiled for 30, compared with the US one would list them all), or in-between pictures drawn with the camera and the bones
+    halfway between two steps.
 22. **The wet look, finer**: the shoes and a raised hand can fall outside the capsules; a highlight that follows the light; wet
     ground and walls in the rain.
 
