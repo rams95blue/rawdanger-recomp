@@ -1,4 +1,59 @@
-# Raw Danger! PC — rawdanger-recomp
+<p align="center">
+  <img src="docs/images/banner.png" alt="Raw Danger! native PC port: rawdanger-recomp" width="100%">
+</p>
+
+<p align="center">
+  <a href="https://github.com/rams95blue/rawdanger-recomp/releases"><img alt="release" src="https://img.shields.io/github/v/release/rams95blue/rawdanger-recomp?style=flat-square&color=f2c14e&labelColor=0b1324&label=release"></a>
+  <img alt="version" src="https://img.shields.io/badge/build-v0.9.1-96c4ff?style=flat-square&labelColor=0b1324">
+  <img alt="platform" src="https://img.shields.io/badge/platform-Windows%2010%2F11%20x64-96c4ff?style=flat-square&labelColor=0b1324">
+  <img alt="engine" src="https://img.shields.io/badge/engine-ps2--native--recomp%20fork-96c4ff?style=flat-square&labelColor=0b1324">
+  <img alt="game data" src="https://img.shields.io/badge/game%20data-not%20included-e05a4f?style=flat-square&labelColor=0b1324">
+</p>
+
+<p align="center">
+  <b>Raw Danger!</b> (PS2, 2006) and <b>Zettai Zetsumei Toshi 2</b>, running natively on Windows.<br>
+  Built from <b>your own discs</b>: the game's code is translated to C++ and compiled for your PC. No emulator, no game data included.
+</p>
+
+<p align="center">
+  <a href="#quick-start">Quick start</a> ·
+  <a href="#highlights">Highlights</a> ·
+  <a href="#play-windows">Full guide</a> ·
+  <a href="docs/ROADMAP.md">Roadmap</a> ·
+  <a href="docs/CAMERA.md">How it works</a>
+</p>
+
+---
+
+## Highlights
+
+| | |
+|---|---|
+| **Enhanced Edition** | Built from your four discs: the US game with the Japanese voices, faces, signs, logo and opening film, each switchable while you play. Its title reads ENHANCED EDITION with the build number. |
+| **Any resolution, any screen** | Internal resolution 1x to 8x, widescreen, full screen, FSR 1, SMAA, sharpening, field of view 80 to 150 %. |
+| **The PS2 look, kept or cleaned** | The game's own glow, tint and haze in one cheap GPU pass; ambient occlusion; rain on the lens that follows the weather; cutscene bars from 100 % to none. |
+| **A modern camera** | Mouse look in the follow and first-person views, an orbit camera that circles the hero, free tilt, and an option to keep your camera where the game has a fixed one. |
+| **Achievements, offline** | RetroAchievements' set of 83, checked on your PC: no account, no connection, badges and progress in the game. |
+| **Saves as folders** | Every save is a plain folder next to the launcher: copy it, back it up, share it. |
+| **PC controls** | Rebindable keys with key caps, the PC keys shown in the game's own texts, F-key shortcuts, fast forward. |
+| **Every patch is a switch** | Widescreen, intro logos, filters, regional textures: in the launcher and live in the game (F3). |
+
+## Quick start
+
+1. **Download** the latest release and unzip it anywhere.
+2. **Run `RawDangerPC.exe`**, point it at your disc images and press **Build**: LEGACY converts one disc as it is; MODERN builds the Enhanced Edition once it has found all four (US, Japanese and the two Japanese demos). The first build fetches the nine free build tools from their official pages (about 330 MB) and takes a few minutes.
+3. **Play.** F1 opens the PC menu in the game, F3 the game's switches, F10 shows your keys.
+
+You need: Windows 10 or 11 (64-bit), a GPU with Vulkan or DirectX 12, and your own copies of the discs (Raw Danger! USA SLUS-21501; for the Enhanced Edition also Zettai Zetsumei Toshi 2, SLPS-25606, and its two demos).
+
+## Screenshots
+
+<!-- Add your own captures here: docs/images/shot-1.png ... -->
+*Screenshots from your own build go here.*
+
+---
+
+# Full guide
 
 A native Windows port of **Raw Danger!** (USA, SLUS-21501) and **Zettai Zetsumei Toshi 2** (Japan, SLPS-25606), plus
 both Japanese demos, made from your own discs with our fork of
@@ -166,3 +221,7 @@ recomp/game/               game module compiled into ps2EntryRunner
 recomp/rawdanger.ini       default settings
 docs/                      WORKFLOW, VERSION_DIFFERENCES, VOICE_SWAP, ROADMAP
 ```
+
+---
+
+<p align="center"><sub>Raw Danger! and Zettai Zetsumei Toshi are trademarks of their respective owners. This is a fan project: it ships no game code or data and builds only from discs you own. The banner is original art (<code>tools/rd_readme_art.py</code>).</sub></p>
