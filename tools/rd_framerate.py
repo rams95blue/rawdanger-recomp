@@ -46,7 +46,12 @@ def scale(vu, ve, flt, fps):
     if a == 0 or b == 0 or (a < 0) != (b < 0): return ve
     if flt and 0 < a < 1 and 0 < b < 1 and abs(math.log(b) / math.log(a) - 2 / 3) < 0.03:
         return fw(a ** (1 / 3))
-    v = a * 3 ** (math.log(b / a) / math.log(1.5))
+    # the law behind the European value: x(30/20)^n with n = +-1 or +-2, or x(25/20)^n (a few were tuned for the PAL TV's 25);
+    # the one nearest in log terms (the European ints are rounded: 5 -> 8 is x1.5 = 7.5), then the same law at 60 (x3^n, x(60/20)^n)
+    r = math.log(b / a)
+    laws = [(n * math.log(1.5), n) for n in (1, -1, 2, -2)] + [(n * math.log(1.25), n) for n in (1, -1)]
+    _, n = min(laws, key=lambda t: abs(t[0] - r))
+    v = a * 3.0 ** n
     return fw(v) if flt else int(round(v))
 
 def code_words(ub, uw, eb, ew, fps):

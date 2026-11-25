@@ -1,0 +1,127 @@
+From bde49c41970673f5d30d1f35a90daf145b767fe3 Mon Sep 17 00:00:00 2001
+From: rawdanger-recomp <rawdanger-recomp@users.noreply.github.com>
+Date: Wed, 25 Nov 2026 23:01:58 +0000
+Subject: [PATCH] rawdanger-recomp v0.10.0: EE overclock; coat sway and a
+ weight shift
+
+PS2_EE_OVERCLOCK=K makes K charged cycles one cycle of the clock that
+paces vblanks, timers and the IOP (PCSX2's EE cycle rate): Raw Danger at
+60 steps a second needs 2. The livelier hero gets springs on the six
+hanging chains (coat tails, skirt) and a slow weight shift standing still.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01QNLFPekqhcU2dj7B3Utmea
+---
+ runtime/src/system.cpp | 54 ++++++++++++++++++++++++++++++++++++------
+ 1 file changed, 47 insertions(+), 7 deletions(-)
+
+diff --git a/runtime/src/system.cpp b/runtime/src/system.cpp
+index 2fc1c0a..9cdfe0b 100644
+--- a/runtime/src/system.cpp
++++ b/runtime/src/system.cpp
+@@ -469,7 +469,16 @@ void load_context(Cpu &c, const ThreadContext &t) {
+     c.fcr31 = t.fcr31;
+ }
+ 
+-std::uint64_t now() { return g_base + static_cast<std::uint64_t>(g_given - g_cpu.budget); }
++// rawdanger-recomp (v0.10.0): the EE overclocked. The translated code charges one cycle an instruction; with PS2_EE_OVERCLOCK=K
++// (1 to 8, default 1) K of them make one cycle of the clock that paces the vblanks, the timers and the IOP, so K times as much
++// work fits between two vblanks (PCSX2's EE cycle rate). A game made to step faster than it was written for (Raw Danger at 60
++// steps a second, docs/FRAMERATE.md in rawdanger-recomp) needs it: at 1 the step overran the vblank and it made 48 a second.
++const std::int64_t kOverclock = [] {
++    const char *v = std::getenv("PS2_EE_OVERCLOCK");
++    const long k = v && *v ? std::strtol(v, nullptr, 10) : 1;
++    return static_cast<std::int64_t>(std::clamp(k, 1L, 8L));
++}();
++std::uint64_t now() { return g_base + static_cast<std::uint64_t>((g_given - g_cpu.budget) / kOverclock); }
+ 
+ std::uint64_t rtc_seconds() {
+     if (g_options.rtc_epoch) return g_options.rtc_epoch + now() / kEeClock;
+@@ -480,8 +489,8 @@ std::uint64_t hblank_cycles() { return frame_cycles() * 2u / (g_options.pal ? 62
+ 
+ void set_budget(Cpu &c, std::int64_t cycles) {
+     g_base = now();
+-    g_given = cycles;
+-    c.budget = static_cast<std::int32_t>(cycles);
++    g_given = std::min<std::int64_t>(cycles * kOverclock, 0x7FFFFFFF);
++    c.budget = static_cast<std::int32_t>(g_given);
+ }
+ 
+ void schedule(int event, std::uint64_t at, std::function<void()> action) {
+@@ -1492,7 +1501,9 @@ struct HeroBones {
+     bool have_prev[48] = {};
+     float hips_prev[3] = {}, yaw_prev = 0.0f;
+     std::uint64_t frame_prev = 0;
+-    float breath_phase = 0.0f, shiver_phase = 0.0f;
++    float breath_phase = 0.0f, shiver_phase = 0.0f, shift_phase = 0.0f;
++    float vel[3] = {}, acc[3] = {};                         // the hips' speed and its change (metres a second, eased)
++    float sway_ang[6][2] = {}, sway_spd[6][2] = {};         // v0.10.0: the six hanging chains (bones 30-47 in threes): two angles each
+     float idle = 0.0f, lean = 0.0f, wet = 0.0f, cold = 0.0f;   // eased
+     float right[3] = {1, 0, 0}, forward[3] = {0, 0, -1};    // the body's, from the shoulders (last step)
+ };
+@@ -1601,6 +1612,30 @@ void anim_step() {
+         while (dy < -3.14159265f) dy += 6.28318531f;
+         turn = dy / dt;
+     }
++    if (fresh) {
++        float v[3] = {(hips[0] - g_hb.hips_prev[0]) / dt, 0.0f, (hips[2] - g_hb.hips_prev[2]) / dt};
++        for (int k = 0; k < 3; k += 2) {
++            if (!std::isfinite(v[k]) || std::fabs(v[k]) > 20.0f) v[k] = 0.0f;
++            const float before = g_hb.vel[k];
++            g_hb.vel[k] += (v[k] - g_hb.vel[k]) * std::min(1.0f, dt * 8.0f);
++            g_hb.acc[k] = (g_hb.vel[k] - before) / dt;
++        }
++        // the hanging chains: a spring each, pushed back by the speed and the change of speed, swinging out in turns
++        const float fwd_speed = g_hb.vel[0] * g_hb.forward[0] + g_hb.vel[2] * g_hb.forward[2];
++        const float fwd_acc = g_hb.acc[0] * g_hb.forward[0] + g_hb.acc[2] * g_hb.forward[2];
++        const float side_acc = g_hb.acc[0] * g_hb.right[0] + g_hb.acc[2] * g_hb.right[2];
++        for (int c = 0; c < 6; ++c) {
++            // pitch: positive turns the chain's top forward about the waist, so its hem trails behind
++            const float want[2] = {std::clamp(0.06f * fwd_speed + 0.03f * fwd_acc, -0.3f, 0.5f),
++                                   std::clamp(-0.025f * side_acc + 0.02f * std::sin(g_hb.breath_phase + c), -0.25f, 0.25f)};
++            for (int k = 0; k < 2; ++k) {
++                // stiffness 40, damping 7: a swing of about a second that settles
++                const float force = (want[k] - g_hb.sway_ang[c][k]) * 40.0f - g_hb.sway_spd[c][k] * 7.0f;
++                g_hb.sway_spd[c][k] += force * dt;
++                g_hb.sway_ang[c][k] = std::clamp(g_hb.sway_ang[c][k] + g_hb.sway_spd[c][k] * dt, -0.6f, 0.6f);
++            }
++        }
++    }
+     std::copy(hips, hips + 3, g_hb.hips_prev);
+     g_hb.yaw_prev = yaw;
+     if (!std::isfinite(speed) || speed > 20.0f) speed = 0.0f;
+@@ -1616,6 +1651,7 @@ void anim_step() {
+     g_hb.cold += (std::clamp((24000.0f - temp) / 10000.0f, 0.0f, 1.0f) - g_hb.cold) * std::min(1.0f, dt * 0.5f);
+     g_hb.breath_phase = std::fmod(g_hb.breath_phase + dt * 6.28318531f / (4.2f - 1.6f * g_hb.cold), 6.28318531f);
+     g_hb.shiver_phase = std::fmod(g_hb.shiver_phase + dt * 6.28318531f * 7.3f, 6.28318531f);
++    g_hb.shift_phase = std::fmod(g_hb.shift_phase + dt * 6.28318531f / 7.0f, 6.28318531f);   // a shift of weight every 7 s
+ }
+ // a turn of the bone's axes about the body's right axis (pitch: positive leans forward), its forward axis (roll) and up (yaw)
+ void body_turn(std::uint32_t bone, float pitch, float roll, float yaw) {
+@@ -1642,8 +1678,12 @@ void body_turn(std::uint32_t bone, float pitch, float roll, float yaw) {
+ }
+ void anim_layers(int i, std::uint32_t bone) {
+     const float g = g_anim_gain.load(std::memory_order_relaxed);
+-    if (i == 5) {   // the spine: the lean into turns, and half the hunch
+-        body_turn(bone, 0.05f * g_hb.wet * g, g_hb.lean * g, 0.0f);
++    if (i == 5) {   // the spine: the lean into turns, half the hunch, and the weight shifting from foot to foot standing still
++        const float shift = std::sin(g_hb.shift_phase) * 0.025f * g_hb.idle;
++        body_turn(bone, 0.05f * g_hb.wet * g, (g_hb.lean + shift) * g, 0.0f);
++    } else if (i >= 30 && i < 48 && (i - 30) % 3 == 0) {   // the first bone of a hanging chain (coat tails, the skirt): its spring
++        const int c = (i - 30) / 3;
++        body_turn(bone, g_hb.sway_ang[c][0] * g, g_hb.sway_ang[c][1] * g, 0.0f);
+     } else if (i == 6) {   // the chest: breathing, the hunch, the shiver
+         const float breath = std::sin(g_hb.breath_phase) * 0.018f * (0.4f + 0.6f * g_hb.idle) * (1.0f + 0.5f * g_hb.cold);
+         const float shiver = g_hb.cold * 0.012f;
+@@ -1659,7 +1699,7 @@ void head_follow_call(Cpu &c) {
+     call(c, g_head.fn, 1);
+     c.r[31].sd[0] = static_cast<std::int32_t>(back);
+     if (lively && idx == 4) anim_step();
+-    if (lively && (idx == 5 || idx == 6)) anim_layers(idx, bone);
++    if (lively && (idx == 5 || idx == 6 || (idx >= 30 && idx < 48 && (idx - 30) % 3 == 0))) anim_layers(idx, bone);
+     if (bone == 0 || idx < 0 || static_cast<std::uint32_t>(idx) != g_head.index) return;
+     update_wet_look(bone);
+     float want_yaw = 0.0f, want_pitch = 0.0f;
+-- 
+2.43.0
+

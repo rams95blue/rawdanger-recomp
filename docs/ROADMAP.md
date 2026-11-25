@@ -131,7 +131,8 @@ ROOT.FAT); if it does, they are candidates for the Enhanced Edition.
 | v0.9.7 changes | ✅ | **A livelier hero** (the animation plan's steps 1 and 2, first pass): on the game's own animation the hero breathes standing still (faster when cold), hunches a little as the clothes get wet, shivers when the body temperature drops, and leans into turns when running; a clip that snaps to the next (a bone turning more than 23 degrees in one step) is taken half the way each step. Settings > Controls > Livelier hero (on); Settings > Debug: the layers four times bigger, to see them. Engine patch 0042 (docs/ANIMATION.md) |
 | v0.9.8 changes | ✅ | **The uncapped frame rate, first findings** (docs/FRAMERATE.md): the word that paces the game (3 vblanks a step) and proof that it is a fixed-step game (at 30 or 60 steps everything runs 1.5 or 3 times as fast). Settings > Debug > Game steps a second forces 20, 30 or 60, as a test. Engine patch 0043 |
 | v0.9.9 changes | ✅ | **Frame rate: the European program compared** (docs/FRAMERATE.md, `rd.py framerate`): about 1150 constants that change with the frame rate found; the US program with them steps 30 times a second at the right speed (a 2 s walk: 3.60 m, as at 20). 60 extrapolated, not right yet (2.85 m). Tables in patches/framerate (not offered in the launcher yet). **Builds leave no temporary files**: the build's TEMP / TMP go to a folder of their own under %TEMP%, removed when it ends (and ones left by a cut-off build at the next start) |
-| **Pending (v0.9.9)** | ⏳ | See the list below |
+| v0.10.0 changes | ✅ | **60 steps a second walks right** with the EE overclocked 2x (engine patch 0044, PS2_EE_OVERCLOCK; the step no longer fitted in a vblank); the 60 table snaps each change to its law. **Coat and skirt sway** and a **weight shift** standing still for the livelier hero. **The European release compared** (docs/VERSION_DIFFERENCES.md): a newspaper text the US lacks, an English "Survived" stamp, BT for TP, 505 Games credits, one longer voice line |
+| **Pending (v0.10.0)** | ⏳ | See the list below |
 | Still open after v0.7.4 | ✅ | All three done: direct mouse look (v0.7.9), the debug menus' text (v0.7.8), saves without the memory card (v0.7.8) |
 | Keyboard prompts | ✅ | v0.7.1: key caps with the player's keys in the game's own font (see *PC keys in the game's texts*) |
 | In-game menu for Raw Danger | ✅ | Engine patch 0005: Resume, Quick save/load, Game options (F3), Graphics page (look, resolution, text filter, full screen, widescreen, pause in the background), Achievements (F4), Key card, Change keys, **Quit to desktop**, hazard-tape look with the game's name. Next: options inside the game's own Options screen (see below) |
@@ -148,7 +149,7 @@ Code patches go into `patches\pnach\SLUS-21501_2905C5C6.pnach` as named sections
 compiled in at build time (the native engine ignores runtime writes to code). Each one is verified on a headless build
 of the same engine: boot or a save state, frames captured every N frames, compared with the unpatched build.
 
-## Pending (as of v0.9.9)
+## Pending (as of v0.10.0)
 
 Asked for and not done yet, roughly by size:
 
@@ -191,6 +192,10 @@ Asked for and not done yet, roughly by size:
     (everything 1.5 or 3 times as fast: measured). Two ways: the frame-rate constants changed with it (the European program,
     compiled for 30, compared with the US one would list them all), or in-between pictures drawn with the camera and the bones
     halfway between two steps.
+22a. **Reported with v0.9.9** (F9 reports awaited): the orbit camera cannot look up (v0.10.0 work in progress: during play the
+    camera is made in 0x17DC80, not through the cutscenes' route; raising the point it looks at after its step did not change the
+    picture, so the matrices come from another word), AO odd in some maps and missing in others, anti-aliasing (SMAA) seems not to
+    work, a crash after loading a map from the debug select.
 22. **The wet look, finer**: the shoes and a raised hand can fall outside the capsules; a highlight that follows the light; wet
     ground and walls in the rain.
 

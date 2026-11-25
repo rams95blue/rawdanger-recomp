@@ -87,3 +87,24 @@ All 6,000-odd files of ROOT.DAT compared, voices and textures left out (both alr
 | Sound banks (`SE\*.HD/.BD/.SQ`) | 69 | Voices inside effects banks | Done: they switch with the voices since v0.7.5 |
 | Overlays (`OVERLAY\DISC\*.BIN`) | 79 of 79 | Program code | No: code of each release's own program |
 | Movies | 2 | The opening film and 1-1-5 | Done: "Japanese opening film" (v0.8.1) |
+
+## The European release (SLES-54587, v0.10.0)
+
+Compared file by file with the US disc (the European one: "Raw Danger (Europe)", SYSTEM.CNF VER 1.02, VMODE PAL):
+
+- **The program** (SLES_545.87): the same 6207 functions in the same order; compiled for 30 steps a second instead of 20 (about
+  1150 constants, docs/FRAMERATE.md), PAL video (runs at 25 on a PAL TV). English only: the same 1610 English text lines, plus:
+  - **a newspaper text the US program does not have**: "Capitol Newspaper, December 24, 2010 AM Edition: New Record Hits Del
+    Ray: Record rain for December / Signs of a Flu Outbreak? Don't get caught, get a flu shot" (between the employee list and
+    Geo's guidelines in the documents' texts);
+  - one sentence corrected ("collect several key items" for "collected several key items").
+- **Pictures**: the stamp that reads 生還 (Japanese: "survived") on the US disc reads **"Survived"** in English (BOOT.DAT);
+  the item menus' and the character select's "TP" label reads "BT" (IMENU, CHARSEL); the title's line "Published by 505 Games";
+  the ending's credits list 505 Games' localization team and staff in place of Agetec's (M1_09_00, M2_08_00_I01, M6_01_00).
+- **One voice line** is longer: VOICE\MES_01_99_00_073_EVE.VOI, 4.2 s in place of 2.3 s.
+- **The same**: the IOP modules, 4693 of the 4694 streamed files (voices, music, movies), 5694 of the 5791 data files (the
+  others: the 79 code overlays, built for 30 too, and the pictures above).
+
+Worth taking into the Enhanced Edition when the European disc is there: the "Survived" stamp, the newspaper text (if the game
+can show it in the US build), the corrected sentence and the longer voice line.
+

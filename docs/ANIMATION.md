@@ -22,6 +22,8 @@ The call to 0x323FB0 goes through the engine (host call 202, `[Head follows came
 | Wet hunch | The spine and the chest | Up to 3 and 3.5 degrees forward as the clothes soak (eased over a few seconds) |
 | Shiver | The chest | About 0.7 degree, quick, as the body temperature falls below 24000 (of 30000) |
 | Lean into turns | The spine | Up to 8 degrees toward the inside of a turn, by turn rate x speed |
+| Weight shift (v0.10.0) | The spine | About 1.4 degrees side to side every 7 s, standing still |
+| Coat and skirt sway (v0.10.0) | The first bone of each hanging chain (30, 33 ... 45) | A spring each (about a second, settling): the hem trails behind when moving off and swings forward when stopping, out in turns |
 | Head follows camera | The head | docs/CAMERA.md |
 
 The chest and the spine are turned in the world after they are built, about their own joint, so the head and the arms built
@@ -30,5 +32,5 @@ Settings > Controls > Livelier hero (keys.ini `anim_layers`); Settings > Debug >
 
 ## Next
 
-The weight shift standing still, hair and coat sway (the hanging bones 30-47), feet on slopes, the other characters; new clips
+Feet on slopes, the other characters; new clips
 (the animation format, retargeting to these bones).

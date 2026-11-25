@@ -56,3 +56,14 @@ constants do not follow the law, and the overlays' counts.
 **Not offered yet** in RawDangerPC.exe: the cutscenes, the scripts (the overlays), the menus at 30 and the PC version's own
 features (the orbit camera's turn per step, the mouse look) still need checking at 30.
 
+## v0.10.0: 60 works, with the EE overclocked
+
+The first 60 table walked 2.85 m in 2 s. The reason was not the table: counting the pictures showed the game made only about 48
+steps a second, because a step's work no longer fitted in one vblank of the emulated EE (the engine charges one cycle an
+instruction; PCSX2's 60 fps patches need its EE cycle rate raised for the same reason). With PS2_EE_OVERCLOCK=2 (engine patch
+0044) the same table walks 3.60 m, as at 20 and 30. The table (patches/framerate/SLUS-21501_60steps.pnach) now snaps each 20 -> 30
+change to its law first (x1.5^n with n = +-1 or +-2, or x1.25^n for the few tuned to the PAL TV's 25), so a rounded count
+(5 -> 8) becomes 15 at 60, not 18.
+
+Still to do before it is an option: the overlays' counts, cutscenes, menus, and the PC version's own per-step features.
+
