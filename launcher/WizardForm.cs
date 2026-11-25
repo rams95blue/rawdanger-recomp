@@ -904,6 +904,57 @@ namespace RawDangerLauncher
             public string Image = "";     // the disc image built from: the disc itself, or the Enhanced Edition's hybrid disc
             public int Step, ExitCode;
             public string Problem;
+            public string TempDir = "";   // v0.9.9: the build's own temp folder (TEMP / TMP / TMPDIR), deleted when it ends
+        }
+
+        // v0.9.9: the build's temporary files (the compilers', CMake's, the shell's) go to a folder of its own under %TEMP%, removed
+        // when the build ends, so a build leaves nothing in %TEMP%; folders left by a build that was cut off (the PC turned off) are
+        // removed at the next start.
+        const string BuildTempPrefix = "RawDangerPC-build-";
+        static string MakeBuildTemp()
+        {
+            string dir = Path.Combine(Path.GetTempPath(), BuildTempPrefix + Process.GetCurrentProcess().Id + "-" + DateTime.Now.ToString("yyyyMMddHHmmss"));
+            Directory.CreateDirectory(dir);
+            return dir;
+        }
+        static long RemoveBuildTemp(string dir)
+        {
+            if (string.IsNullOrEmpty(dir) || !Directory.Exists(dir)) return 0;
+            long bytes = 0;
+            try { foreach (FileInfo f in new DirectoryInfo(dir).GetFiles("*", SearchOption.AllDirectories)) bytes += f.Length; } catch (Exception) { }
+            for (int attempt = 0; attempt < 5; ++attempt)
+            {
+                try
+                {
+                    foreach (string f in Directory.GetFiles(dir, "*", SearchOption.AllDirectories)) try { File.SetAttributes(f, FileAttributes.Normal); } catch (Exception) { }
+                    Directory.Delete(dir, true);
+                    return bytes;
+                }
+                catch (Exception) { System.Threading.Thread.Sleep(400); }   // a compiler still closing a file
+            }
+            Program.Trace("build temp: could not remove " + dir);
+            return 0;
+        }
+        public static void RemoveOldBuildTemps()
+        {
+            try
+            {
+                foreach (string dir in Directory.GetDirectories(Path.GetTempPath(), BuildTempPrefix + "*"))
+                {
+                    // the folder of a launcher still running (its process id in the name) is left alone
+                    string rest = Path.GetFileName(dir).Substring(BuildTempPrefix.Length);
+                    int dash = rest.IndexOf('-'), pid;
+                    if (dash > 0 && int.TryParse(rest.Substring(0, dash), out pid) && pid != Process.GetCurrentProcess().Id)
+                    {
+                        bool alive = false;
+                        try { alive = !Process.GetProcessById(pid).HasExited && Process.GetProcessById(pid).ProcessName.StartsWith("RawDangerPC", StringComparison.OrdinalIgnoreCase); } catch (Exception) { }
+                        if (alive) continue;
+                    }
+                    long freed = RemoveBuildTemp(dir);
+                    if (freed > 0) Program.Trace("build temp: removed " + dir + " (" + (freed >> 20) + " MB) left by an earlier build");
+                }
+            }
+            catch (Exception) { }
         }
 
         List<string> SectionsFor(DiscInfo d)
@@ -1133,6 +1184,15 @@ namespace RawDangerLauncher
                 psi.RedirectStandardError = true;
                 psi.StandardOutputEncoding = Encoding.UTF8;
                 psi.StandardErrorEncoding = Encoding.UTF8;
+                // v0.9.9: the build's temporary files in a folder of its own, removed when it ends
+                try
+                {
+                    job.TempDir = MakeBuildTemp();
+                    psi.EnvironmentVariables["TEMP"] = job.TempDir;
+                    psi.EnvironmentVariables["TMP"] = job.TempDir;
+                    psi.EnvironmentVariables["TMPDIR"] = job.TempDir;
+                }
+                catch (Exception e) { job.TempDir = ""; Program.Trace("build temp: " + e.Message); }
                 // compiler jobs: the engine's scripts read PS2_JOBS (env.ps1 keeps it); one the player set himself wins
                 if (string.IsNullOrEmpty(Environment.GetEnvironmentVariable("PS2_JOBS")))
                     psi.EnvironmentVariables["PS2_JOBS"] = BuildLoad.Jobs(settings).ToString();
@@ -1144,7 +1204,14 @@ namespace RawDangerLauncher
                 p.EnableRaisingEvents = true;
                 p.OutputDataReceived += delegate(object o, DataReceivedEventArgs e) { if (e.Data != null) lock (job.Lines) job.Lines.Enqueue(e.Data); };
                 p.ErrorDataReceived += delegate(object o, DataReceivedEventArgs e) { if (e.Data != null) lock (job.Lines) job.Lines.Enqueue(e.Data); };
-                p.Exited += delegate { try { p.WaitForExit(); } catch (Exception) { } job.ExitCode = p.ExitCode; job.Done = true; };
+                p.Exited += delegate
+                {
+                    try { p.WaitForExit(); } catch (Exception) { }
+                    job.ExitCode = p.ExitCode;
+                    long freed = RemoveBuildTemp(job.TempDir);
+                    if (job.TempDir != "") lock (job.Lines) job.Lines.Enqueue("== launcher: temporary files removed (" + (freed >> 20) + " MB in " + job.TempDir + ")");
+                    job.Done = true;
+                };
                 job.Estimate = BuildTime.Estimate(settings, d.GameName, job.Faster, out job.EstimateKnown);
                 job.Clock = Stopwatch.StartNew();
                 p.Start();

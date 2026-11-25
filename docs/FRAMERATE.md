@@ -29,3 +29,30 @@ more hold numbers worked out from it, such as speeds per step), and the scripts'
 2. **In-between pictures** (the game at 20, the picture at 60): the camera and every model drawn again between two steps, with
    the places and the bones halfway (the engine already sees each bone's build and the world-to-screen matrix, 0x5FD690). Needs
    the draw task run again without the game's step, or the native renderer's own draws (docs/NATIVE_RENDERER.md).
+
+## v0.9.9: the European program compared
+
+The European disc (SLES_545.87, VER 1.02, PAL) has the same 6207 functions in the same order as the US program; 6198 have the
+same length. Compared word by word (`rd.py framerate US_ELF EU_ELF 30`, tools/rd_framerate.py):
+
+- **About 1150 constants change with the frame rate**: about 400 in the code (lui/ori floats such as 20.0 -> 30.0 and 0.05 ->
+  0.0333, li counts such as the vblanks a step 3 -> 2, slti bounds) and about 750 floats in the data tables (per-step
+  amounts like 3 -> 2, 18 -> 12, 0.18 -> 0.12). Most change by x1.5 or x2/3; accelerations by x4/9; some counts are rounded
+  (5 -> 8, 6 -> 8, 7 -> 10); some angles per step were tuned for the PAL TV's 25 (pi/16 -> pi/20).
+- Left out after a look at each: a sound number (0x209670), a table's size (0x24B68C), a place (0x348728), a bit mask
+  (0x144FDC) and a value set with a screen size (0x19C390/98).
+- The 79 code overlays (map scripts, menus) differ too, nearly all by the moved addresses of the main program's functions;
+  about 120 small counts in them look like frame-rate ones (not applied yet).
+- The data files are the same apart from the menus' pictures (IMENU), BOOT.DAT and one map file.
+
+**Tested**: the US program with the European constants (patches/framerate/SLUS-21501_30steps.pnach, translated again) steps 30
+times a second; after a fresh map load (the map select, the hotel), holding forward for 2 s moves Joshua 3.60 m, as the
+original at 20. (From a saved state the old values copied into the characters when the map loaded stay: 5.40 m.)
+
+**60 (extrapolated)**: the same changes applied three times instead of one and a half (x3, x1/3, x1/9, per-step factors
+cubed-rooted): 2.85 m in 2 s, so not right yet; next, the walk at 20, 30 and 60 sampled step by step to find which
+constants do not follow the law, and the overlays' counts.
+
+**Not offered yet** in RawDangerPC.exe: the cutscenes, the scripts (the overlays), the menus at 30 and the PC version's own
+features (the orbit camera's turn per step, the mouse look) still need checking at 30.
+

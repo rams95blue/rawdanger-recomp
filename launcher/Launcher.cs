@@ -28,7 +28,7 @@ namespace RawDangerLauncher
 {
     public static class Program
     {
-        public const string Version = "0.9.8";
+        public const string Version = "0.9.9";
         public const string AppName = "Raw Danger PC";
         public static bool Restart;
 
@@ -73,6 +73,7 @@ namespace RawDangerLauncher
                     return 0;
                 }
                 // Changing the language closes the window and opens it again in the other language.
+                new System.Threading.Thread(delegate() { WizardForm.RemoveOldBuildTemps(); }) { IsBackground = true }.Start();   // v0.9.9
                 do { Restart = false; Lang.Choose(settings); Application.Run(new WizardForm(settings)); } while (Restart);
                 LanguageSwitch.WaitAll();   // the window closed while a game runs: a language switch still works
             }

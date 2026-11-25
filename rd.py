@@ -542,6 +542,16 @@ def step_ra_port(a):
     py("rd_ra_port.py")
 
 
+def step_framerate(a):
+    """The frame-rate constants of the US program from the European one (docs/FRAMERATE.md): rd.py framerate US_ELF EU_ELF [30|60]."""
+    if len(a.paths) < 2:
+        sys.exit("rd.py framerate needs the US program (SLUS_215.01) and the European one (SLES_545.87), then 30 or 60")
+    fps = a.paths[2] if len(a.paths) > 2 else "30"
+    out = os.path.join(ROOT, "patches", "framerate", f"SLUS-21501_{fps}steps.generated.pnach")
+    py("rd_framerate.py", "--us", a.paths[0], "--eu", a.paths[1], "--fps", fps, "--pnach", out)
+    print(f"written {out}")
+
+
 def step_all(a):
     for fn in (step_setup, step_extract, step_compare, step_analyze, step_config, step_recomp, step_build):
         print(f"\n==== {fn.__name__[5:]} ====")
@@ -551,7 +561,7 @@ def step_all(a):
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("step", choices=["setup", "extract", "compare", "analyze", "ghidra", "config", "recomp", "sync",
-                                     "build", "overlays", "voicepack", "demos", "engine-check", "ra-logic", "ra-port", "run", "all"])
+                                     "build", "overlays", "voicepack", "demos", "engine-check", "ra-logic", "ra-port", "run", "framerate", "all"])
     ap.add_argument("paths", nargs="*", help="voicepack: disc paths to swap")
     ap.add_argument("--us-iso"); ap.add_argument("--jp-iso"); ap.add_argument("--force", action="store_true")
     ap.add_argument("--only", help="overlays: comma list of overlay names to recompile (default: all)")
@@ -576,7 +586,7 @@ def main(argv=None):
     {"setup": step_setup, "extract": step_extract, "compare": step_compare, "analyze": step_analyze,
      "ghidra": step_ghidra,
      "config": step_config, "recomp": step_recomp, "sync": step_sync, "build": step_build,
-     "overlays": step_overlays, "voicepack": step_voicepack, "demos": step_demos, "engine-check": step_engine_check, "ra-logic": step_ra_logic, "ra-port": step_ra_port, "run": step_run, "all": step_all}[a.step](a)
+     "overlays": step_overlays, "voicepack": step_voicepack, "demos": step_demos, "engine-check": step_engine_check, "ra-logic": step_ra_logic, "ra-port": step_ra_port, "run": step_run, "framerate": step_framerate, "all": step_all}[a.step](a)
     return 0
 
 
