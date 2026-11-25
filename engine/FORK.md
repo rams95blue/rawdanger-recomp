@@ -175,6 +175,10 @@
 - **0041-debug-views-stats** (rawdanger-recomp v0.9.6): Settings > Debug > Picture shown (the game's, the AO alone, the depth, the
   wet look's capsules; drawn by the AO pass, its word 63) and Stats on screen (FPS, CPU / GPU, memory, scene and camera, the
   clothes' wetness, the view, the frame; in the keys' place, once a second).
+- **0042-livelier-hero** (rawdanger-recomp v0.9.7): in the bone call (0039), for the player's bones: a snap of more than 23
+  degrees in a bone's local turn goes half the way each step; the spine and chest get breathing standing still, a hunch when
+  wet, shivering when cold and a lean into turns, turned in the world after they are built (the head and arms follow).
+  Settings > Controls > Livelier hero (keys.ini anim_layers, on); Settings > Debug: the layers x4.
 
 ## Goals of the fork
 

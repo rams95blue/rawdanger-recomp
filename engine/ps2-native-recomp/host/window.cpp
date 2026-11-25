@@ -248,7 +248,7 @@ constexpr std::size_t kDebugRow = static_cast<std::size_t>(-2), kMapSelRow = sta
                       // v0.9.5: the Debug tab's test switches
                       kDryRow = static_cast<std::size_t>(-7), kSoakRow = static_cast<std::size_t>(-8), kWetForceRow = static_cast<std::size_t>(-9),
                       kWetShowRow = static_cast<std::size_t>(-10), kHeadTestRow = static_cast<std::size_t>(-11),
-                      kViewRow = static_cast<std::size_t>(-12), kStatsRow = static_cast<std::size_t>(-13);
+                      kViewRow = static_cast<std::size_t>(-12), kStatsRow = static_cast<std::size_t>(-13), kAnimGainRow = static_cast<std::size_t>(-14);
 // rawdanger-recomp (v0.9.2): the hero's two bars. PS2_DEBUG_HERO="TABLE,PLAYER,COUNT,NOW1,MOST1,NOW2,MOST2" (hex: the table of the
 // characters' addresses, the word with the player's number, how many the table has, and two pairs of offsets: a value and its
 // most). Raw Danger: 0x5EAC80, 0x48F3E4, 235; health (+0x368 of +0x36C, 100) and body temperature (+0x370 of +0x374, 30000: it
@@ -1278,6 +1278,7 @@ void read_keyboard(std::uint16_t &pressed, std::uint8_t &lx, std::uint8_t &ly, s
     ps2::set_free_camera(g_keys.free_camera != 0);
     ps2::set_head_follow(g_keys.head_follow != 0);
     ps2::set_wet_look_on(g_keys.wet_look != 0);
+    ps2::set_anim_layers(g_keys.anim_layers != 0);
     if (g_keep_hero) heal_hero();
     {
         static bool was = false;
@@ -1507,6 +1508,7 @@ void menu_paint(bool show_again) {
         v.filter_pass = ps2::game_filter_pass();
         v.ambient_occlusion = ps2::ambient_occlusion();
         v.wet_look = g_keys.wet_look;
+        v.anim_layers = ps2::head_follow_available() ? g_keys.anim_layers : -1;
         v.field_of_view = g_keys.field_of_view;
         v.keys_on_screen = g_keys.keys_on_screen != 0;
         v.game_waits = g_menu_hold.load();
@@ -1617,6 +1619,7 @@ void menu_paint(bool show_again) {
                     debug_row(kWetForceRow, "Wet look: wetness shown", f < 0.0f ? "<  the game's  >" : "<  " + std::to_string(static_cast<int>(f * 100.0f + 0.5f)) + " %  >");
                     debug_row(kWetShowRow, "Wet look: show the hero's capsules", ps2::wet_show() ? "<  on  >" : "<  off >");
                     const float t = ps2::head_test();
+                    debug_row(kAnimGainRow, "Livelier hero: the layers' size", ps2::anim_gain() > 1.5f ? "<  x4 (to see them)  >" : "<  as made  >");
                     debug_row(kHeadTestRow, "Head follows camera: a fixed turn", t == 0.0f ? "<  off  >" : "<  " + std::to_string(static_cast<int>(std::lround(t * 57.29578f))) + " deg  >");
                 }
                 if (debug_scenes().set) {
@@ -2355,6 +2358,8 @@ void native_option_rows() {
         if (ps2::head_follow_available()) {
             const auto get_head = [] { return g_keys.head_follow ? 0 : 1; };
             pick("Head follows camera", "The hero looks where you look", {"ON", "OFF"}, get_head, toggle_to(Command::head_follow, get_head));
+            const auto get_anim = [] { return g_keys.anim_layers ? 0 : 1; };
+            pick("Livelier hero", "Breathing, shivers, leans into turns", {"ON", "OFF"}, get_anim, toggle_to(Command::anim_layers, get_anim));
         }
         spin("Mouse speed", "How far the camera turns", [] {
                 char t[16];
@@ -2490,6 +2495,13 @@ void menu_command(quickmenu::Command c, int step) {
         ps2::set_free_camera(g_keys.free_camera != 0);
         rewrite_keys_file([](const std::string &t) { return keymap::with_free_camera(t, g_keys.free_camera); }, "fixed cameras");
         set_notice(g_keys.free_camera ? "Fixed cameras off: the follow camera in every place (from the next place that has one)" : "Fixed cameras on: as on the PS2");
+        break;
+    case Command::anim_layers:
+        if (!ps2::head_follow_available()) break;
+        g_keys.anim_layers = g_keys.anim_layers ? 0 : 1;
+        ps2::set_anim_layers(g_keys.anim_layers != 0);
+        rewrite_keys_file([](const std::string &t) { return keymap::with_anim_layers(t, g_keys.anim_layers); }, "livelier hero");
+        set_notice(g_keys.anim_layers ? "Livelier hero: on (breathing, a hunch when soaked, shivers when cold, leans into turns)" : "Livelier hero: off (the game's animation as it is)");
         break;
     case Command::wet_look:
         g_keys.wet_look = g_keys.wet_look ? 0 : 1;
@@ -2648,6 +2660,11 @@ void menu_command(quickmenu::Command c, int step) {
             const int k = (ps2::debug_view() + (step < 0 ? 3 : 1)) % 4;
             ps2::set_debug_view(k);
             g_recomp_note = kViews[k];
+            break;
+        }
+        if (row < g_recomp_row_section.size() && g_recomp_row_section[row] == kAnimGainRow) {
+            ps2::set_anim_gain(ps2::anim_gain() > 1.5f ? 1.0f : 4.0f);
+            g_recomp_note = ps2::anim_gain() > 1.5f ? "Livelier hero: the layers four times bigger (a test)" : "Livelier hero: the layers as made";
             break;
         }
         if (row < g_recomp_row_section.size() && g_recomp_row_section[row] == kStatsRow) {

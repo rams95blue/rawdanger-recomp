@@ -1325,17 +1325,6 @@ HeadFollow g_head;
 std::atomic<bool> g_head_on{true};
 float g_head_yaw = 0.0f, g_head_pitch = 0.0f;
 std::atomic<float> g_head_test{0.0f};   // debug (Debug tab): a fixed turn in radians, 0 the camera's
-std::uint32_t head_bone() {
-    const std::uint32_t pid = ld32(g_head.player);
-    if (pid > 7u) return 0;
-    const std::uint32_t ch = ld32(g_head.table + 4u * pid);
-    if (ch < 0x100000u || ch >= 0x2000000u) return 0;
-    const std::uint32_t model = ld32(ch + g_head.model);
-    if (model < 0x100000u || model >= 0x2000000u) return 0;
-    std::uint32_t n = ld32(model + 4u);
-    for (std::uint32_t i = 0; i < g_head.index && n >= 0x100000u && n < 0x2000000u; ++i) n = ld32(n + 4u);
-    return n >= 0x100000u && n < 0x2000000u ? n : 0;
-}
 void rotate_rows(std::uint32_t bone, const float axis[3], float angle) {
     const float s = std::sin(angle), co = std::cos(angle);
     for (int r = 0; r < 3; ++r) {
@@ -1486,12 +1475,192 @@ void update_wet_look(std::uint32_t head) {
     }
     set_wet_look(show ? -1.0f : g_wet_shown, caps.data(), static_cast<int>(caps.size() / 7));
 }
+// rawdanger-recomp (v0.9.7): the hero's animation, livelier. The same call builds every bone; for the player's bones (the model's
+// list, cached when its first bone comes) it adds, on the game's own animation:
+//  - smoothing: a bone whose local turn jumps by more than 23 degrees in one step (a clip that snaps to the next) goes half the
+//    way at each step instead;
+//  - layers on the chest and the spine, turned in the world after they are built so the head and the arms follow: breathing
+//    standing still, a hunch when the clothes are wet, shivering when cold (the body temperature, character +0x370), a lean
+//    into turns when running.
+// Only while playing with the follow camera (as the head turn). Settings > Controls > Livelier hero (keys.ini anim_layers, on).
+std::atomic<bool> g_anim_on{[] { const char *v = std::getenv("PS2_ANIM_LAYERS"); return !(v && *v == '0'); }()};
+struct HeroBones {
+    std::uint32_t first = 0, lo = 0, hi = 0;
+    std::uint32_t list[48] = {};
+    int count = 0;
+    float prev_local[48][9] = {};   // the local turn given last step (smoothing)
+    bool have_prev[48] = {};
+    float hips_prev[3] = {}, yaw_prev = 0.0f;
+    std::uint64_t frame_prev = 0;
+    float breath_phase = 0.0f, shiver_phase = 0.0f;
+    float idle = 0.0f, lean = 0.0f, wet = 0.0f, cold = 0.0f;   // eased
+    float right[3] = {1, 0, 0}, forward[3] = {0, 0, -1};    // the body's, from the shoulders (last step)
+};
+HeroBones g_hb;
+std::atomic<float> g_anim_gain{[] { const char *v = std::getenv("PS2_ANIM_GAIN"); return v && *v ? static_cast<float>(std::atof(v)) : 1.0f; }()};   // debug (Settings > Debug): the layers made bigger to see them
+int hero_bone_index(std::uint32_t bone) {
+    const std::uint32_t pid = ld32(g_head.player);
+    if (pid > 7u) return -1;
+    const std::uint32_t ch = ld32(g_head.table + 4u * pid);
+    if (!in_ram(ch)) return -1;
+    const std::uint32_t model = ld32(ch + g_head.model);
+    if (!in_ram(model)) return -1;
+    const std::uint32_t first = ld32(model + 4u);
+    if (bone == first) {
+        // a new step of the player's model: the list again (a costume change or another hero changes it)
+        if (first != g_hb.first) std::fill(std::begin(g_hb.have_prev), std::end(g_hb.have_prev), false);
+        g_hb.first = first, g_hb.count = 0, g_hb.lo = 0xFFFFFFFFu, g_hb.hi = 0;
+        for (std::uint32_t n = first; in_ram(n) && g_hb.count < 48; n = ld32(n + 4u)) {
+            g_hb.list[g_hb.count++] = n;
+            g_hb.lo = std::min(g_hb.lo, n), g_hb.hi = std::max(g_hb.hi, n);
+        }
+        return 0;
+    }
+    if (first != g_hb.first || bone < g_hb.lo || bone > g_hb.hi) return -1;
+    for (int i = 0; i < g_hb.count; ++i)
+        if (g_hb.list[i] == bone) return i;
+    return -1;
+}
+bool anim_live() {
+    if (!g_anim_on.load(std::memory_order_relaxed) || ld32(g_head.when) != g_head.when_value) return false;
+    const std::uint32_t cam = ld32(g_head.pointer);
+    return in_ram(cam) && ld32(cam + g_head.mode) == 0 && ms_since_cinema_bars() > 1000;
+}
+void bone_place(int i, float out[3]) {
+    for (int k = 0; k < 3; ++k) out[k] = i < g_hb.count ? word_float(ld32(g_hb.list[i] + 0x40u + 4u * k)) : 0.0f;
+}
+// before the build: a snap in the bone's local turn (+0x50, +0x60, +0x70: its axes) is taken half the way
+void smooth_local(int i, std::uint32_t bone) {
+    float m[9];
+    for (int r = 0; r < 3; ++r)
+        for (int k = 0; k < 3; ++k) m[r * 3 + k] = word_float(ld32(bone + 0x50u + 0x10u * r + 4u * k));
+    for (float v : m)
+        if (!std::isfinite(v)) return;
+    float *p = g_hb.prev_local[i];
+    if (g_hb.have_prev[i]) {
+        // the angle between the two turns: trace(P^T M) = 1 + 2 cos(angle), the rows' lengths taken out
+        float tr = 0.0f, len[3];
+        for (int r = 0; r < 3; ++r) {
+            len[r] = std::sqrt(m[r * 3] * m[r * 3] + m[r * 3 + 1] * m[r * 3 + 1] + m[r * 3 + 2] * m[r * 3 + 2]);
+            const float pl = std::sqrt(p[r * 3] * p[r * 3] + p[r * 3 + 1] * p[r * 3 + 1] + p[r * 3 + 2] * p[r * 3 + 2]);
+            if (len[r] < 1e-4f || pl < 1e-4f) { g_hb.have_prev[i] = false; break; }
+            tr += (m[r * 3] * p[r * 3] + m[r * 3 + 1] * p[r * 3 + 1] + m[r * 3 + 2] * p[r * 3 + 2]) / (len[r] * pl);
+        }
+        const float angle = std::acos(std::clamp((tr - 1.0f) * 0.5f, -1.0f, 1.0f));
+        if (g_hb.have_prev[i] && angle > 0.4f && angle < 2.8f) {
+            // half way: the rows mixed, then made square again (Gram-Schmidt), each at its own length
+            float o[9];
+            for (int k = 0; k < 9; ++k) o[k] = (m[k] + p[k]) * 0.5f;
+            float *a = o, *b = o + 3, *c = o + 6;
+            auto norm = [](float *v) { const float l = std::sqrt(v[0] * v[0] + v[1] * v[1] + v[2] * v[2]); if (l > 1e-6f) v[0] /= l, v[1] /= l, v[2] /= l; };
+            norm(a);
+            const float d = a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+            for (int k = 0; k < 3; ++k) b[k] -= a[k] * d;
+            norm(b);
+            const float cr[3] = {a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]};
+            if (cr[0] * c[0] + cr[1] * c[1] + cr[2] * c[2] < 0.0f) for (int k = 0; k < 3; ++k) c[k] = -cr[k];
+            else for (int k = 0; k < 3; ++k) c[k] = cr[k];
+            for (int r = 0; r < 3; ++r)
+                for (int k = 0; k < 3; ++k) {
+                    m[r * 3 + k] = o[r * 3 + k] * len[r];
+                    st32(bone + 0x50u + 0x10u * r + 4u * k, float_word(m[r * 3 + k]));
+                }
+        }
+    }
+    std::copy(m, m + 9, p);
+    g_hb.have_prev[i] = true;
+}
+// once a step (at the hips, bone 4, built first of the body): how fast the hero goes and turns, how wet and cold
+void anim_step() {
+    const std::uint64_t now = frame_count();
+    const float dt = std::clamp(static_cast<float>(now - g_hb.frame_prev) / 60.0f, 1.0f / 60.0f, 0.25f);
+    const bool fresh = g_hb.frame_prev != 0 && now > g_hb.frame_prev && now - g_hb.frame_prev < 30;
+    g_hb.frame_prev = now;
+    float hips[3];
+    bone_place(4, hips);
+    float l[3], r[3];
+    bone_place(17, l), bone_place(24, r);
+    float rx = r[0] - l[0], rz = r[2] - l[2];
+    const float rl = std::sqrt(rx * rx + rz * rz);
+    if (rl > 0.05f) {
+        rx /= rl, rz /= rl;
+        // forward is the right turned a quarter about the up axis; which way: toward the head's facing (its -Z axis)
+        float fx = -rz, fz = rx;
+        const std::uint32_t head = g_head.index < static_cast<std::uint32_t>(g_hb.count) ? g_hb.list[g_head.index] : 0;
+        if (head && fx * -word_float(ld32(head + 0x30)) + fz * -word_float(ld32(head + 0x38)) < 0.0f) fx = -fx, fz = -fz, rx = -rx, rz = -rz;
+        g_hb.right[0] = rx, g_hb.right[1] = 0.0f, g_hb.right[2] = rz;
+        g_hb.forward[0] = fx, g_hb.forward[1] = 0.0f, g_hb.forward[2] = fz;
+    }
+    const float yaw = std::atan2(g_hb.forward[0], g_hb.forward[2]);
+    float speed = 0.0f, turn = 0.0f;
+    if (fresh) {
+        const float dx = hips[0] - g_hb.hips_prev[0], dz = hips[2] - g_hb.hips_prev[2];
+        speed = std::sqrt(dx * dx + dz * dz) / dt;
+        float dy = yaw - g_hb.yaw_prev;
+        while (dy > 3.14159265f) dy -= 6.28318531f;
+        while (dy < -3.14159265f) dy += 6.28318531f;
+        turn = dy / dt;
+    }
+    std::copy(hips, hips + 3, g_hb.hips_prev);
+    g_hb.yaw_prev = yaw;
+    if (!std::isfinite(speed) || speed > 20.0f) speed = 0.0f;
+    if (!std::isfinite(turn)) turn = 0.0f;
+    const float ease = std::min(1.0f, dt * 3.0f);
+    g_hb.idle += ((speed < 0.25f ? 1.0f : 0.0f) - g_hb.idle) * ease;
+    g_hb.lean += (std::clamp(turn * std::min(speed, 6.0f) * 0.02f, -0.14f, 0.14f) - g_hb.lean) * ease;
+    const float w = hero_wetness();
+    g_hb.wet += ((w > 0.0f ? w : 0.0f) - g_hb.wet) * std::min(1.0f, dt * 0.5f);
+    // the body temperature: 30000 warm; the HUD's arrow is blue from about two thirds down
+    const std::uint32_t pid = ld32(g_head.player), ch = ld32(g_head.table + 4u * pid);
+    const float temp = in_ram(ch) ? static_cast<float>(static_cast<std::int32_t>(ld32(ch + 0x370))) : 30000.0f;
+    g_hb.cold += (std::clamp((24000.0f - temp) / 10000.0f, 0.0f, 1.0f) - g_hb.cold) * std::min(1.0f, dt * 0.5f);
+    g_hb.breath_phase = std::fmod(g_hb.breath_phase + dt * 6.28318531f / (4.2f - 1.6f * g_hb.cold), 6.28318531f);
+    g_hb.shiver_phase = std::fmod(g_hb.shiver_phase + dt * 6.28318531f * 7.3f, 6.28318531f);
+}
+// a turn of the bone's axes about the body's right axis (pitch: positive leans forward), its forward axis (roll) and up (yaw)
+void body_turn(std::uint32_t bone, float pitch, float roll, float yaw) {
+    if (std::fabs(pitch) > 1e-5f) {
+        // which way is forward: the up direction (y down: (0,-1,0)) turned by a small positive angle must move forward
+        const float *ax = g_hb.right;
+        const float up[3] = {0.0f, -1.0f, 0.0f};
+        const float moved[3] = {ax[1] * up[2] - ax[2] * up[1], ax[2] * up[0] - ax[0] * up[2], ax[0] * up[1] - ax[1] * up[0]};
+        const float sign = moved[0] * g_hb.forward[0] + moved[2] * g_hb.forward[2] >= 0.0f ? 1.0f : -1.0f;
+        rotate_rows(bone, ax, pitch * sign);
+    }
+    if (std::fabs(roll) > 1e-5f) {
+        // positive roll: the top toward the side the heading turns to when its angle grows, (cos, -sin) of it = (forward z, -forward x)
+        const float *ax = g_hb.forward;
+        const float up[3] = {0.0f, -1.0f, 0.0f};
+        const float moved[3] = {ax[1] * up[2] - ax[2] * up[1], ax[2] * up[0] - ax[0] * up[2], ax[0] * up[1] - ax[1] * up[0]};
+        const float sign = moved[0] * g_hb.forward[2] - moved[2] * g_hb.forward[0] >= 0.0f ? 1.0f : -1.0f;
+        rotate_rows(bone, ax, roll * sign);
+    }
+    if (std::fabs(yaw) > 1e-5f) {
+        const float up[3] = {0.0f, 1.0f, 0.0f};
+        rotate_rows(bone, up, yaw);
+    }
+}
+void anim_layers(int i, std::uint32_t bone) {
+    const float g = g_anim_gain.load(std::memory_order_relaxed);
+    if (i == 5) {   // the spine: the lean into turns, and half the hunch
+        body_turn(bone, 0.05f * g_hb.wet * g, g_hb.lean * g, 0.0f);
+    } else if (i == 6) {   // the chest: breathing, the hunch, the shiver
+        const float breath = std::sin(g_hb.breath_phase) * 0.018f * (0.4f + 0.6f * g_hb.idle) * (1.0f + 0.5f * g_hb.cold);
+        const float shiver = g_hb.cold * 0.012f;
+        body_turn(bone, (breath + 0.06f * g_hb.wet + 0.04f * g_hb.cold) * g, shiver * g * std::sin(g_hb.shiver_phase * 1.7f), shiver * g * std::sin(g_hb.shiver_phase));
+    }
+}
 void head_follow_call(Cpu &c) {
     const std::uint32_t back = c.r[31].w[0];
     const std::uint32_t bone = c.r[4].w[0];
+    const int idx = bone ? hero_bone_index(bone) : -1;
+    const bool lively = idx >= 0 && anim_live();
+    if (lively) smooth_local(idx, bone);
     call(c, g_head.fn, 1);
     c.r[31].sd[0] = static_cast<std::int32_t>(back);
-    if (bone == 0 || bone != head_bone()) return;
+    if (lively && idx == 4) anim_step();
+    if (lively && (idx == 5 || idx == 6)) anim_layers(idx, bone);
+    if (bone == 0 || idx < 0 || static_cast<std::uint32_t>(idx) != g_head.index) return;
     update_wet_look(bone);
     float want_yaw = 0.0f, want_pitch = 0.0f;
     const std::uint32_t cam = ld32(g_head.pointer);
@@ -1578,6 +1747,9 @@ bool head_call_in_place() { return head_follow_available(); }
 }  // namespace
 void set_head_follow(bool on) { g_head_on = on; }
 void set_head_test(float radians) { g_head_test = radians; }
+void set_anim_layers(bool on) { g_anim_on = on; }
+void set_anim_gain(float gain) { g_anim_gain = gain; }
+float anim_gain() { return g_anim_gain.load(); }
 float head_test() { return g_head_test.load(); }
 void add_camera_orbit_turn(float radians) {
     float now = g_orbit_turn.load();

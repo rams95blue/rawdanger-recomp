@@ -128,7 +128,8 @@ ROOT.FAT); if it does, they are candidates for the Enhanced Edition.
 | v0.9.4 changes | ✅ | **The hero's head follows the camera**: with the follow camera while playing, the hero (either one) turns the head toward where the camera looks, up to 60 degrees each way and a little up or down with the camera's pitch, eased in and out; it comes back to the middle when the camera looks at the hero's face, and cutscenes, the first-person view and the fixed cameras keep the animation as it is. Settings > Controls > Head follows camera (on by default; keys.ini head_follow). Engine patch 0039 (host call 202 in the function that builds the bones' world matrices). Detail distance: eleven likely distance words raised three times changed no pixel in three places, so the pop-in is not a single distance setting (see item 7) |
 | v0.9.5 changes | ✅ | **The wet look**: the hero darkens and the colours deepen as the clothes get wet, and lighten again as they dry, from the game's own wetness (the worn clothes' 0-100, what the HUD's drops show). The hero's limbs are projected with the game's own world-to-screen matrix into capsules on the screen, and the GPU's AO pass darkens only the pixels inside them at the hero's depth, so nothing behind or in front is touched (Settings > Picture > Wet look, on by default). **Settings > Debug**: every test switch in one tab, kept in every build: Where am I (now with the clothes' wetness), Heal, warm and dry the hero, Keep the hero healthy and warm, Dry / Soak the hero's clothes, Wet look: wetness shown (the game's, 0 to 100 %), Wet look: show the capsules (in blue), Head follows camera: a fixed turn, and the developers' debug menu and map select. Engine patch 0040 |
 | v0.9.6 changes | ✅ | **Graphics debug in Settings > Debug**: *Picture shown* switches the 3D picture between the game's, the ambient occlusion alone (white: none, dark: shaded), the depth (grey by distance: 1 m white, 60 m and the sky black) and the wet look's capsules in blue; *Stats on screen* puts FPS, CPU / GPU, memory, scene and camera mode, the clothes' wetness, the view and the frame at the left, once a second. Engine patch 0041 |
-| **Pending (v0.9.6)** | ⏳ | See the list below |
+| v0.9.7 changes | ✅ | **A livelier hero** (the animation plan's steps 1 and 2, first pass): on the game's own animation the hero breathes standing still (faster when cold), hunches a little as the clothes get wet, shivers when the body temperature drops, and leans into turns when running; a clip that snaps to the next (a bone turning more than 23 degrees in one step) is taken half the way each step. Settings > Controls > Livelier hero (on); Settings > Debug: the layers four times bigger, to see them. Engine patch 0042 (docs/ANIMATION.md) |
+| **Pending (v0.9.7)** | ⏳ | See the list below |
 | Still open after v0.7.4 | ✅ | All three done: direct mouse look (v0.7.9), the debug menus' text (v0.7.8), saves without the memory card (v0.7.8) |
 | Keyboard prompts | ✅ | v0.7.1: key caps with the player's keys in the game's own font (see *PC keys in the game's texts*) |
 | In-game menu for Raw Danger | ✅ | Engine patch 0005: Resume, Quick save/load, Game options (F3), Graphics page (look, resolution, text filter, full screen, widescreen, pause in the background), Achievements (F4), Key card, Change keys, **Quit to desktop**, hazard-tape look with the game's name. Next: options inside the game's own Options screen (see below) |
@@ -145,7 +146,7 @@ Code patches go into `patches\pnach\SLUS-21501_2905C5C6.pnach` as named sections
 compiled in at build time (the native engine ignores runtime writes to code). Each one is verified on a headless build
 of the same engine: boot or a save state, frames captured every N frames, compared with the unpatched build.
 
-## Pending (as of v0.9.6)
+## Pending (as of v0.9.7)
 
 Asked for and not done yet, roughly by size:
 
@@ -174,9 +175,11 @@ Asked for and not done yet, roughly by size:
 21. **Animation, made livelier** (asked after v0.9.4; the head turn's call 0x323FB0 sees every bone of every character):
     1. *Layers on the game's animation*, no new assets: breathing and a shift of weight standing still, a lean into turns,
        shivering as the body temperature falls (character +0x370), a heavier, hunched walk when soaked (the wetness above),
-       hair and coat sway, feet on slopes. Next.
+       hair and coat sway, feet on slopes. v0.9.7: breathing, the wet hunch, shivering, the lean (docs/ANIMATION.md). Still to do:
+       the weight shift, hair and coat sway, feet on slopes, and the same for the other characters.
     2. *Smoother motion*: the game samples its animation 20 times a second (0x324ED0 every third frame); blending between those
-       samples, and between clips where it snaps from one to the next. Next.
+       samples, and between clips where it snaps from one to the next. v0.9.7: snaps of more than 23 degrees are halved each step.
+       The whole game steps 20 times a second (the picture too), so in-between frames wait for the uncapped frame rate (9, 12).
     3. *New clips*: the game's animation format decoded and new motion (from a source you can use) retargeted to its 48-bone
        skeleton. Days of work, in steps.
 22. **The wet look, finer**: the shoes and a raised hand can fall outside the capsules; a highlight that follows the light; wet

@@ -140,6 +140,11 @@ void set_free_camera(bool on);
 bool head_follow_available();
 void set_head_follow(bool on);
 void set_head_test(float radians);   // debug: a fixed turn of the head (0: follows the camera)
+// rawdanger-recomp (v0.9.7): the hero's animation livelier: smoothing of snaps, breathing, a hunch when wet, shivering, a lean
+// into turns (system.cpp; keys.ini anim_layers, on; needs [Head follows camera]'s call)
+void set_anim_layers(bool on);
+void set_anim_gain(float gain);   // debug: the layers bigger (1 as made)
+float anim_gain();
 float head_test();
 // rawdanger-recomp (v0.9.5): how wet the hero's worn clothes are (0 ... 1, the wettest; -1 no hero), set them (debug), and the wet
 // look (PS2_HERO_WET, system.cpp; keys.ini wet_look, on) with its debug switches: a forced wetness (-1 the game's), the capsules shown

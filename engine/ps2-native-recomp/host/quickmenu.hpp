@@ -56,6 +56,7 @@ enum class Command {
     key_prompts,   // Settings > Controls: the game's texts show the keys (key caps) or the PlayStation symbols
     mouse_look,    // Settings > Controls: the mouse turns the camera while playing
     free_camera,   // Settings > Controls: the follow camera also where the game has a fixed one
+    anim_layers,   // Settings > Controls: the hero's animation livelier
     wet_look,      // Settings > Picture: the hero looks wet when the clothes are
     head_follow,   // Settings > Controls: the hero's head turns toward where the camera looks
     camera_orbit,  // Settings > Controls: up / down on the camera circles the hero (or the game's own tilt)
@@ -102,6 +103,7 @@ struct Values {
     int mouse_look = -1;           // -1: this game has no mouse look (PS2_MOUSE_LOOK_YAW), 0 off, 1 on
     int free_camera = -1;          // -1: not in this game (PS2_FREE_CAMERA), 0 the game's fixed cameras, 1 the follow camera everywhere
     int wet_look = 1;
+    int anim_layers = -1;          // -1: not in this game
     int head_follow = -1;          // -1: not in this game (PS2_HEAD_FOLLOW), 0 off, 1 on
     int camera_orbit = -1;         // -1: this game has no orbit camera (PS2_CAMERA_ORBIT), 0 the game's tilt, 1 orbit
     double mouse_speed = 1.0;

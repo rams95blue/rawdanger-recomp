@@ -28,7 +28,7 @@ namespace RawDangerLauncher
 {
     public static class Program
     {
-        public const string Version = "0.9.6";
+        public const string Version = "0.9.7";
         public const string AppName = "Raw Danger PC";
         public static bool Restart;
 
@@ -473,7 +473,7 @@ namespace RawDangerLauncher
                 if (!System.IO.File.Exists(optIndex) || !System.IO.File.Exists(optArt) || System.IO.File.GetLastWriteTimeUtc(optIndex) < System.IO.File.GetLastWriteTimeUtc(iso) ||
                     recompNewer || jpNewer || !System.IO.File.ReadAllText(optArt).Contains("A:up\t") ||
                     !System.IO.File.ReadAllText(optArt).Contains("L:Keys on screen\t") ||   // v0.8.0 rows
-                    !System.IO.File.ReadAllText(optArt).Contains("L:Wet look\t"))   // v0.9.5 rows (and v0.9.4's Head follows camera, v0.9.2's Fixed cameras)
+                    !System.IO.File.ReadAllText(optArt).Contains("L:Livelier hero\t"))   // v0.9.7 rows (and v0.9.5's Wet look, v0.9.4's Head follows camera, v0.9.2's Fixed cameras)
                 {
                     string python = Path.Combine(Path.Combine(Path.Combine(Path.Combine(s.PnrDir, "tools"), "portable"), "python"), "python.exe");
                     if (!System.IO.File.Exists(python)) python = "python";
