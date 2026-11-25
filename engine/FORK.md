@@ -151,6 +151,9 @@
   (PS2_CAMERA_ZOOM), FXAA in the Options list, the filter's name in sentence case, the debug menu notes, the UNPACKs in PS2_VU1_STATS.
 - **0033-v0.8.7-ao-debug-menu** (rawdanger-recomp v0.8.7): stronger ambient occlusion; the developers' debug menu drawn in
   the PC font with its cursor followed from the pad; a menu canvas fill wholly off its picture no longer writes past it.
+- **0034-card-check-frames-ao-metres-texture-switch** (rawdanger-recomp v0.8.9): PS2_AUTO_CROSS answered in the game's own
+  frames by ps2::latch_pads (it missed when timed by the window); ambient occlusion measured in metres (no far outlines, no near
+  smears); every texture decoded again when the regional textures switch while playing.
 
 ## Goals of the fork
 

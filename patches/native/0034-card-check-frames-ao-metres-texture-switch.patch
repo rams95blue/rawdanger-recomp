@@ -1,0 +1,160 @@
+From cd3edf1acaa26a43ba66fd3c9bce36c23383eb2f Mon Sep 17 00:00:00 2001
+From: rawdanger-recomp <rawdanger-recomp@users.noreply.github.com>
+Date: Wed, 25 Nov 2026 01:16:03 +0000
+Subject: [PATCH] rawdanger-recomp v0.8.9: card check answered in game frames,
+ AO in metres, redecode on regional texture switch
+
+PS2_AUTO_CROSS moves from the window's pad poll (SDL clock, skipped while the PC menu
+was open) to ps2::latch_pads: Cross down 6 frames in every 12 of the game's own frames
+while the scene word matches.
+
+game_ao: depth taken as ~131072/metres; radius depth/900 px (max 16), creases of
+2-20 cm, occluders under 1 m in front, faded out at 20-45 m, softer response.
+
+Switching the Japanese textures live resets the decoded texture cache and the
+override pictures (flushed first, in apply_scale_request).
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01QNLFPekqhcU2dj7B3Utmea
+---
+ host/window.cpp            | 16 +---------------
+ runtime/src/gs/gpu/gpu.cpp | 15 +++++++++++++++
+ runtime/src/gs/gpu/gs.wgsl | 24 +++++++++++++++++-------
+ runtime/src/system.cpp     | 24 ++++++++++++++++++++++++
+ 4 files changed, 57 insertions(+), 22 deletions(-)
+
+diff --git a/host/window.cpp b/host/window.cpp
+index 6aebf03..8924b66 100644
+--- a/host/window.cpp
++++ b/host/window.cpp
+@@ -1275,21 +1275,7 @@ void poll_port(int port) {
+         if (quickmenu::game_font_loaded()) quickmenu::set_skin(2);
+         menu_paint();
+     }
+-    // rawdanger-recomp: the memory-card check at start answers itself. PS2_AUTO_CROSS="ADDRESS=VALUE" (Raw Danger: the scene word
+-    // 0x48F488 = 3, MCCHECK): while the game is there, Cross is tapped for it (a tenth of a second in every three), so the
+-    // "Starting the game without using System data" notice of a new card goes on by itself; with system data on the card the
+-    // check never waits for a button anyway.
+-    if (port == 0 && !g_menu.is_open()) {
+-        static const auto spec = [] {
+-            std::pair<std::uint32_t, std::uint32_t> r{0, 0};
+-            if (const char *v = std::getenv("PS2_AUTO_CROSS"); v && *v) {
+-                unsigned long a = 0, w = 0;
+-                if (std::sscanf(v, "%lx=%lu", &a, &w) == 2) r = {static_cast<std::uint32_t>(a), static_cast<std::uint32_t>(w)};
+-            }
+-            return r;
+-        }();
+-        if (spec.first && ps2::ld32(spec.first) == spec.second && (SDL_GetTicks() / 100) % 3 == 0) pressed |= kCross;
+-    }
++    // (the memory-card check at start, PS2_AUTO_CROSS: answered in the runtime, ps2::latch_pads, in the game's own frames)
+     if (g_menu.is_open()) g_block_input[port] = true;
+     if (g_block_input[port]) {
+         if (!pressed) g_block_input[port] = false;  // all let go: from the next pass on the game gets this port again
+diff --git a/runtime/src/gs/gpu/gpu.cpp b/runtime/src/gs/gpu/gpu.cpp
+index 76db0eb..d169a82 100644
+--- a/runtime/src/gs/gpu/gpu.cpp
++++ b/runtime/src/gs/gpu/gpu.cpp
+@@ -5081,6 +5081,21 @@ void remake_programs() {
+ std::atomic<std::uint32_t> g_scale_request{0};
+ std::atomic<int> g_sharp_request{-1};
+ void apply_scale_request() {
++    // rawdanger-recomp (v0.8.9): the regional look switched while playing: every decoded picture is made again, the replaced ones
++    // too (a face drawn with what a decode of the other look had left in its place came out striped after the switch)
++    {
++        static bool jp_was = false;
++        const bool jp_now = g_jp_textures.load(std::memory_order_relaxed);
++        if (jp_now != jp_was) {
++            jp_was = jp_now;
++            flush_all();
++            submit();
++            wait_idle();
++            dec_reset();
++            g_override_used = 0;
++            for (auto &kv : g_tex_index) kv.second.cached_dec = 0xFFFFFFFFu, kv.second.kept.clear(), kv.second.dirty = true;
++        }
++    }
+     if (const int sharp = g_sharp_request.exchange(-1); sharp >= 0 && g_make_pipeline_at && static_cast<std::uint32_t>(sharp) != g_sharp_2d) {
+         // the filter of upscaled 2D art is a constant of the programs too: they are made again, the memory stays
+         flush_all();
+diff --git a/runtime/src/gs/gpu/gs.wgsl b/runtime/src/gs/gpu/gs.wgsl
+index 7c0a9f0..5200c3d 100644
+--- a/runtime/src/gs/gpu/gs.wgsl
++++ b/runtime/src/gs/gpu/gs.wgsl
+@@ -1784,8 +1784,18 @@ fn game_ao(@builtin(global_invocation_id) gid: vec3<u32>) {
+     if (z0 < 64.0) {
+         return;   // nothing drawn (sky, cleared)
+     }
+-    let radius = clamp(f32(prm(7u)) * z0 / 65536.0, 2.0, 40.0);
+-    // v0.8.4: the same 8 directions at 2 distances for every pixel (no random turn per pixel: that was the grain)
++    // v0.8.9: measured in the world, not in the depth's own steps. The depth grows as the distance shrinks (about 131072 / metres in
++    // Raw Danger's maps: the banquet hall's floor at the camera reads 68000, the city across the river 500), so a crease of the depth
++    // means little far away (one step of the depth there is half a metre: the dark outlines round the far buildings) and a lot near
++    // by (radius 40 pixels near the camera: the dark smears and blotches under people and on table cloths). Now: about half a metre
++    // round each point (at most 16 pixels), only creases of 2 to 20 cm, only things less than a metre in front, faded out beyond
++    // 20 to 45 metres, and a softer response.
++    let dist = 131072.0 / z0;
++    let radius = min(f32(prm(7u)) * z0 / 72000.0, 16.0);
++    let keep = (1.0 - smoothstep(20.0, 45.0, dist)) * smoothstep(1.5, 3.0, radius);
++    if (keep <= 0.0) {
++        return;
++    }
+     var occluded = 0.0;
+     var counted = 0.0;
+     for (var s = 0u; s < 16u; s = s + 1u) {
+@@ -1801,13 +1811,13 @@ fn game_ao(@builtin(global_invocation_id) gid: vec3<u32>) {
+         if (zp <= 0.0 || zm <= 0.0) {
+             continue;
+         }
+-        let crease = ((zp + zm) * 0.5 - z0) / z0;
+-        let ahead = max(zp, zm) / z0 - 1.0;
+-        occluded = occluded + smoothstep(0.004, 0.035, crease) * (1.0 - smoothstep(0.04, 0.15, ahead));   // v0.8.7: stronger (it hardly showed)
++        let crease = ((zp + zm) * 0.5 - z0) / z0 * dist;          // metres (a flat surface: 0, the depth is flat on screen)
++        let ahead = dist - 131072.0 / max(zp, zm);                 // metres the nearest of the two is in front
++        occluded = occluded + smoothstep(0.02, 0.2, crease) * (1.0 - smoothstep(0.3, 1.0, ahead));
+         counted = counted + 1.0;
+     }
+-    occluded = select(0.0, occluded / counted * 6.0, counted > 0.0);
+-    let ao = 1.0 - f32(prm(6u)) / 256.0 * smoothstep(0.0, 1.0, clamp(occluded / 6.0 * 3.0, 0.0, 1.0));
++    occluded = select(0.0, occluded / counted, counted > 0.0);
++    let ao = 1.0 - 0.75 * f32(prm(6u)) / 256.0 * keep * clamp(occluded * 2.0, 0.0, 1.0);
+     let fl = locate(0u, prm(0u), prm(1u), x, y);
+     let c = load_at(fl, k);
+     let cr = u32(f32(c & 255u) * ao);
+diff --git a/runtime/src/system.cpp b/runtime/src/system.cpp
+index 30b3a1a..312423d 100644
+--- a/runtime/src/system.cpp
++++ b/runtime/src/system.cpp
+@@ -212,6 +212,30 @@ void latch_pads() {
+         g_pad_dirty = 0;
+     }
+     quick::pads_hook(pads, apply);
++    // rawdanger-recomp: the memory-card check at start answers itself. PS2_AUTO_CROSS="ADDRESS=VALUE" (Raw Danger: the scene word
++    // 0x48F488 = 3, MCCHECK): while the game is there, Cross is down for 6 frames in every 12, counted in the game's own frames, so
++    // the "Starting the game without using System data" notice of a card with no system data goes on by itself, however fast the
++    // scene runs (PS2_SKIP_SCENE) and whether or not the window has the keyboard (v0.8.9: it was timed by the window's clock before,
++    // and could miss)
++    {
++        static const auto spec = [] {
++            std::pair<std::uint32_t, std::uint32_t> r{0, 0};
++            if (const char *v = std::getenv("PS2_AUTO_CROSS"); v && *v) {
++                unsigned long a = 0, w = 0;
++                if (std::sscanf(v, "%lx=%lu", &a, &w) == 2) r = {static_cast<std::uint32_t>(a), static_cast<std::uint32_t>(w)};
++            }
++            return r;
++        }();
++        static bool was_on = false;
++        const bool here = spec.first && ps2::ld32(spec.first) == spec.second;
++        if (here || was_on) {
++            const bool down = here && (g_frames / 6) % 2 == 0;
++            const std::uint16_t want = down ? static_cast<std::uint16_t>(pads[0].buttons | (1u << 14)) : pads[0].buttons;
++            if (down != was_on) apply |= 1u;
++            pads[0].buttons = want;
++            was_on = down;
++        }
++    }
+     for (int p = 0; p < 2; ++p) {
+         if (!(apply & (1u << p))) continue;
+         iop::sio2::set_buttons(p, pads[p].buttons);
+-- 
+2.43.0
+

@@ -63,3 +63,12 @@ TEX LIST, SE TEST, ADD ITEM, DRY_PLAYER, SHADOWMAP TEST...) is only a table of 3
 (0x187F60). The task that drew it is an empty function (0x187EF0), and of its values only line 5 (R2 LAND PATH) is still read
 (0x1666DC). The code behind the other lines was taken out before release, so those functions cannot be switched on.
 
+
+## v0.8.9: one key
+
+The game's scene list (0x3A8380, 42 scenes: DUMMY, BOOTLOAD, WARNING, MCCHECK ... EPI LOAD, EPI SAVE, DEBSEL, MAP SEL) has no
+other developers' scene than DEBSEL (40) and MAP SEL (41). Since DEBSEL only leads to the map select (its sound test does
+nothing, its exit restarts at the logos), the launcher no longer offers it: `PS2_DEBUG_SCENES=0x48F48C;0;41;21` (US),
+`0x48E00C;0;41;21` (Japanese), and F7 alone opens the map select. The 37 names of the stripped menu are all the disc keeps
+of it (no code); the useful ones (no death / damage, dry the player, add item, restart at the last gate, fog and depth of
+field off, a working sound test, an info line) would have to be written anew: ROADMAP, "Debug menu of our own".

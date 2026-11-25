@@ -49,7 +49,7 @@ tools...** lists them with their links and where they are found (docs/BUILD_TOOL
   F1 menu** (Settings -> Display -> *Game runs behind this menu*; off: it waits). See docs/GRAPHICS.md.
 - **Keys**: F1 menu, F2 picture look, F3 game options, F4 achievements, F5 / F8 quick save / load, **F6 held: fast
   forward** (skips through cutscenes, talks and walks at the game's top speed), **F7: the developers' map select** left on
-  the disc (up / down a line, left / right its value, Cross loads the map; docs/DEBUG.md), F9 report, **F10 your keys on screen**, F11 full screen, **Shift+F7 the debug menu** (map select, exit; drawn in the PC font; Cross or Circle). The camera tilts much further up and down
+  the disc (up / down a line, left / right its value, Cross loads the map; docs/DEBUG.md), F9 report, **F10 your keys on screen**, F11 full screen. (The developers' other menu, DEBSEL, only led to the map select, so v0.8.9 dropped its Shift+F7; docs/DEBUG.md lists what else the disc still names.) The camera tilts much further up and down
   than on the PS2 (free tilt since v0.8.6, a switch in F3). The mouse wheel sets
   walk or run for the walk keys (up runs, down walks) when no button is put on the wheel. The memory-card
   check at start is not shown at all (the card is still read).

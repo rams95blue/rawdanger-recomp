@@ -1275,21 +1275,7 @@ void poll_port(int port) {
         if (quickmenu::game_font_loaded()) quickmenu::set_skin(2);
         menu_paint();
     }
-    // rawdanger-recomp: the memory-card check at start answers itself. PS2_AUTO_CROSS="ADDRESS=VALUE" (Raw Danger: the scene word
-    // 0x48F488 = 3, MCCHECK): while the game is there, Cross is tapped for it (a tenth of a second in every three), so the
-    // "Starting the game without using System data" notice of a new card goes on by itself; with system data on the card the
-    // check never waits for a button anyway.
-    if (port == 0 && !g_menu.is_open()) {
-        static const auto spec = [] {
-            std::pair<std::uint32_t, std::uint32_t> r{0, 0};
-            if (const char *v = std::getenv("PS2_AUTO_CROSS"); v && *v) {
-                unsigned long a = 0, w = 0;
-                if (std::sscanf(v, "%lx=%lu", &a, &w) == 2) r = {static_cast<std::uint32_t>(a), static_cast<std::uint32_t>(w)};
-            }
-            return r;
-        }();
-        if (spec.first && ps2::ld32(spec.first) == spec.second && (SDL_GetTicks() / 100) % 3 == 0) pressed |= kCross;
-    }
+    // (the memory-card check at start, PS2_AUTO_CROSS: answered in the runtime, ps2::latch_pads, in the game's own frames)
     if (g_menu.is_open()) g_block_input[port] = true;
     if (g_block_input[port]) {
         if (!pressed) g_block_input[port] = false;  // all let go: from the next pass on the game gets this port again

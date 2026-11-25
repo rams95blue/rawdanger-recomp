@@ -212,6 +212,30 @@ void latch_pads() {
         g_pad_dirty = 0;
     }
     quick::pads_hook(pads, apply);
+    // rawdanger-recomp: the memory-card check at start answers itself. PS2_AUTO_CROSS="ADDRESS=VALUE" (Raw Danger: the scene word
+    // 0x48F488 = 3, MCCHECK): while the game is there, Cross is down for 6 frames in every 12, counted in the game's own frames, so
+    // the "Starting the game without using System data" notice of a card with no system data goes on by itself, however fast the
+    // scene runs (PS2_SKIP_SCENE) and whether or not the window has the keyboard (v0.8.9: it was timed by the window's clock before,
+    // and could miss)
+    {
+        static const auto spec = [] {
+            std::pair<std::uint32_t, std::uint32_t> r{0, 0};
+            if (const char *v = std::getenv("PS2_AUTO_CROSS"); v && *v) {
+                unsigned long a = 0, w = 0;
+                if (std::sscanf(v, "%lx=%lu", &a, &w) == 2) r = {static_cast<std::uint32_t>(a), static_cast<std::uint32_t>(w)};
+            }
+            return r;
+        }();
+        static bool was_on = false;
+        const bool here = spec.first && ps2::ld32(spec.first) == spec.second;
+        if (here || was_on) {
+            const bool down = here && (g_frames / 6) % 2 == 0;
+            const std::uint16_t want = down ? static_cast<std::uint16_t>(pads[0].buttons | (1u << 14)) : pads[0].buttons;
+            if (down != was_on) apply |= 1u;
+            pads[0].buttons = want;
+            was_on = down;
+        }
+    }
     for (int p = 0; p < 2; ++p) {
         if (!(apply & (1u << p))) continue;
         iop::sio2::set_buttons(p, pads[p].buttons);

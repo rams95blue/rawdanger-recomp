@@ -1784,8 +1784,18 @@ fn game_ao(@builtin(global_invocation_id) gid: vec3<u32>) {
     if (z0 < 64.0) {
         return;   // nothing drawn (sky, cleared)
     }
-    let radius = clamp(f32(prm(7u)) * z0 / 65536.0, 2.0, 40.0);
-    // v0.8.4: the same 8 directions at 2 distances for every pixel (no random turn per pixel: that was the grain)
+    // v0.8.9: measured in the world, not in the depth's own steps. The depth grows as the distance shrinks (about 131072 / metres in
+    // Raw Danger's maps: the banquet hall's floor at the camera reads 68000, the city across the river 500), so a crease of the depth
+    // means little far away (one step of the depth there is half a metre: the dark outlines round the far buildings) and a lot near
+    // by (radius 40 pixels near the camera: the dark smears and blotches under people and on table cloths). Now: about half a metre
+    // round each point (at most 16 pixels), only creases of 2 to 20 cm, only things less than a metre in front, faded out beyond
+    // 20 to 45 metres, and a softer response.
+    let dist = 131072.0 / z0;
+    let radius = min(f32(prm(7u)) * z0 / 72000.0, 16.0);
+    let keep = (1.0 - smoothstep(20.0, 45.0, dist)) * smoothstep(1.5, 3.0, radius);
+    if (keep <= 0.0) {
+        return;
+    }
     var occluded = 0.0;
     var counted = 0.0;
     for (var s = 0u; s < 16u; s = s + 1u) {
@@ -1801,13 +1811,13 @@ fn game_ao(@builtin(global_invocation_id) gid: vec3<u32>) {
         if (zp <= 0.0 || zm <= 0.0) {
             continue;
         }
-        let crease = ((zp + zm) * 0.5 - z0) / z0;
-        let ahead = max(zp, zm) / z0 - 1.0;
-        occluded = occluded + smoothstep(0.004, 0.035, crease) * (1.0 - smoothstep(0.04, 0.15, ahead));   // v0.8.7: stronger (it hardly showed)
+        let crease = ((zp + zm) * 0.5 - z0) / z0 * dist;          // metres (a flat surface: 0, the depth is flat on screen)
+        let ahead = dist - 131072.0 / max(zp, zm);                 // metres the nearest of the two is in front
+        occluded = occluded + smoothstep(0.02, 0.2, crease) * (1.0 - smoothstep(0.3, 1.0, ahead));
         counted = counted + 1.0;
     }
-    occluded = select(0.0, occluded / counted * 6.0, counted > 0.0);
-    let ao = 1.0 - f32(prm(6u)) / 256.0 * smoothstep(0.0, 1.0, clamp(occluded / 6.0 * 3.0, 0.0, 1.0));
+    occluded = select(0.0, occluded / counted, counted > 0.0);
+    let ao = 1.0 - 0.75 * f32(prm(6u)) / 256.0 * keep * clamp(occluded * 2.0, 0.0, 1.0);
     let fl = locate(0u, prm(0u), prm(1u), x, y);
     let c = load_at(fl, k);
     let cr = u32(f32(c & 255u) * ao);

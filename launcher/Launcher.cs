@@ -28,7 +28,7 @@ namespace RawDangerLauncher
 {
     public static class Program
     {
-        public const string Version = "0.8.8";
+        public const string Version = "0.8.9";
         public const string AppName = "Raw Danger PC";
         public static bool Restart;
 
@@ -587,7 +587,7 @@ namespace RawDangerLauncher
                     // the developers' map select left on the disc (F7, or F1 -> Settings -> Game): the game's next-scene word and
                     // its scene MAP SEL (41); and the debug menu (DEBSEL, 40: map select, sound test, exit), whose text reads through
                     // PS2_SJIS_TEXT below and which took only Circle or Start until [Debug menu answers Cross] (v0.8.6)
-                    psi.EnvironmentVariables["PS2_DEBUG_SCENES"] = "0x48F48C;40;41;21";   // v0.8.6: the debug menu too (Shift+F7; it answers Cross with [Debug menu answers Cross])   // (from the game itself, scene 21)
+                    psi.EnvironmentVariables["PS2_DEBUG_SCENES"] = "0x48F48C;0;41;21";   // v0.8.9: the map select only (F7): the debug menu (DEBSEL) only led to it, a sound test wired to nothing and a restart, so Shift+F7 is gone; was   // v0.8.6: the debug menu too (Shift+F7; it answers Cross with [Debug menu answers Cross])   // (from the game itself, scene 21)
                     // the developers' text through the US font sheet (texture base 3592): Shift-JIS strings shown in ASCII, and the map
                     // select's letters at the font's own size (engine patch 0024, gs.cpp sjis)
                     psi.EnvironmentVariables["PS2_SJIS_TEXT"] = "3592";
@@ -605,7 +605,7 @@ namespace RawDangerLauncher
                     psi.EnvironmentVariables["PS2_SKIP_SCENE"] = "0x48E008=3";
                     // v0.8.7: the developers' map select (F7) and debug menu (Shift+F7) here too: the same scenes (40, 41) and the
                     // scene request at gp - 0x49E4 as on the US program (0x16EAE4), 0x48E00C; the debug menu is drawn in the PC font
-                    psi.EnvironmentVariables["PS2_DEBUG_SCENES"] = "0x48E00C;40;41;21";
+                    psi.EnvironmentVariables["PS2_DEBUG_SCENES"] = "0x48E00C;0;41;21";   // v0.8.9: the map select only (as above)
                 }
             }
             catch (Exception) { }   // the F1 menu's Recomp options page

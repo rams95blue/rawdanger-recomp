@@ -120,7 +120,8 @@ ROOT.FAT); if it does, they are candidates for the Enhanced Edition.
 | v0.8.6 changes | ✅ | Launcher: two tabs, MODERN (the Enhanced Edition, recommended) and LEGACY (one disc as it is); build speed Light / Balanced / Full; Build tools... lists the nine tools with their links and finds copies saved on the PC (docs/BUILD_TOOLS.md). Regional options start as the US release (English voices included). Title screen: ENHANCED EDITION and the build number under the logo, in its own yellow and red. Camera: free tilt (the game's look-up stop moved, the mouse's range widened) and a field of view setting (80-150 %). The debug menu answers Cross (Shift+F7). Every other file that differs between the US and Japanese discs listed, with what can become a toggle (docs/VERSION_DIFFERENCES.md). The data each VU1 program is given (docs/NATIVE_RENDERER.md). Engine patch 0032 |
 | v0.8.7 changes | ✅ | Options list: the PC rows were gone (rd_options.py stopped when its words did not fit: now only live options, and never all or nothing); Field of view and FXAA words added. Ambient occlusion much stronger (it hardly showed). The debug menu (Shift+F7, US and Japanese builds) drawn in the PC font. Title words in the Japanese logo's look (white, over it) when the Japanese logo is on; a layered PSD (8 times the size) to refine them, read back from tools/title_art_us.png / title_art_jp.png. Engine patch 0033 |
 | v0.8.8 changes | ✅ | The title words redrawn by hand (v2 PSDs): ENHANCED EDITION with a bevel under the US logo, 強化版 over the Japanese one (tools/title_art_us.png, title_art_jp.png, cut from the PSDs with `rd_title_art_source.py png`); the build number sits on the words' line and leans with them |
-| **Pending (v0.8.8)** | ⏳ | See the list below |
+| v0.8.9 changes | ✅ | The memory-card check at start goes on by itself again: Cross is now tapped in the game's own frames by the runtime (ps2::latch_pads), not by the window's clock, so it no longer depends on the window having the keyboard; with an empty saves folder the card has no system data and the game waits on "Starting the game without using System data" every start. Ambient occlusion measured in metres (depth ≈ 131072 / distance): no dark outlines round far buildings, no smears near the camera, faded out past 20-45 m, at most 16 pixels round, softer (GRAPHICS.md). Switching the regional textures while playing decodes every picture again (the striped NPC face). F7 alone opens the map select; the DEBSEL menu (Shift+F7) is gone, it only led there (DEBUG.md) |
+| **Pending (v0.8.9)** | ⏳ | See the list below |
 | Still open after v0.7.4 | ✅ | All three done: direct mouse look (v0.7.9), the debug menus' text (v0.7.8), saves without the memory card (v0.7.8) |
 | Keyboard prompts | ✅ | v0.7.1: key caps with the player's keys in the game's own font (see *PC keys in the game's texts*) |
 | In-game menu for Raw Danger | ✅ | Engine patch 0005: Resume, Quick save/load, Game options (F3), Graphics page (look, resolution, text filter, full screen, widescreen, pause in the background), Achievements (F4), Key card, Change keys, **Quit to desktop**, hazard-tape look with the game's name. Next: options inside the game's own Options screen (see below) |
@@ -137,7 +138,7 @@ Code patches go into `patches\pnach\SLUS-21501_2905C5C6.pnach` as named sections
 compiled in at build time (the native engine ignores runtime writes to code). Each one is verified on a headless build
 of the same engine: boot or a save state, frames captured every N frames, compared with the unpatched build.
 
-## Pending (as of v0.8.8)
+## Pending (as of v0.8.9)
 
 Asked for and not done yet, roughly by size:
 
@@ -159,4 +160,7 @@ Asked for and not done yet, roughly by size:
     English voices, the window and the launcher's settings): an F9 report taken during it would show where it waits.
 16. **The title words at a higher resolution in the game** (the title picture is 640 x 448; a sharper copy needs a texture
     override of it).
+17. **The hero's head follows the camera** (natural head motion). Found so far: the camera follows a node of the game's scene graph (camera block +0x144 points at it; nodes of 0xF0 bytes with a world matrix at +0x10 and a local place at +0x80, the follow point 1.5 above the hero's root). The head turn needs the hero's head bone and a hook after the animation sets its rotation, before the world matrices are made: a code change, not a memory write.
+18. **Debug menu of our own** (one native panel on F7): the disc keeps only the names of the developers' 37-line menu (DEBUG.md); the useful lines would be written anew: no death or damage, dry the player, add item, restart at the last gate, fog and depth of field off, a sound test, an info line.
+19. **Striped NPC face after switching the textures**: v0.8.9 makes every picture again at the switch; if it still shows, an F9 report at that moment (which map, which person) would say which picture it is.
 

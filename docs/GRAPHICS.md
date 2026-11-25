@@ -104,3 +104,11 @@ v0.8.7: stronger, as it hardly showed (in the banquet hall, 0.3 % of the picture
 depth (was 38, up to 40 pixels), counts creases from 0.4 % (was 0.6 %), with a gain of 3 (was 1.4); light darkens up to 66 %,
 strong up to 96 %. Now feet stand on the floor and the tables' edges sit on it.
 
+v0.8.9: measured in the world. The game's depth grows as the distance shrinks, about 131072 / metres (the banquet hall's floor
+at the camera reads 68000, the far city 500), so v0.8.7's thresholds, taken relative to the
+depth, broke both ways: far away one step of the depth is half a metre, and the far buildings got dark outlines and blotches;
+near the camera the 40-pixel radius smeared dark patches under people and over table cloths. Now each point looks about half a
+metre round it (depth / 900 pixels, at most 16), counts creases of 2 to 20 cm and only things less than a metre in front of it,
+fades out between 20 and 45 m, and darkens at most 72 % (strong) or 50 % (light) of the way. Tuned on depth dumps of four
+scenes (the banquet hall, a view over the city, two streets) with a copy of the shader in numpy before it went in.
+

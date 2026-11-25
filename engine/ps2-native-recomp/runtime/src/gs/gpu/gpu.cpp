@@ -5081,6 +5081,21 @@ void remake_programs() {
 std::atomic<std::uint32_t> g_scale_request{0};
 std::atomic<int> g_sharp_request{-1};
 void apply_scale_request() {
+    // rawdanger-recomp (v0.8.9): the regional look switched while playing: every decoded picture is made again, the replaced ones
+    // too (a face drawn with what a decode of the other look had left in its place came out striped after the switch)
+    {
+        static bool jp_was = false;
+        const bool jp_now = g_jp_textures.load(std::memory_order_relaxed);
+        if (jp_now != jp_was) {
+            jp_was = jp_now;
+            flush_all();
+            submit();
+            wait_idle();
+            dec_reset();
+            g_override_used = 0;
+            for (auto &kv : g_tex_index) kv.second.cached_dec = 0xFFFFFFFFu, kv.second.kept.clear(), kv.second.dirty = true;
+        }
+    }
     if (const int sharp = g_sharp_request.exchange(-1); sharp >= 0 && g_make_pipeline_at && static_cast<std::uint32_t>(sharp) != g_sharp_2d) {
         // the filter of upscaled 2D art is a constant of the programs too: they are made again, the memory stays
         flush_all();
