@@ -4,7 +4,7 @@
 
 <p align="center">
   <a href="https://github.com/rams95blue/rawdanger-recomp/releases"><img alt="release" src="https://img.shields.io/github/v/release/rams95blue/rawdanger-recomp?style=flat-square&color=f2c14e&labelColor=0b1324&label=release"></a>
-  <img alt="version" src="https://img.shields.io/badge/build-v0.9.2-96c4ff?style=flat-square&labelColor=0b1324">
+  <img alt="version" src="https://img.shields.io/badge/build-v0.9.3-96c4ff?style=flat-square&labelColor=0b1324">
   <img alt="platform" src="https://img.shields.io/badge/platform-Windows%2010%2F11%20x64-96c4ff?style=flat-square&labelColor=0b1324">
   <img alt="engine" src="https://img.shields.io/badge/engine-ps2--native--recomp%20fork-96c4ff?style=flat-square&labelColor=0b1324">
   <img alt="game data" src="https://img.shields.io/badge/game%20data-not%20included-e05a4f?style=flat-square&labelColor=0b1324">
@@ -97,7 +97,7 @@ tools...** lists them with their links and where they are found (docs/BUILD_TOOL
   which follows the map's weather and stays under the HUD, the texts and the bars), **Sound** (master volume, reverb),
   **Controls** (change keys with key caps, **mouse look** with speed and invert (since v0.7.9 the mouse turns the camera
   itself: as far as it moved, no top speed; build the game again once to get it), the PC keys shown in the game's own texts
-  in place of the PlayStation symbols, **Camera up/down** (v0.9.0: ORBIT circles the hero at the same distance, PS2 tilts and
+  and in its menus' button pictures (v0.9.3) in place of the PlayStation symbols, **Camera up/down** (v0.9.0: ORBIT circles the hero at the same distance, PS2 tilts and
   zooms as on the console) and **Fixed cameras** (OFF keeps your camera in the places that have a fixed one; ON by default)), **Game** (the game's other switches, and the developers' map select). Every one of
   these settings is also a **row of the game's own Options screen** (from the title and from the in-game menu's Options
   tab), with the game's live options of recomp.ini: they sit in the game's list like its own lines (the same cursor,

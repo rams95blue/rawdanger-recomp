@@ -28,7 +28,7 @@ namespace RawDangerLauncher
 {
     public static class Program
     {
-        public const string Version = "0.9.2";
+        public const string Version = "0.9.3";
         public const string AppName = "Raw Danger PC";
         public static bool Restart;
 
@@ -444,7 +444,7 @@ namespace RawDangerLauncher
             {
                 string dir = Path.Combine(Folder(s, name), "prompts"), envFile = Path.Combine(dir, "prompts.env");
                 if (!System.IO.File.Exists(envFile) || System.IO.File.GetLastWriteTimeUtc(envFile) < System.IO.File.GetLastWriteTimeUtc(iso) ||
-                    !System.IO.File.ReadAllText(envFile).Contains("PS2_PROMPTS_VERSION=3"))   // made by an older rd_prompts.py
+                    !System.IO.File.ReadAllText(envFile).Contains("PS2_PROMPTS_VERSION=4"))   // made by an older rd_prompts.py (4: the menus' button pictures too, v0.9.3)
                 {
                     string python = Path.Combine(Path.Combine(Path.Combine(Path.Combine(s.PnrDir, "tools"), "portable"), "python"), "python.exe");
                     if (!System.IO.File.Exists(python)) python = "python";

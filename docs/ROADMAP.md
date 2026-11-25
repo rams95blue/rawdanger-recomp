@@ -124,7 +124,8 @@ ROOT.FAT); if it does, they are candidates for the Enhanced Edition.
 | v0.9.0 changes | ✅ | Orbit camera: up / down on the right stick or the mouse now circles the hero at the same distance (from just over the floor to 75 degrees over him), through the follow camera's own height and distance words (engine host call at 0x177270; Settings > Controls > Camera up/down: ORBIT or PS2). Fixed cameras OFF (off by default): the places with a fixed camera keep the follow camera while you play; the cutscenes keep their shots (host call at 0x17C9B0; docs/CAMERA.md). The camera's code mapped (docs/CAMERA.md) |
 | v0.9.1 changes | ✅ | First-person view (Triangle): it looks round with the left stick, so the mouse now pushes that stick there (it turned nothing before). Japanese title: the US program's menu boxes covered the right end of 強化版 and the build number; the words now start where the logo starts. Settings > Game > Where am I: the scene, the camera mode, the character and the place, for reports |
 | v0.9.2 changes | ✅ | Debug lines in Settings > Game: Heal and warm the hero (once) and Keep the hero healthy and warm (every frame): the hero's health and body temperature found (the characters' table 0x5EAC80, +0x368 / +0x370; the body temperature falls while wet and cold, and the HUD's arrow turns blue). A build with the new camera code no longer stops when started without RawDangerPC.exe's camera settings (the engine has Raw Danger's own). The README's banner, badges, highlights and quick start (docs/images, tools/rd_readme_art.py) |
-| **Pending (v0.9.2)** | ⏳ | See the list below |
+| v0.9.3 changes | ✅ | Your keys in the menus' own button pictures too: the help strips of the Options screen, the map, the character select, the radio, the relations, the memories, the epilogue and the results draw the buttons as ringed symbols in pictures of their own; tools/rd_prompts.py finds them on the disc (a white ring 15 pixels across with the button's own colour inside: 19 pictures, 51 symbols on the US disc) and the engine draws a key cap with your key over each, as it does in the texts (Settings > Controls > Key names in texts) |
+| **Pending (v0.9.3)** | ⏳ | See the list below |
 | Still open after v0.7.4 | ✅ | All three done: direct mouse look (v0.7.9), the debug menus' text (v0.7.8), saves without the memory card (v0.7.8) |
 | Keyboard prompts | ✅ | v0.7.1: key caps with the player's keys in the game's own font (see *PC keys in the game's texts*) |
 | In-game menu for Raw Danger | ✅ | Engine patch 0005: Resume, Quick save/load, Game options (F3), Graphics page (look, resolution, text filter, full screen, widescreen, pause in the background), Achievements (F4), Key card, Change keys, **Quit to desktop**, hazard-tape look with the game's name. Next: options inside the game's own Options screen (see below) |
@@ -141,7 +142,7 @@ Code patches go into `patches\pnach\SLUS-21501_2905C5C6.pnach` as named sections
 compiled in at build time (the native engine ignores runtime writes to code). Each one is verified on a headless build
 of the same engine: boot or a save state, frames captured every N frames, compared with the unpatched build.
 
-## Pending (as of v0.9.2)
+## Pending (as of v0.9.3)
 
 Asked for and not done yet, roughly by size:
 
@@ -149,7 +150,7 @@ Asked for and not done yet, roughly by size:
 2. ~~First-person mouse~~: done in v0.9.1 (the view turns with the left stick; checked with the stick, the mouse itself only in a slow test window).
 3. **Japanese title**: the menu over the words is fixed (v0.9.1). Still open: one or two tiny specks that drift down past the copyright lines, only with the Japanese logo picture and not the lens rain (they are not in the picture itself: something the US program draws picks them from the Japanese one).
 4. **Japanese text** for the menus and subtitles (an option, like the voices).
-5. **Menus' button pictures for keyboard and mouse** (the Options header, the item menu and the other screens draw the controller's buttons as pictures; the texts already switch).
+5. ~~Menus' button pictures for keyboard and mouse~~: done in v0.9.3 for the four face buttons. The D-pad, L1 / R1 and SELECT pictures in the same strips stay as they are.
 6. **The hero's voice switching at once** (his lines are in sound banks loaded per area; the other characters' switch at once).
 7. **Detail distance**: the pop-in (the crowd's flat cut-outs, map pieces loaded by zone); the setting has not been found yet (the disc has no lower-detail models).
 8. **Minimap** from the game's own map (R3).
@@ -164,7 +165,7 @@ Asked for and not done yet, roughly by size:
 16. **The title words at a higher resolution in the game** (the title picture is 640 x 448; a sharper copy needs a texture
     override of it).
 17. **The hero's head follows the camera** (natural head motion). Found so far: the camera follows a node of the game's scene graph (camera block +0x144 points at it; nodes of 0xF0 bytes with a world matrix at +0x10 and a local place at +0x80, the follow point 1.5 above the hero's root). The head turn needs the hero's head bone and a hook after the animation sets its rotation, before the world matrices are made: a code change, not a memory write.
-18. **Debug menu of our own**: Settings > Game has Where am I (v0.9.1), Heal and warm the hero and Keep the hero healthy and warm (v0.9.2). Still to find: the wetness itself (the HUD's drops), the items (add item), the last gate (restart).
+18. **Debug menu of our own**: Settings > Game has Where am I (v0.9.1), Heal and warm the hero and Keep the hero healthy and warm (v0.9.2). Still to find: the wetness itself (the HUD's drops belong to the clothes, the game's clothing system, not to the hero's data), the items (add item), the last gate (restart).
 19. **Striped NPC face after switching the textures**: v0.8.9 makes every picture again at the switch; if it still shows, an F9 report at that moment (which map, which person) would say which picture it is.
 20. **Engine pipeline** (see "Engine pipeline" below).
 

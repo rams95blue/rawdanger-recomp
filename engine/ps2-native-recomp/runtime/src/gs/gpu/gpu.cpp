@@ -1490,6 +1490,146 @@ void draw_prompt_caps(std::vector<std::uint32_t> &words, std::uint32_t w, std::u
     }
 }
 
+// rawdanger-recomp (v0.9.3): the menus' own pictures of the buttons. Besides the font, the menus' strips (the map's help line,
+// the character select, the radio, the relations, the epilogue: "ⓧ OK  △ CANCEL") draw the PlayStation buttons as ringed symbols
+// in their own pictures. tools\rd_prompts.py finds them (a white ring with the button's colour inside), writes those pictures as
+// overrides and lists them: PS2_PROMPT_PICTURES = "KEY:b,cx,cy,r|b,cx,cy,r;KEY:..." (hex key; b 0 cross, 1 circle, 2 square,
+// 3 triangle; the ring's middle and radius in the picture's pixels). Each ring with a key given to its button becomes a key cap
+// with the key's name, in the game's letters (PS2_MENU_FONT, the font's coverage: "RDF1", width, height, a byte a pixel).
+struct PromptRing { int button, cx, cy, r; };
+std::unordered_map<std::uint64_t, std::vector<PromptRing>> g_prompt_pictures;
+std::vector<std::uint8_t> g_menu_font;   // the font's coverage, 384 x 384
+int g_menu_font_w = 0, g_menu_font_h = 0;
+
+void parse_prompt_pictures() {
+    const std::string v = os::env("PS2_PROMPT_PICTURES");
+    std::size_t at = 0;
+    while (at < v.size()) {
+        const std::size_t end = std::min(v.find(';', at), v.size());
+        const std::string one = v.substr(at, end - at);
+        at = end + 1;
+        const std::size_t colon = one.find(':');
+        if (colon == std::string::npos) continue;
+        const std::uint64_t key = std::strtoull(one.substr(0, colon).c_str(), nullptr, 16);
+        std::vector<PromptRing> rings;
+        std::size_t p = colon + 1;
+        while (p < one.size()) {
+            const std::size_t bar = std::min(one.find('|', p), one.size());
+            PromptRing r{};
+            if (std::sscanf(one.substr(p, bar - p).c_str(), "%d,%d,%d,%d", &r.button, &r.cx, &r.cy, &r.r) == 4 && r.button >= 0 && r.button < 4) rings.push_back(r);
+            p = bar + 1;
+        }
+        if (key && !rings.empty()) g_prompt_pictures[key] = std::move(rings);
+    }
+    // (runs without a window, tests: the keys' names from PS2_PROMPT_LABELS="cross,circle,square,triangle")
+    if (const std::string l = os::env("PS2_PROMPT_LABELS"); !l.empty()) {
+        std::lock_guard<std::mutex> lock(g_prompt_mutex);
+        std::size_t p = 0;
+        for (int i = 0; i < 4 && p <= l.size(); ++i) {
+            const std::size_t c = std::min(l.find(',', p), l.size());
+            g_prompt_labels[i] = l.substr(p, c - p);
+            p = c + 1;
+        }
+    }
+    const std::string font = os::env("PS2_MENU_FONT");
+    if (font.empty() || g_prompt_pictures.empty()) return;
+    if (std::FILE *f = std::fopen(font.c_str(), "rb")) {
+        char magic[4] = {};
+        std::uint32_t w = 0, h = 0;
+        if (std::fread(magic, 1, 4, f) == 4 && std::memcmp(magic, "RDF1", 4) == 0 && std::fread(&w, 4, 1, f) == 1 && std::fread(&h, 4, 1, f) == 1 && w <= 1024 && h <= 1024) {
+            g_menu_font.resize(static_cast<std::size_t>(w) * h);
+            if (std::fread(g_menu_font.data(), 1, g_menu_font.size(), f) == g_menu_font.size()) g_menu_font_w = static_cast<int>(w), g_menu_font_h = static_cast<int>(h);
+            else g_menu_font.clear();
+        }
+        std::fclose(f);
+    }
+    std::fprintf(stderr, "[prompts] %zu menu pictures with button symbols%s\n", g_prompt_pictures.size(), g_menu_font.empty() ? " (no font: left as they are)" : "");
+}
+
+void draw_ring_caps(std::vector<std::uint32_t> &words, std::uint32_t w, std::uint32_t h, int sc, const std::vector<PromptRing> &rings) {
+    if (g_menu_font.empty()) return;
+    std::string labels[4];
+    {
+        std::lock_guard<std::mutex> lock(g_prompt_mutex);
+        for (int i = 0; i < 4; ++i) labels[i] = g_prompt_labels[i];
+    }
+    const auto inside = [&](int x, int y) { return x >= 0 && y >= 0 && x < static_cast<int>(w) && y < static_cast<int>(h); };
+    const auto at = [&](int x, int y) -> std::uint32_t & { return words[static_cast<std::size_t>(y) * w + x]; };
+    const auto cover = [&](int x, int y) -> int { return x >= 0 && y >= 0 && x < g_menu_font_w && y < g_menu_font_h ? g_menu_font[static_cast<std::size_t>(y) * g_menu_font_w + x] : 0; };
+    // white over what is there, by a coverage 0..1 (the picture's alpha is 0..0x80)
+    const auto blend = [&](int x, int y, float cov, int grey) {
+        if (!inside(x, y) || cov <= 0.f) return;
+        std::uint32_t &d = at(x, y);
+        const float k = std::min(cov, 1.f);
+        const int r = static_cast<int>((d & 255) * (1 - k) + grey * k), g = static_cast<int>(((d >> 8) & 255) * (1 - k) + grey * k),
+                  b = static_cast<int>(((d >> 16) & 255) * (1 - k) + grey * k);
+        const int a = std::max(static_cast<int>(d >> 24), static_cast<int>(k * 128.f + 0.5f));
+        d = static_cast<std::uint32_t>(r) | static_cast<std::uint32_t>(g) << 8 | static_cast<std::uint32_t>(b) << 16 | static_cast<std::uint32_t>(std::min(a, 128)) << 24;
+    };
+    for (const PromptRing &ring : rings) {
+        const std::string &t = labels[ring.button];
+        if (t.empty()) continue;
+        const int R = ring.r + 2;
+        // the symbol goes: each row of its box takes the colour just left of the ring (the strip's own background, gradients too)
+        for (int y = (ring.cy - R) * sc; y < (ring.cy + R + 1) * sc; ++y) {
+            const int sx = (ring.cx - R - 1) * sc;
+            if (!inside(sx, y)) continue;
+            const std::uint32_t bg = at(sx, y);
+            for (int x = (ring.cx - R) * sc; x < (ring.cx + R + 1) * sc; ++x)
+                if (inside(x, y)) at(x, y) = bg;
+        }
+        // the letters' boxes in the font (cells of 24, ASCII from the third row), made smaller to `lh` pixels
+        struct G { int sx, sy, sw; };
+        std::vector<G> glyphs;
+        const float lh = t.size() > 1 ? 7.5f : 9.0f, k = lh / 15.0f;
+        float text_w = 0;
+        for (char ch : t) {
+            const int c = (static_cast<unsigned char>(ch) >= 32 && static_cast<unsigned char>(ch) <= 126 ? ch : '?') - 32;
+            const int cx = (c % 16) * 24, cy = (2 + c / 16) * 24;
+            int lo = 24, hi = -1;
+            for (int y = 0; y < 24; ++y)
+                for (int x = 0; x < 24; ++x)
+                    if (cover(cx + x, cy + y) > 80) lo = std::min(lo, x), hi = std::max(hi, x);
+            if (hi < lo) lo = 0, hi = 5;
+            glyphs.push_back({cx + lo, cy + 4, hi - lo + 1});
+            text_w += (hi - lo + 1) * k + 1.0f;
+        }
+        text_w -= 1.0f;
+        // the cap: as tall as the ring, as wide as the name needs (at most a little wider than the ring)
+        const float cap_h = 2.0f * ring.r - 1.0f, cap_w = std::clamp(text_w + 5.0f, cap_h, 2.0f * ring.r + 6.0f);
+        const float bx0 = ring.cx + 0.5f - cap_w * 0.5f, by0 = ring.cy + 0.5f - cap_h * 0.5f;
+        const float rr = 2.5f, line = 1.1f;
+        for (int y = static_cast<int>(by0 * sc) - 1; y <= static_cast<int>((by0 + cap_h) * sc) + 1; ++y)
+            for (int x = static_cast<int>(bx0 * sc) - 1; x <= static_cast<int>((bx0 + cap_w) * sc) + 1; ++x) {
+                const float px = (x + 0.5f) / sc, py = (y + 0.5f) / sc;
+                const float qx = std::fabs(px - (bx0 + cap_w * 0.5f)) - (cap_w * 0.5f - rr), qy = std::fabs(py - (by0 + cap_h * 0.5f)) - (cap_h * 0.5f - rr);
+                const float out = std::hypot(std::max(qx, 0.f), std::max(qy, 0.f)) + std::min(std::max(qx, qy), 0.f) - rr;
+                blend(x, y, std::clamp(line * 0.5f + 0.5f / sc - std::fabs(out + line * 0.5f), 0.f, 1.f) * sc, 235);
+            }
+        const float squeeze = std::min(1.0f, (cap_w - 4.0f) / std::max(text_w, 1.0f));   // a long name is made narrower to fit
+        float pen = bx0 + (cap_w - text_w * squeeze) * 0.5f;
+        const float top = ring.cy + 0.5f - lh * 0.5f;
+        for (const G &g : glyphs) {
+            const float kx = k * squeeze;
+            const int tw = static_cast<int>(std::ceil(g.sw * kx * sc)), th = static_cast<int>(std::ceil(15 * k * sc));
+            const int ox = static_cast<int>(std::lround(pen * sc)), oy = static_cast<int>(std::lround(top * sc));
+            for (int ty = 0; ty < th; ++ty)
+                for (int tx = 0; tx < tw; ++tx) {
+                    const float sx0 = tx / (kx * sc), sx1 = (tx + 1) / (kx * sc), sy0 = ty / (k * sc), sy1 = (ty + 1) / (k * sc);
+                    float sum = 0, area = 0;
+                    for (int sy = static_cast<int>(sy0); sy < static_cast<int>(std::ceil(sy1)); ++sy)
+                        for (int sx = static_cast<int>(sx0); sx < static_cast<int>(std::ceil(sx1)); ++sx) {
+                            if (sx >= g.sw || sy >= 15) continue;
+                            sum += cover(g.sx + sx, g.sy + sy);
+                            area += 1;
+                        }
+                    if (area > 0) blend(ox + tx, oy + ty, sum / area / 255.f * 1.25f, 245);
+                }
+            pen += (g.sw * k + 1.0f) * squeeze;
+        }
+    }
+}
+
 std::unordered_map<std::uint64_t, TexIndexEntry> g_tex_index;
 std::vector<std::uint64_t> g_tracked_tex_keys;
 std::uint64_t g_dbp_tex_key[16384] = {};
@@ -1829,6 +1969,7 @@ void load_tex_index_file(const std::filesystem::path &tsv_path) {
 
 void init_tex_overrides() {
     parse_prompt_env();
+    parse_prompt_pictures();
     g_tex_index.clear();
     g_tracked_tex_keys.clear();
     g_override_used = 0;
@@ -1975,7 +2116,9 @@ std::uint32_t resolve_tex_override(const std::uint32_t *w, std::uint32_t base_w,
         }
     }
     const bool prompts = key == g_prompt_key && g_prompt_cells_set;
-    if (prompts && e.prompt_gen != g_prompt_gen.load()) e.dirty = true;   // the player changed a key: the font is made again
+    const auto ring_list = g_prompt_pictures.find(key);
+    const bool rings = ring_list != g_prompt_pictures.end();
+    if ((prompts || rings) && e.prompt_gen != g_prompt_gen.load()) e.dirty = true;   // the player changed a key: the picture is made again
     if (!e.dirty && e.cached_dec != 0xFFFFFFFFu) return e.cached_dec;
 
     std::uint32_t png_w = 0, png_h = 0;
@@ -1988,6 +2131,10 @@ std::uint32_t resolve_tex_override(const std::uint32_t *w, std::uint32_t base_w,
     if (prompts && (png_w == base_w || png_w == base_w * 2) && png_h * base_w == base_h * png_w) {
         e.prompt_gen = g_prompt_gen.load();
         draw_prompt_caps(words, png_w, png_h, static_cast<int>(png_w / base_w));
+    }
+    if (rings && (png_w == base_w || png_w == base_w * 2) && png_h * base_w == base_h * png_w) {
+        e.prompt_gen = g_prompt_gen.load();
+        draw_ring_caps(words, png_w, png_h, static_cast<int>(png_w / base_w), ring_list->second);
     }
     std::uint32_t hd_shift = 0;
     if (png_w == base_w * 2 && png_h == base_h * 2) hd_shift = 1;

@@ -162,6 +162,8 @@
   while the first-person camera is active) and PS2_DEBUG_INFO (Settings > Game > Where am I).
 - **0037-hero-debug-camera-defaults** (rawdanger-recomp v0.9.2): PS2_DEBUG_HERO (Heal and warm / Keep healthy and warm in
   Settings > Game); the camera calls default to Raw Danger's settings, so a build never stops for a missing one.
+- **0038-menu-button-pictures** (rawdanger-recomp v0.9.3): PS2_PROMPT_PICTURES: key caps over the ringed button symbols in the
+  menus' own pictures (found by tools/rd_prompts.py), in the game's letters.
 
 ## Goals of the fork
 
