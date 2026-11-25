@@ -61,7 +61,7 @@ def main():
     print(f"{n} letters, {len(out)} bytes")
 
 
-if __name__ == "__main__" and (len(sys.argv) < 2 or sys.argv[1] != "psd"):
+if __name__ == "__main__" and (len(sys.argv) < 2 or sys.argv[1] not in ("psd", "png")):
     main()
 
 
@@ -211,6 +211,48 @@ def psd(title_dat, style, out_path, version="0.8.7"):
         out.write(f)
     print("written", out_path, CW * S, "x", CH * S)
 
+
+# python tools/rd_title_art_source.py png <edited.psd> <tools/title_art_us.png | title_art_jp.png>
+# The words as Photoshop drew them (its merged picture, layer effects included: bevel, stroke, shadow), cut out around the
+# "Words" group: the guide, the in-game reference and the build number are left out whether they were hidden or not.
+def png(psd_path, out_path, margin=40):
+    import numpy as np
+    from psd_tools import PSDImage
+    p = PSDImage.open(psd_path)
+    size = p.size
+    merged = p.topil()
+    if merged is None:
+        merged = p.composite(force=True)   # (no merged picture saved: layer effects are not drawn then)
+        print("no merged picture in the PSD (save it with Maximize compatibility): layer effects are left out")
+    merged = np.asarray(merged.convert("RGBA")).copy()
+
+    def content(layer):
+        a = np.asarray(layer.composite(viewport=(0, 0) + size, force=True).convert("RGBA"))[..., 3]
+        ys, xs = np.nonzero(a > 8)
+        return (xs.min(), ys.min(), xs.max(), ys.max()) if len(xs) else None
+
+    groups = {l.name.rstrip("\0"): l for l in p}
+    words = next((l for n, l in groups.items() if n == "Words"), None)
+    if words is None:
+        sys.exit("no 'Words' group in " + psd_path)
+    box = content(words)
+    keep = np.zeros(merged.shape[:2], bool)
+    x0, y0, x1, y1 = box
+    keep[max(0, y0 - margin):y1 + margin + 1, max(0, x0 - margin):x1 + margin + 1] = True
+    for n, l in groups.items():   # the build number and the guide pictures stay out
+        if n.startswith("Build number"):
+            b = content(l)
+            if b: keep[max(0, b[1] - margin // 2):b[3] + margin // 2 + 1, max(0, b[0] - margin // 2):b[2] + margin // 2 + 1] = False
+        elif n.startswith("Guide") or n.startswith("In the game"):
+            a = np.asarray(l.composite(viewport=(0, 0) + size, force=True).convert("RGBA"))[..., 3]
+            keep &= a < 8
+    merged[~keep] = 0
+    Image.fromarray(merged, "RGBA").save(out_path)
+    print("written", out_path, "words at", box)
+
+
+if __name__ == "__main__" and len(sys.argv) > 1 and sys.argv[1] == "png":
+    png(sys.argv[2], sys.argv[3])
 
 if __name__ == "__main__" and len(sys.argv) > 1 and sys.argv[1] == "psd":
     psd(sys.argv[2], sys.argv[3], sys.argv[4], *(sys.argv[5:6]))

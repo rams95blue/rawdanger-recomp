@@ -17,8 +17,9 @@ tools...** lists them with their links and where they are found (docs/BUILD_TOOL
   Japanese voices from the JP disc; offered once all four discs are found). It starts as the US release (English voices, US
   pictures, logo and film); its title screen reads ENHANCED EDITION with the build number by the logo, in the US logo's yellow
   or the Japanese logo's white. To redraw those words: `python tools/rd_title_art_source.py psd <TITLE.DAT> us|jp out.psd`
-  makes a layered PSD at 8 times the size; export the words as `tools/title_art_us.png` / `title_art_jp.png` (2720 x 944,
-  the guide and the build number hidden) and build again.
+  makes a layered PSD at 8 times the size; after editing it, `python tools/rd_title_art_source.py png edited.psd
+  tools/title_art_us.png` (or `title_art_jp.png`) cuts the words out of Photoshop's own picture (layer effects included),
+  and the next build uses them. The PSDs of the current words are in `launcher\art\rawdanger-title-art`.
 - **Recomp options**: every patch as an option, in the launcher and in the game (F1 -> Recomp options, or F3). They
   switch while you play: widescreen, intro logos, the PS2 post-processing filter, and in the Enhanced Edition **Japanese / English
   voices**, **Japanese faces and hair** and **Japanese signs** (the 151 textures the US release redrew, from the JP disc).

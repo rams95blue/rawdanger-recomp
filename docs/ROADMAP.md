@@ -119,7 +119,8 @@ ROOT.FAT); if it does, they are candidates for the Enhanced Edition.
 | v0.8.5 changes | ✅ | Post processing: all 36 maps checked; every version of the game's colour filter (including an eight-step one) now goes through the one-pass GPU path. Camera: the follow camera tilts about 25 degrees up and 30 down (the game: 8 and 13), and the rain on the lens gets up to four times heavier when looking up. Frame rate: the game's logic steps a fixed 20 times a second, so a higher frame rate is done by drawing in-between frames (native renderer, phase 3). Native renderer started: plan and VU1 program counts (docs/NATIVE_RENDERER.md). Engine patch 0031 |
 | v0.8.6 changes | ✅ | Launcher: two tabs, MODERN (the Enhanced Edition, recommended) and LEGACY (one disc as it is); build speed Light / Balanced / Full; Build tools... lists the nine tools with their links and finds copies saved on the PC (docs/BUILD_TOOLS.md). Regional options start as the US release (English voices included). Title screen: ENHANCED EDITION and the build number under the logo, in its own yellow and red. Camera: free tilt (the game's look-up stop moved, the mouse's range widened) and a field of view setting (80-150 %). The debug menu answers Cross (Shift+F7). Every other file that differs between the US and Japanese discs listed, with what can become a toggle (docs/VERSION_DIFFERENCES.md). The data each VU1 program is given (docs/NATIVE_RENDERER.md). Engine patch 0032 |
 | v0.8.7 changes | ✅ | Options list: the PC rows were gone (rd_options.py stopped when its words did not fit: now only live options, and never all or nothing); Field of view and FXAA words added. Ambient occlusion much stronger (it hardly showed). The debug menu (Shift+F7, US and Japanese builds) drawn in the PC font. Title words in the Japanese logo's look (white, over it) when the Japanese logo is on; a layered PSD (8 times the size) to refine them, read back from tools/title_art_us.png / title_art_jp.png. Engine patch 0033 |
-| **Pending (v0.8.7)** | ⏳ | See the list below |
+| v0.8.8 changes | ✅ | The title words redrawn by hand (v2 PSDs): ENHANCED EDITION with a bevel under the US logo, 強化版 over the Japanese one (tools/title_art_us.png, title_art_jp.png, cut from the PSDs with `rd_title_art_source.py png`); the build number sits on the words' line and leans with them |
+| **Pending (v0.8.8)** | ⏳ | See the list below |
 | Still open after v0.7.4 | ✅ | All three done: direct mouse look (v0.7.9), the debug menus' text (v0.7.8), saves without the memory card (v0.7.8) |
 | Keyboard prompts | ✅ | v0.7.1: key caps with the player's keys in the game's own font (see *PC keys in the game's texts*) |
 | In-game menu for Raw Danger | ✅ | Engine patch 0005: Resume, Quick save/load, Game options (F3), Graphics page (look, resolution, text filter, full screen, widescreen, pause in the background), Achievements (F4), Key card, Change keys, **Quit to desktop**, hazard-tape look with the game's name. Next: options inside the game's own Options screen (see below) |
@@ -136,7 +137,7 @@ Code patches go into `patches\pnach\SLUS-21501_2905C5C6.pnach` as named sections
 compiled in at build time (the native engine ignores runtime writes to code). Each one is verified on a headless build
 of the same engine: boot or a save state, frames captured every N frames, compared with the unpatched build.
 
-## Pending (as of v0.8.7)
+## Pending (as of v0.8.8)
 
 Asked for and not done yet, roughly by size:
 

@@ -373,8 +373,10 @@ def title_words(dat, version, art_path):
         print("  the title words from tools/title_art_" + style + ".png")
         if not build:
             return bytes(out)
-        bottom = max(cy for _, cy in cells) if cells else base - TITLE_ART_AT[1]
-        parts, x, base, lean = [build], TITLE_ART_AT[0] + x_max + shift + 6, TITLE_ART_AT[1] + bottom + 1, 0
+        # the number sits on the words' line where they end (their last 12 columns: the US words lean, so their right end is
+        # higher than their left), and leans with them
+        bottom = max((cy for cx, cy in cells if cx >= x_max - 12), default=base - TITLE_ART_AT[1])
+        parts, x, base = [build], TITLE_ART_AT[0] + x_max + shift + 6, TITLE_ART_AT[1] + bottom + 1 - rim_w   # (on the letters, not their rim)
         start_x = x
     else:
         words = line("ENHANCED EDITION", 0)
