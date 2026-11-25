@@ -263,6 +263,7 @@ def load_title_art(path):
 # background): the title picture's corner from x 300, y 330 to its edge (340 x 118) at 8 times the size, 2720 x 944. The PSD that
 # tools/rd_title_art_source.py makes has that canvas, with the logo as a guide layer. The build number is still drawn here.
 TITLE_ART_AT, TITLE_ART_SCALE = (300, 330), 8
+JP_WORDS_LEFT = 383   # the Japanese words' left end (the logo starts at 381; the US menu's boxes at 507)
 
 
 def read_rgba_png(path):
@@ -367,6 +368,11 @@ def title_words(dat, version, art_path):
                     x_max = max(x_max, cx)
         room = (W - 3) - (TITLE_ART_AT[0] + x_max) - (len(build[0]) + 6 if build else 0)
         shift = min(0, room)   # moved left when the build number would not fit after it
+        if style == "jp":
+            # v0.9.1: over the Japanese logo the US program's title menu (its boxes from x 507, OPTION at y 336-347) covered the
+            # words' right end; they start where the logo starts (x 381) instead, and end before the menu
+            x_min = min(cx for cx, cy in cells)
+            shift = JP_WORDS_LEFT - (TITLE_ART_AT[0] + x_min)
         for (cx, cy), idx in cells.items():
             X, Y = TITLE_ART_AT[0] + cx + shift, TITLE_ART_AT[1] + cy
             if 0 <= X < W and 0 <= Y < H: out[pix + Y * W + X] = idx

@@ -29,6 +29,11 @@ program's; the Japanese one has the same code elsewhere.
   point, 1.5 over the hero's feet), +0x260 to +0x2A0 the camera at the last mode switch, +0x450 the zoom factor (the field of
   view: the screen distance is 768 times it), +0x448 non-zero while the game animates a zoom.
 
+## The first-person view (mode 1)
+
+Triangle switches to mode 1 (block 0x5FDC60) while held; it looks round with the LEFT stick (right turns right, up looks up),
+not the right one. The mouse pushes the left stick there (PS2_MOUSE_LOOK_FIRST="48F4E0=5FDC60", v0.9.1).
+
 ## What the PC version adds
 
 - Orbit camera (v0.9.0, `[Orbit camera]`, engine host call 200 at 0x177270, `PS2_CAMERA_ORBIT`): the step turns the camera round

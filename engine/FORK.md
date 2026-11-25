@@ -158,6 +158,8 @@
   hero through the follow camera's own words; keys.ini camera_orbit) and PS2_FREE_CAMERA (host call 201 runs the active camera,
   leaving a fixed camera for the follow one while playing and with no cutscene bars; keys.ini free_camera, off); gs
   ms_since_cinema_bars().
+- **0036-first-person-mouse-where-am-i** (rawdanger-recomp v0.9.1): PS2_MOUSE_LOOK_FIRST (the mouse pushes the left stick
+  while the first-person camera is active) and PS2_DEBUG_INFO (Settings > Game > Where am I).
 
 ## Goals of the fork
 

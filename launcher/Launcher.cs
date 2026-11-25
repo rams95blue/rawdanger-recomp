@@ -28,7 +28,7 @@ namespace RawDangerLauncher
 {
     public static class Program
     {
-        public const string Version = "0.9.0";
+        public const string Version = "0.9.1";
         public const string AppName = "Raw Danger PC";
         public static bool Restart;
 
@@ -581,6 +581,8 @@ namespace RawDangerLauncher
                     psi.EnvironmentVariables["PS2_MOUSE_LOOK_YAW"] = "0x5FDBAC,0.001565,59.1";
                     psi.EnvironmentVariables["PS2_MOUSE_LOOK_PITCH"] = "0x5FDB88,0.00358,59,-9,12";   // v0.8.6: -9 (about 55 degrees up, with [Free camera tilt]) to 12 (about 65 down); the game: -3.6 to 1.2
                     psi.EnvironmentVariables["PS2_MOUSE_LOOK_WHEN"] = "0x48F488=21";
+                    psi.EnvironmentVariables["PS2_DEBUG_INFO"] = "48F488,48F4E0,3EC,310,48F3E4";   // v0.9.1: Settings > Game > Where am I: the scene, the camera block's mode and follow point, the player's character
+                    psi.EnvironmentVariables["PS2_MOUSE_LOOK_FIRST"] = "48F4E0=5FDC60";   // v0.9.1: in the first-person view (Triangle; the active camera block is mode 1's) the mouse pushes the left stick, which looks round there
                     // (v0.8.1 made texture switches wait for the next area load; v0.8.3 found the real cause of the garbled
                     // characters, the Japanese pictures' headers, and they switch at once again: no PS2_AREA_LOAD)
                     // the mouse turns the camera itself (the pnach section [Direct mouse look], built in since v0.7.9: the camera adds

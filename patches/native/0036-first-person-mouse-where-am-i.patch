@@ -1,0 +1,150 @@
+From fdee985bc1076a06eecd482d0cfc2bad8346f782 Mon Sep 17 00:00:00 2001
+From: rawdanger-recomp <rawdanger-recomp@users.noreply.github.com>
+Date: Wed, 25 Nov 2026 14:34:16 +0000
+Subject: [PATCH] rawdanger-recomp v0.9.1: first-person mouse, Where am I
+
+PS2_MOUSE_LOOK_FIRST=WORD=VALUE: while it holds (Raw Danger: the first-person
+camera block is active) the mouse pushes the left stick, which looks round there,
+as far as it moved, spread over a few frames.
+
+PS2_DEBUG_INFO: a Settings > Game line showing the scene, the camera mode, the
+player's character and the follow point (also logged as [where]).
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01QNLFPekqhcU2dj7B3Utmea
+---
+ host/window.cpp | 76 +++++++++++++++++++++++++++++++++++++++++++++++--
+ 1 file changed, 74 insertions(+), 2 deletions(-)
+
+diff --git a/host/window.cpp b/host/window.cpp
+index e14b72b..c3bae2f 100644
+--- a/host/window.cpp
++++ b/host/window.cpp
+@@ -243,7 +243,38 @@ std::vector<std::size_t> g_recomp_row_section;  // the Game options page's lines
+ // before release, and of its values only line 5 (R2 LAND PATH) is still read. The launcher offers both ("0x48F48C;40;41").
+ // Opened from Settings > Game (lines at the end), F7 (map select) or Shift+F7 (the debug menu).
+ // In the map select: up / down the line, left / right the value, Cross loads the map at that gate.
+-constexpr std::size_t kDebugRow = static_cast<std::size_t>(-2), kMapSelRow = static_cast<std::size_t>(-3);
++constexpr std::size_t kDebugRow = static_cast<std::size_t>(-2), kMapSelRow = static_cast<std::size_t>(-3), kInfoRow = static_cast<std::size_t>(-4);
++// rawdanger-recomp (v0.9.1): "Where am I" for reports: PS2_DEBUG_INFO="SCENE,CAMERA,MODE,PIVOT,PLAYER" (hex: the scene word, the
++// word with the active camera block, the mode's and the follow point's offsets in it, the word with the player's character)
++struct DebugInfo {
++    bool set = false;
++    std::uint32_t scene = 0, camera = 0, mode = 0, pivot = 0, player = 0;
++};
++const DebugInfo &debug_info() {
++    static const DebugInfo d = [] {
++        DebugInfo r;
++        const char *v = std::getenv("PS2_DEBUG_INFO");
++        unsigned long s = 0, c = 0, m = 0, p = 0, pl = 0;
++        if (v && *v && std::sscanf(v, "%lx,%lx,%lx,%lx,%lx", &s, &c, &m, &p, &pl) == 5)
++            r = {true, static_cast<std::uint32_t>(s), static_cast<std::uint32_t>(c), static_cast<std::uint32_t>(m), static_cast<std::uint32_t>(p), static_cast<std::uint32_t>(pl)};
++        return r;
++    }();
++    return d;
++}
++std::string debug_info_text() {
++    const DebugInfo &d = debug_info();
++    const std::uint32_t cam = ps2::ld32(d.camera);
++    char text[200];
++    if (cam < 0x100000u || cam >= 0x2000000u) {
++        std::snprintf(text, sizeof text, "Scene %u, no camera yet, frame %llu", ps2::ld32(d.scene), static_cast<unsigned long long>(ps2::frame_count()));
++        return text;
++    }
++    float at[3];
++    for (int k = 0; k < 3; ++k) { const std::uint32_t w = ps2::ld32(cam + d.pivot + 4u * k); std::memcpy(&at[k], &w, 4); }
++    std::snprintf(text, sizeof text, "Scene %u, camera mode %u, character %u, at %.1f %.1f %.1f, frame %llu", ps2::ld32(d.scene), ps2::ld32(cam + d.mode),
++                  ps2::ld32(d.player), at[0], at[1], at[2], static_cast<unsigned long long>(ps2::frame_count()));
++    return text;
++}
+ struct DebugScenes { std::uint32_t address = 0, debug = 0, mapsel = 0, from = 0; bool set = false; };
+ // the debug menu (DEBSEL) on screen, and the line its cursor is on: followed here from the pad (the game moves it one line per
+ // new press of up or down, from 0 to 2 without wrapping: 0x188088-0x1880C0), as its own cursor is in a block made at run time
+@@ -302,6 +333,13 @@ struct LookDirect {
+     std::uint64_t since = 0;   // the console frame (vblank) when the word was last seen read; unread time counts frames, not
+                                // passes of the window (which come 2 to 3 times a frame at 144 Hz, or many while the game hitches)
+ } g_look_direct;
++// rawdanger-recomp (v0.9.1): the first-person view (Triangle) looks round with the LEFT stick, and its turn is not the follow
++// camera's: PS2_MOUSE_LOOK_FIRST="WORD=VALUE" (Raw Danger: the active camera block 0x48F4E0 is the first-person one, 0x5FDC60)
++// makes the mouse push the left stick while it holds, as far as the mouse moved, spread over a few frames
++struct LookFirst {
++    bool set = false;
++    std::uint32_t word = 0, value = 0;
++} g_look_first;
+ std::uint32_t g_look_when_address = 0, g_look_when_value = 0;
+ bool g_look_parsed = false, g_look_when_set = false;
+ double g_look_dx = 0, g_look_dy = 0;
+@@ -1002,6 +1040,10 @@ void parse_mouse_look() {
+             g_look_direct.value = static_cast<std::uint32_t>(v), g_look_direct.set = true;
+         }
+     }
++    if (const char *fp = std::getenv("PS2_MOUSE_LOOK_FIRST"); fp && *fp) {
++        unsigned long w = 0, v = 0;
++        if (std::sscanf(fp, "%lx=%lx", &w, &v) == 2) g_look_first = {true, static_cast<std::uint32_t>(w), static_cast<std::uint32_t>(v)};
++    }
+     if (const char *st = std::getenv("PS2_MOUSE_LOOK_STEP"); st && *st) g_look_step = std::clamp(std::atoi(st), 1, 6);
+     if (const char *w = std::getenv("PS2_MOUSE_LOOK_WHEN"); w && *w) {
+         unsigned long a = 0, v = 0;
+@@ -1207,6 +1249,21 @@ void read_keyboard(std::uint16_t &pressed, std::uint8_t &lx, std::uint8_t &ly, s
+             const int step = g_look_step;
+             // the turn straight into the camera when the build has the code for it (the stick's way round: right on the stick, 255,
+             // makes the game's turn smaller), else as a push of the stick
++            static double first_x = 0, first_y = 0;
++            if (g_look_first.set && ps2::ld32(g_look_first.word) == g_look_first.value) {
++                // right on the left stick turns the view right, up looks up: the mouse the same way (dx and dy are the stick's way
++                // round already, so their sign flips)
++                first_x = std::clamp(first_x - dx * 8.0 * speed, -1200.0, 1200.0);
++                first_y = std::clamp(first_y - dy * 8.0 * speed, -1200.0, 1200.0);
++                const double ox = std::clamp(first_x, -127.0, 127.0), oy = std::clamp(first_y, -127.0, 127.0);
++                first_x -= ox * 0.35, first_y -= oy * 0.35;
++                if (std::fabs(first_x) < 0.5) first_x = 0;
++                if (std::fabs(first_y) < 0.5) first_y = 0;
++                if (lx == 0x80) lx = static_cast<std::uint8_t>(std::lround(128.0 + ox));
++                if (ly == 0x80) ly = static_cast<std::uint8_t>(std::lround(128.0 + oy));
++                return;
++            }
++            first_x = first_y = 0;
+             const bool direct = look_direct(-dx * 0.0022 * speed);
+             const std::uint8_t sx = direct ? 0x80 : look_axis(g_look_yaw, dx, 0.0022 * speed, frame_in_step, step);
+             // the orbit camera (v0.9.0) takes the mouse's up / down as a turn round the hero: up looks up (the camera goes down)
+@@ -1481,6 +1538,14 @@ void menu_paint(bool show_again) {
+                 row.state = sec.on ? "<  on  >" : "<  off >";
+                 v.recomp_rows.push_back(row);
+             }
++            if (debug_info().set) {
++                g_recomp_row_section.push_back(kInfoRow);
++                quickmenu::Values::RecompRow row;
++                row.label = "Where am I (scene, camera, place: for reports)";
++                row.live = true;
++                row.state = "show";
++                v.recomp_rows.push_back(row);
++            }
+             if (debug_scenes().set) {
+                 for (const std::size_t kind : {kDebugRow, kMapSelRow}) {
+                     if ((kind == kMapSelRow && !debug_scenes().mapsel) || (kind == kDebugRow && !debug_scenes().debug)) continue;
+@@ -2476,6 +2541,12 @@ void menu_command(quickmenu::Command c, int step) {
+     case Command::recomp_toggle: {
+         const bool wide = ps2::g_options.widescreen;
+         const std::size_t row = static_cast<std::size_t>(g_menu.recomp_row());
++        if (row < g_recomp_row_section.size() && g_recomp_row_section[row] == kInfoRow) {
++            const std::string info = debug_info_text();
++            std::fprintf(stderr, "[where] %s\n", info.c_str());
++            g_recomp_note = info;
++            break;
++        }
+         if (row < g_recomp_row_section.size() && (g_recomp_row_section[row] == kDebugRow || g_recomp_row_section[row] == kMapSelRow)) {
+             open_debug_scene(g_recomp_row_section[row] == kMapSelRow);
+             return;
+@@ -2629,7 +2700,8 @@ bool menu_event(const SDL_Event &e) {
+         const quickmenu::Command c = g_menu.side();
+         // the developers' menus are opened with Enter only (left / right on their lines does nothing)
+         const std::size_t row = static_cast<std::size_t>(g_menu.recomp_row());
+-        if (c == Command::recomp_toggle && row < g_recomp_row_section.size() && (g_recomp_row_section[row] == kDebugRow || g_recomp_row_section[row] == kMapSelRow)) return;
++        if (c == Command::recomp_toggle && row < g_recomp_row_section.size() &&
++            (g_recomp_row_section[row] == kDebugRow || g_recomp_row_section[row] == kMapSelRow || g_recomp_row_section[row] == kInfoRow)) return;
+         menu_command(c, step);
+     };
+     const auto move = [](int step) {
+-- 
+2.43.0
+

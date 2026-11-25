@@ -122,7 +122,8 @@ ROOT.FAT); if it does, they are candidates for the Enhanced Edition.
 | v0.8.8 changes | ✅ | The title words redrawn by hand (v2 PSDs): ENHANCED EDITION with a bevel under the US logo, 強化版 over the Japanese one (tools/title_art_us.png, title_art_jp.png, cut from the PSDs with `rd_title_art_source.py png`); the build number sits on the words' line and leans with them |
 | v0.8.9 changes | ✅ | The memory-card check at start goes on by itself again: Cross is now tapped in the game's own frames by the runtime (ps2::latch_pads), not by the window's clock, so it no longer depends on the window having the keyboard; with an empty saves folder the card has no system data and the game waits on "Starting the game without using System data" every start. Ambient occlusion measured in metres (depth ≈ 131072 / distance): no dark outlines round far buildings, no smears near the camera, faded out past 20-45 m, at most 16 pixels round, softer (GRAPHICS.md). Switching the regional textures while playing decodes every picture again (the striped NPC face). F7 alone opens the map select; the DEBSEL menu (Shift+F7) is gone, it only led there (DEBUG.md) |
 | v0.9.0 changes | ✅ | Orbit camera: up / down on the right stick or the mouse now circles the hero at the same distance (from just over the floor to 75 degrees over him), through the follow camera's own height and distance words (engine host call at 0x177270; Settings > Controls > Camera up/down: ORBIT or PS2). Fixed cameras OFF (off by default): the places with a fixed camera keep the follow camera while you play; the cutscenes keep their shots (host call at 0x17C9B0; docs/CAMERA.md). The camera's code mapped (docs/CAMERA.md) |
-| **Pending (v0.9.0)** | ⏳ | See the list below |
+| v0.9.1 changes | ✅ | First-person view (Triangle): it looks round with the left stick, so the mouse now pushes that stick there (it turned nothing before). Japanese title: the US program's menu boxes covered the right end of 強化版 and the build number; the words now start where the logo starts. Settings > Game > Where am I: the scene, the camera mode, the character and the place, for reports |
+| **Pending (v0.9.1)** | ⏳ | See the list below |
 | Still open after v0.7.4 | ✅ | All three done: direct mouse look (v0.7.9), the debug menus' text (v0.7.8), saves without the memory card (v0.7.8) |
 | Keyboard prompts | ✅ | v0.7.1: key caps with the player's keys in the game's own font (see *PC keys in the game's texts*) |
 | In-game menu for Raw Danger | ✅ | Engine patch 0005: Resume, Quick save/load, Game options (F3), Graphics page (look, resolution, text filter, full screen, widescreen, pause in the background), Achievements (F4), Key card, Change keys, **Quit to desktop**, hazard-tape look with the game's name. Next: options inside the game's own Options screen (see below) |
@@ -139,13 +140,13 @@ Code patches go into `patches\pnach\SLUS-21501_2905C5C6.pnach` as named sections
 compiled in at build time (the native engine ignores runtime writes to code). Each one is verified on a headless build
 of the same engine: boot or a save state, frames captured every N frames, compared with the unpatched build.
 
-## Pending (as of v0.9.0)
+## Pending (as of v0.9.1)
 
 Asked for and not done yet, roughly by size:
 
 1. ~~Orbit camera~~: done in v0.9.0. **Fixed cameras OFF** is in too but has not been tried in a place with a fixed camera while playing (the saved states have none): a report from such a place (F9) would confirm it.
-2. **First-person mouse**: Triangle (right mouse button) is the first-person view; the mouse there is not confirmed yet.
-3. **Japanese title**: a few stray pixels on the copyright line.
+2. ~~First-person mouse~~: done in v0.9.1 (the view turns with the left stick; checked with the stick, the mouse itself only in a slow test window).
+3. **Japanese title**: the menu over the words is fixed (v0.9.1). Still open: one or two tiny specks that drift down past the copyright lines, only with the Japanese logo picture and not the lens rain (they are not in the picture itself: something the US program draws picks them from the Japanese one).
 4. **Japanese text** for the menus and subtitles (an option, like the voices).
 5. **Menus' button pictures for keyboard and mouse** (the Options header, the item menu and the other screens draw the controller's buttons as pictures; the texts already switch).
 6. **The hero's voice switching at once** (his lines are in sound banks loaded per area; the other characters' switch at once).
@@ -162,7 +163,7 @@ Asked for and not done yet, roughly by size:
 16. **The title words at a higher resolution in the game** (the title picture is 640 x 448; a sharper copy needs a texture
     override of it).
 17. **The hero's head follows the camera** (natural head motion). Found so far: the camera follows a node of the game's scene graph (camera block +0x144 points at it; nodes of 0xF0 bytes with a world matrix at +0x10 and a local place at +0x80, the follow point 1.5 above the hero's root). The head turn needs the hero's head bone and a hook after the animation sets its rotation, before the world matrices are made: a code change, not a memory write.
-18. **Debug menu of our own** (one native panel on F7): the disc keeps only the names of the developers' 37-line menu (DEBUG.md); the useful lines would be written anew: no death or damage, dry the player, add item, restart at the last gate, fog and depth of field off, a sound test, an info line.
+18. **Debug menu of our own**: v0.9.1 has its first line, Settings > Game > Where am I. The others need the game's own words found first: 0x48F3E4, thought to be the hero's wetness, is the player's character (0 Joshua, 1 the other one), so "dry the player" still needs the real word; no death, add item and restart at the last gate likewise.
 19. **Striped NPC face after switching the textures**: v0.8.9 makes every picture again at the switch; if it still shows, an F9 report at that moment (which map, which person) would say which picture it is.
 20. **Engine pipeline** (see "Engine pipeline" below).
 

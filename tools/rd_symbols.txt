@@ -17,3 +17,5 @@
 0x0048F4E0	camera_block	word: the active camera block
 0x003A8380	scene_table	42 scenes, 24 bytes each
 0x003BC810	debug_menu_names	37 names of the stripped developers' menu
+0x0048F3E4	player_character	word: 0 Joshua, 1 the other hero (set at 0x1669D4)
+0x005FDC60	camera_block_1	the first-person view's camera block (Triangle; the left stick looks)
