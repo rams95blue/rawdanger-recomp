@@ -185,7 +185,7 @@ public:
     static void draw_debug_menu(int window_width, int window_height, int cursor, Picture &out);
     // rawdanger-recomp: the player's keys at the left of the screen while playing (F10); note: a line under it, may be empty
     static void draw_keys_on_screen(int window_width, int window_height, const std::vector<std::pair<std::string, std::string>> &rows,
-                                    const std::string &note, Picture &out);
+                                    const std::string &note, Picture &out, const std::string &title = "KEYS   (F10 hides)");
     // rawdanger-recomp: the achievement pop-up - its picture (straight RGBA, red in the low byte; may be empty) beside two lines
     static void draw_toast(int window_width, int window_height, const std::string &header, const std::string &title,
                            const std::vector<std::uint32_t> &icon, int icon_width, int icon_height, Picture &out);

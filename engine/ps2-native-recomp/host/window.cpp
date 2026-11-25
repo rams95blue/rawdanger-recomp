@@ -247,7 +247,8 @@ constexpr std::size_t kDebugRow = static_cast<std::size_t>(-2), kMapSelRow = sta
                       kHealRow = static_cast<std::size_t>(-5), kKeepRow = static_cast<std::size_t>(-6),
                       // v0.9.5: the Debug tab's test switches
                       kDryRow = static_cast<std::size_t>(-7), kSoakRow = static_cast<std::size_t>(-8), kWetForceRow = static_cast<std::size_t>(-9),
-                      kWetShowRow = static_cast<std::size_t>(-10), kHeadTestRow = static_cast<std::size_t>(-11);
+                      kWetShowRow = static_cast<std::size_t>(-10), kHeadTestRow = static_cast<std::size_t>(-11),
+                      kViewRow = static_cast<std::size_t>(-12), kStatsRow = static_cast<std::size_t>(-13);
 // rawdanger-recomp (v0.9.2): the hero's two bars. PS2_DEBUG_HERO="TABLE,PLAYER,COUNT,NOW1,MOST1,NOW2,MOST2" (hex: the table of the
 // characters' addresses, the word with the player's number, how many the table has, and two pairs of offsets: a value and its
 // most). Raw Danger: 0x5EAC80, 0x48F3E4, 235; health (+0x368 of +0x36C, 100) and body temperature (+0x370 of +0x374, 30000: it
@@ -401,6 +402,9 @@ bool g_look_forced = false;
 
 // The title shows the speed; for a few seconds after F5, F8 or F9 a message is put in front of it.
 std::string g_speed_title = "ps2-native-recomp";
+// rawdanger-recomp (v0.9.6, Settings > Debug): the stats at the left of the picture, once a second
+bool g_stats_on = false;
+std::vector<std::pair<std::string, std::string>> g_stats_rows;
 std::string g_game_title;  // optional PS2_WINDOW_TITLE, supplied by the launcher
 std::string g_notice_text;
 const char *const kStartNotice = "F1 = menu";  // the title for the first 30 s
@@ -1478,7 +1482,7 @@ bool keys_on_screen_now() { return g_keys.keys_on_screen != 0; }
 
 void menu_paint(bool show_again) {
     if (show_again) g_menu_redraw = true;
-    g_overlay_on = g_menu.is_open() || !g_note_text.empty() || g_native_hint || keys_on_screen_now() || g_debug_menu_on.load(std::memory_order_relaxed);
+    g_overlay_on = g_menu.is_open() || !g_note_text.empty() || g_native_hint || keys_on_screen_now() || g_stats_on || g_debug_menu_on.load(std::memory_order_relaxed);
     if (!g_overlay_on) {
 #ifdef PS2_GPU
         if (g_gpu_present) ps2::gs::gpu::set_overlay(nullptr, 0, 0, 0, 0);
@@ -1596,6 +1600,9 @@ void menu_paint(bool show_again) {
             if (g_menu.on_debug_tab()) {
                 v.recomp_rows.clear();
                 g_recomp_row_section.clear();
+                static const char *const kViews[] = {"<  the game's  >", "<  AO alone  >", "<  depth  >", "<  the hero's capsules  >"};
+                debug_row(kViewRow, "Picture shown", kViews[std::clamp(ps2::debug_view(), 0, 3)]);
+                debug_row(kStatsRow, "Stats on screen (FPS, CPU, GPU, scene)", g_stats_on ? "<  on  >" : "<  off >");
                 if (debug_info().set) debug_row(kInfoRow, "Where am I (scene, camera, place, wetness: for reports)", "show");
                 if (debug_hero().set) {
                     debug_row(kHealRow, "Heal, warm and dry the hero", "now");
@@ -1639,6 +1646,8 @@ void menu_paint(bool show_again) {
         quickmenu::Menu::draw_debug_menu(w, h, g_debug_cursor.load(), g_menu_picture);
     } else if (g_toast) {
         quickmenu::Menu::draw_toast(w, h, "ACHIEVEMENT UNLOCKED", g_toast_title, g_toast_icon, g_toast_w, g_toast_h, g_menu_picture);
+    } else if (g_note_text.empty() && g_stats_on) {
+        quickmenu::Menu::draw_keys_on_screen(w, h, g_stats_rows, "", g_menu_picture, "STATS   (Settings > Debug)");   // v0.9.6: the stats in the keys' place
     } else if (g_note_text.empty()) {
         // rawdanger-recomp: the keys at the left (F10); a note or an achievement takes the place for its few seconds
         quickmenu::Menu::draw_keys_on_screen(w, h, keymap::screen_rows(g_keys, g_keys.mouse_look != 0 && g_look_yaw.set), "", g_menu_picture);
@@ -2633,6 +2642,20 @@ void menu_command(quickmenu::Command c, int step) {
             g_recomp_note = g_keep_hero ? "The hero stays healthy and warm (until the game ends or you switch it off)" : "The hero's health and warmth are the game's again";
             break;
         }
+        if (row < g_recomp_row_section.size() && g_recomp_row_section[row] == kViewRow) {
+            static const char *const kViews[] = {"Picture: the game's", "Picture: the ambient occlusion alone (white: none)", "Picture: the depth (near white, far dark)",
+                                                 "Picture: the wet look's capsules in blue"};
+            const int k = (ps2::debug_view() + (step < 0 ? 3 : 1)) % 4;
+            ps2::set_debug_view(k);
+            g_recomp_note = kViews[k];
+            break;
+        }
+        if (row < g_recomp_row_section.size() && g_recomp_row_section[row] == kStatsRow) {
+            g_stats_on = !g_stats_on;
+            g_stats_rows = {{"Stats", "in a second"}};
+            g_recomp_note = g_stats_on ? "Stats on screen, at the left (in place of the keys)" : "Stats off";
+            break;
+        }
         if (row < g_recomp_row_section.size() && g_recomp_row_section[row] == kDryRow) {
             g_recomp_note = ps2::set_hero_wetness(0.0f) ? "The hero's clothes are dry" : "No hero here (only while playing)";
             break;
@@ -3459,6 +3482,23 @@ void show_speed() {
                   (cpu - cpu_start) / seconds * 100.0, (gpu - gpu_start) / (seconds * 10.0), resident_mb(), queued, stretched);
     g_speed_title = title;
     refresh_title();
+    if (g_stats_on) {
+        char a[64], b[64], c[64];
+        std::snprintf(a, sizeof a, "%.1f", static_cast<double>(frames) / seconds);
+        std::snprintf(b, sizeof b, "%.0f %% / %.0f %%", (cpu - cpu_start) / seconds * 100.0, (gpu - gpu_start) / (seconds * 10.0));
+        std::snprintf(c, sizeof c, "%.0f MB, audio %.0f ms", resident_mb(), queued);
+        g_stats_rows = {{"FPS", a}, {"CPU / GPU", b}, {"Memory", c}};
+        if (debug_info().set) {
+            const DebugInfo &d = debug_info();
+            const std::uint32_t cam = ps2::ld32(d.camera);
+            g_stats_rows.push_back({"Scene", std::to_string(ps2::ld32(d.scene)) + (cam >= 0x100000u && cam < 0x2000000u ? ", camera mode " + std::to_string(ps2::ld32(cam + d.mode)) : "")});
+        }
+        if (const float wet = ps2::hero_wetness(); wet >= 0.0f) g_stats_rows.push_back({"Clothes wet", std::to_string(static_cast<int>(wet * 100.0f + 0.5f)) + " %"});
+        static const char *const kViews[] = {"the game's", "AO alone", "depth", "capsules"};
+        g_stats_rows.push_back({"Picture", kViews[std::clamp(ps2::debug_view(), 0, 3)]});
+        g_stats_rows.push_back({"Frame", std::to_string(ps2::frame_count())});
+        menu_paint(true);
+    }
     start = now;
     frames = 0;
     cpu_start = cpu;

@@ -1056,7 +1056,8 @@ std::uint64_t g_scene_xyoffset = 0;              // rawdanger-recomp (wet look):
 std::mutex g_wet_lock;
 float g_wet_amount = 0.0f;
 std::vector<float> g_wet_caps;
-int g_wet_age = 0;   // pictures since they came: the capsules of a hero no longer drawn (another scene, the title) are dropped
+int g_wet_age = 0;
+std::atomic<int> g_debug_view{0};   // v0.9.6 (Settings > Debug): 0 the picture, 1 the AO alone, 2 the depth, 3 the hero's capsules   // pictures since they came: the capsules of a hero no longer drawn (another scene, the title) are dropped
 std::atomic<int> g_ao{[] { const char *v = std::getenv("PS2_AO"); return v ? std::atoi(v) : 0; }()};   // 0 off, 1 light, 2 strong
 
 std::uint32_t entry(std::uint32_t cbp, std::uint32_t i) {   // palette entry i of a 256-entry 32-bit palette stored at cbp (CSM1)
@@ -1188,10 +1189,14 @@ bool step(const State &s, std::uint64_t attr) {
             if (++g_wet_age > 4) wet = 0.0f, caps.clear();
         }
         const int ao = g_ao.load(std::memory_order_relaxed);
+        const int view = g_debug_view.load(std::memory_order_relaxed);
+        if (view == 3 && caps.size() >= 7) wet = -1.0f;
         const bool show = wet < 0.0f;   // debug: the capsules drawn plainly
         const bool wet_on = (wet > 0.01f || show) && caps.size() >= 7;
-        if ((ao > 0 || wet_on) && gpu_on() && g_scene_bp && g_scene_bw >= 8 && g_scene_bw <= 16) {
-            std::uint32_t p[64] = {g_scene_bp, g_scene_bw, g_scene_bw * 64u, 448u, zbp, w.zpsm, ao >= 2 ? 245u : ao > 0 ? 170u : 0u, 80u};   // v0.8.7: radius 80 (38 hardly showed)
+        if ((ao > 0 || wet_on || view > 0) && gpu_on() && g_scene_bp && g_scene_bw >= 8 && g_scene_bw <= 16) {
+            // the AO view shows the strong AO even with AO off
+            std::uint32_t p[64] = {g_scene_bp, g_scene_bw, g_scene_bw * 64u, 448u, zbp, w.zpsm, ao >= 2 || view == 1 ? 245u : ao > 0 ? 170u : 0u, 80u};   // v0.8.7: radius 80 (38 hardly showed)
+            p[63] = static_cast<std::uint32_t>(view == 3 ? 0 : view);
             if (wet_on) {
                 // the capsules in the picture's pixels, a quarter pixel a step, +4096 pixels so a part off the left or the top fits
                 const float ofx = static_cast<float>(g_scene_xyoffset & 0xFFFFu) / 16.0f, ofy = static_cast<float>((g_scene_xyoffset >> 32) & 0xFFFFu) / 16.0f;
@@ -2569,6 +2574,8 @@ void set_wet_look(float amount, const float *capsules, int count) {
     ps2::gs::rdfilter::g_wet_caps.assign(capsules, capsules + 7 * std::max(count, 0));
     ps2::gs::rdfilter::g_wet_age = 0;
 }
+void set_debug_view(int view) { ps2::gs::rdfilter::g_debug_view = std::clamp(view, 0, 3); }
+int debug_view() { return ps2::gs::rdfilter::g_debug_view.load(); }
 void set_ambient_occlusion(int level) { ps2::gs::rdfilter::g_ao.store(std::clamp(level, 0, 2), std::memory_order_relaxed); }
 int ambient_occlusion() { return ps2::gs::rdfilter::g_ao.load(std::memory_order_relaxed); }
 void set_game_filter_pass(int mode) { ps2::gs::rdfilter::g_mode.store(mode ? 1 : 0, std::memory_order_relaxed); }

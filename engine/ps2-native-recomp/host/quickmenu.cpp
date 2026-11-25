@@ -1047,7 +1047,7 @@ void Menu::draw_toast(int window_width, int window_height, const std::string &he
 }
 
 void Menu::draw_keys_on_screen(int window_width, int window_height, const std::vector<std::pair<std::string, std::string>> &rows,
-                               const std::string &note, Picture &out) {
+                               const std::string &note, Picture &out, const std::string &title) {
     // font pixels: a title, then one line per key (the name, then the keys), half see-through so the game shows through
     const int pad = 4, line_h = 10, name_chars = 13;
     std::size_t key_chars = 4;
@@ -1068,7 +1068,7 @@ void Menu::draw_keys_on_screen(int window_width, int window_height, const std::v
     c.fill(0, out.height - frame, out.width, frame, kFrame);
     int y = pad * s;
     const int x = pad * s;
-    c.text(x, y, s, "KEYS   (F10 hides)", kTitle);
+    c.text(x, y, s, title, kTitle);
     y += title_h * s;
     for (const auto &r : rows) {
         c.text(x, y, s, r.first.substr(0, name_chars), kDim);

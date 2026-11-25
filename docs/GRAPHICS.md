@@ -128,3 +128,10 @@ version darkens the hero as the clothes get wet.
 - **What it misses**: a shoe or a raised hand can fall just outside the capsules, and the look has no highlight yet.
 - Settings > Picture > Wet look (keys.ini `wet_look`, on); Settings > Debug: a forced wetness and the capsules drawn in blue.
 
+## Debug views (v0.9.6)
+
+Settings > Debug > Picture shown draws, in place of the 3D picture (before the HUD and the game's colour filter): the ambient
+occlusion alone, to tune or report it; the depth as grey by distance (log scale, 1 m white to 60 m dark, the sky black), to see
+what the AO and the wet look see; or the wet look's capsules in blue. Stats on screen puts FPS, CPU / GPU, memory and the scene
+at the left of the picture.
+

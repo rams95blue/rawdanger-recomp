@@ -172,6 +172,9 @@
   darkens (about 38 %) and saturates at the hero's depth, eased (Settings > Picture > Wet look, keys.ini wet_look, on). Settings
   gets a Debug tab gathering every test switch (Where am I, heal / keep, dry / soak, a forced wetness, the capsules shown, a fixed
   head turn, the developers' menus); heal also dries.
+- **0041-debug-views-stats** (rawdanger-recomp v0.9.6): Settings > Debug > Picture shown (the game's, the AO alone, the depth, the
+  wet look's capsules; drawn by the AO pass, its word 63) and Stats on screen (FPS, CPU / GPU, memory, scene and camera, the
+  clothes' wetness, the view, the frame; in the keys' place, once a second).
 
 ## Goals of the fork
 

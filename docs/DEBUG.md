@@ -80,6 +80,8 @@ else:
 
 | Line | What it does |
 |---|---|
+| Picture shown (v0.9.6) | The game's picture, the ambient occlusion alone, the depth (1 m white, 60 m and the sky black), or the wet look's capsules |
+| Stats on screen (v0.9.6) | FPS, CPU / GPU, memory, scene and camera mode, the clothes' wetness, the view and the frame, at the left, once a second |
 | Where am I | Scene, camera mode, character, place, the clothes' wetness, frame: for reports |
 | Heal, warm and dry the hero | Health, body temperature and the clothes back to full, warm and dry, once |
 | Keep the hero healthy and warm | The same every moment |

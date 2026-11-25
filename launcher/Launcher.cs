@@ -28,7 +28,7 @@ namespace RawDangerLauncher
 {
     public static class Program
     {
-        public const string Version = "0.9.5";
+        public const string Version = "0.9.6";
         public const string AppName = "Raw Danger PC";
         public static bool Restart;
 

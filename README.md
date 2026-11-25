@@ -4,7 +4,7 @@
 
 <p align="center">
   <a href="https://github.com/rams95blue/rawdanger-recomp/releases"><img alt="release" src="https://img.shields.io/github/v/release/rams95blue/rawdanger-recomp?style=flat-square&color=f2c14e&labelColor=0b1324&label=release"></a>
-  <img alt="version" src="https://img.shields.io/badge/build-v0.9.5-96c4ff?style=flat-square&labelColor=0b1324">
+  <img alt="version" src="https://img.shields.io/badge/build-v0.9.6-96c4ff?style=flat-square&labelColor=0b1324">
   <img alt="platform" src="https://img.shields.io/badge/platform-Windows%2010%2F11%20x64-96c4ff?style=flat-square&labelColor=0b1324">
   <img alt="engine" src="https://img.shields.io/badge/engine-ps2--native--recomp%20fork-96c4ff?style=flat-square&labelColor=0b1324">
   <img alt="game data" src="https://img.shields.io/badge/game%20data-not%20included-e05a4f?style=flat-square&labelColor=0b1324">

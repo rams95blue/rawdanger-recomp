@@ -1781,10 +1781,26 @@ fn game_ao(@builtin(global_invocation_id) gid: vec3<u32>) {
     let x = (i / n) % w;
     let y = (i / n) / w;
     let z0 = f32(read_sample(prm(5u), prm(4u), prm(1u), x, y, k));
+    let view = prm(63u);   // v0.9.6 debug views (Settings > Debug): 1 the AO alone, 2 the depth
+    if (view == 2u) {
+        // the distance in metres (131072 / z, docs/GRAPHICS.md) as grey: 1 m white, 60 m and the sky black
+        let metres = select(1000.0, 131072.0 / max(z0, 1.0), z0 >= 64.0);
+        let g = u32(clamp(1.0 - log2(max(metres, 1.0)) / log2(60.0), 0.0, 1.0) * 255.0);
+        store(locate(0u, prm(0u), prm(1u), x, y), k, g | (g << 8u) | (g << 16u) | 0x80000000u);
+        return;
+    }
     if (z0 < 64.0) {
+        if (view == 1u) {
+            store(locate(0u, prm(0u), prm(1u), x, y), k, 0x80FFFFFFu);
+        }
         return;   // nothing drawn (sky, cleared)
     }
     let ao = select(1.0, ao_factor(x, y, w, h, k, z0), prm(6u) > 0u);
+    if (view == 1u) {
+        let g = u32(clamp(ao, 0.0, 1.0) * 255.0);
+        store(locate(0u, prm(0u), prm(1u), x, y), k, g | (g << 8u) | (g << 16u) | 0x80000000u);
+        return;
+    }
     let wet = wet_mask(x, y, k, z0);
     if (ao >= 1.0 && wet <= 0.0) {
         return;

@@ -42,6 +42,10 @@ int ambient_occlusion();
 // rawdanger-recomp: the wet look: how wet the hero is (0 to 1) and the hero's limbs as capsules in GS window coordinates, 7 floats
 // each (x0, y0, x1, y1, radius, nearest depth, farthest depth); darkened in the AO pass (the GPU only)
 void set_wet_look(float amount, const float *capsules, int count);
+// rawdanger-recomp (v0.9.6, Settings > Debug): what the 3D picture shows: 0 itself, 1 the AO alone (white: none, dark: shaded),
+// 2 the depth (near white, far dark, the sky black), 3 the wet look's capsules on the picture (the GPU only)
+void set_debug_view(int view);
+int debug_view();
 int game_filter_pass();   // rawdanger-recomp: a developers' scene is on screen: its font drawn at its own size (gs.cpp, sjis)
 // rawdanger-recomp: the keys shown instead of the PlayStation symbols in the game's font (cross, circle, square, triangle; short
 // names of 1 to 3 letters, "" keeps the symbol); see gpu.cpp, draw_prompt_caps

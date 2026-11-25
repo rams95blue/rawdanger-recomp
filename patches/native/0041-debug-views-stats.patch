@@ -1,0 +1,243 @@
+From 7619b2283de87b47426da6b87bae903f5416d77c Mon Sep 17 00:00:00 2001
+From: rawdanger-recomp <rawdanger-recomp@users.noreply.github.com>
+Date: Wed, 25 Nov 2026 20:04:43 +0000
+Subject: [PATCH] rawdanger-recomp v0.9.6: graphics views and stats in Settings
+ > Debug
+
+Picture shown: the game's, the AO alone, the depth (in metres, log grey)
+or the wet look's capsules, drawn by the AO pass (word 63). Stats on
+screen: FPS, CPU / GPU, memory, scene and camera, wetness, the view and
+the frame, in the keys' place once a second.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01QNLFPekqhcU2dj7B3Utmea
+---
+ host/quickmenu.cpp            |  4 ++--
+ host/quickmenu.hpp            |  2 +-
+ host/window.cpp               | 44 +++++++++++++++++++++++++++++++++--
+ runtime/include/ps2/video.hpp |  4 ++++
+ runtime/src/gs/gpu/gs.wgsl    | 16 +++++++++++++
+ runtime/src/gs/gs.cpp         | 13 ++++++++---
+ 6 files changed, 75 insertions(+), 8 deletions(-)
+
+diff --git a/host/quickmenu.cpp b/host/quickmenu.cpp
+index 072161b..99c22c4 100644
+--- a/host/quickmenu.cpp
++++ b/host/quickmenu.cpp
+@@ -1047,7 +1047,7 @@ void Menu::draw_toast(int window_width, int window_height, const std::string &he
+ }
+ 
+ void Menu::draw_keys_on_screen(int window_width, int window_height, const std::vector<std::pair<std::string, std::string>> &rows,
+-                               const std::string &note, Picture &out) {
++                               const std::string &note, Picture &out, const std::string &title) {
+     // font pixels: a title, then one line per key (the name, then the keys), half see-through so the game shows through
+     const int pad = 4, line_h = 10, name_chars = 13;
+     std::size_t key_chars = 4;
+@@ -1068,7 +1068,7 @@ void Menu::draw_keys_on_screen(int window_width, int window_height, const std::v
+     c.fill(0, out.height - frame, out.width, frame, kFrame);
+     int y = pad * s;
+     const int x = pad * s;
+-    c.text(x, y, s, "KEYS   (F10 hides)", kTitle);
++    c.text(x, y, s, title, kTitle);
+     y += title_h * s;
+     for (const auto &r : rows) {
+         c.text(x, y, s, r.first.substr(0, name_chars), kDim);
+diff --git a/host/quickmenu.hpp b/host/quickmenu.hpp
+index a73d582..d8ea4d6 100644
+--- a/host/quickmenu.hpp
++++ b/host/quickmenu.hpp
+@@ -185,7 +185,7 @@ public:
+     static void draw_debug_menu(int window_width, int window_height, int cursor, Picture &out);
+     // rawdanger-recomp: the player's keys at the left of the screen while playing (F10); note: a line under it, may be empty
+     static void draw_keys_on_screen(int window_width, int window_height, const std::vector<std::pair<std::string, std::string>> &rows,
+-                                    const std::string &note, Picture &out);
++                                    const std::string &note, Picture &out, const std::string &title = "KEYS   (F10 hides)");
+     // rawdanger-recomp: the achievement pop-up - its picture (straight RGBA, red in the low byte; may be empty) beside two lines
+     static void draw_toast(int window_width, int window_height, const std::string &header, const std::string &title,
+                            const std::vector<std::uint32_t> &icon, int icon_width, int icon_height, Picture &out);
+diff --git a/host/window.cpp b/host/window.cpp
+index c8c392e..12a2e1d 100644
+--- a/host/window.cpp
++++ b/host/window.cpp
+@@ -247,7 +247,8 @@ constexpr std::size_t kDebugRow = static_cast<std::size_t>(-2), kMapSelRow = sta
+                       kHealRow = static_cast<std::size_t>(-5), kKeepRow = static_cast<std::size_t>(-6),
+                       // v0.9.5: the Debug tab's test switches
+                       kDryRow = static_cast<std::size_t>(-7), kSoakRow = static_cast<std::size_t>(-8), kWetForceRow = static_cast<std::size_t>(-9),
+-                      kWetShowRow = static_cast<std::size_t>(-10), kHeadTestRow = static_cast<std::size_t>(-11);
++                      kWetShowRow = static_cast<std::size_t>(-10), kHeadTestRow = static_cast<std::size_t>(-11),
++                      kViewRow = static_cast<std::size_t>(-12), kStatsRow = static_cast<std::size_t>(-13);
+ // rawdanger-recomp (v0.9.2): the hero's two bars. PS2_DEBUG_HERO="TABLE,PLAYER,COUNT,NOW1,MOST1,NOW2,MOST2" (hex: the table of the
+ // characters' addresses, the word with the player's number, how many the table has, and two pairs of offsets: a value and its
+ // most). Raw Danger: 0x5EAC80, 0x48F3E4, 235; health (+0x368 of +0x36C, 100) and body temperature (+0x370 of +0x374, 30000: it
+@@ -401,6 +402,9 @@ bool g_look_forced = false;
+ 
+ // The title shows the speed; for a few seconds after F5, F8 or F9 a message is put in front of it.
+ std::string g_speed_title = "ps2-native-recomp";
++// rawdanger-recomp (v0.9.6, Settings > Debug): the stats at the left of the picture, once a second
++bool g_stats_on = false;
++std::vector<std::pair<std::string, std::string>> g_stats_rows;
+ std::string g_game_title;  // optional PS2_WINDOW_TITLE, supplied by the launcher
+ std::string g_notice_text;
+ const char *const kStartNotice = "F1 = menu";  // the title for the first 30 s
+@@ -1478,7 +1482,7 @@ bool keys_on_screen_now() { return g_keys.keys_on_screen != 0; }
+ 
+ void menu_paint(bool show_again) {
+     if (show_again) g_menu_redraw = true;
+-    g_overlay_on = g_menu.is_open() || !g_note_text.empty() || g_native_hint || keys_on_screen_now() || g_debug_menu_on.load(std::memory_order_relaxed);
++    g_overlay_on = g_menu.is_open() || !g_note_text.empty() || g_native_hint || keys_on_screen_now() || g_stats_on || g_debug_menu_on.load(std::memory_order_relaxed);
+     if (!g_overlay_on) {
+ #ifdef PS2_GPU
+         if (g_gpu_present) ps2::gs::gpu::set_overlay(nullptr, 0, 0, 0, 0);
+@@ -1596,6 +1600,9 @@ void menu_paint(bool show_again) {
+             if (g_menu.on_debug_tab()) {
+                 v.recomp_rows.clear();
+                 g_recomp_row_section.clear();
++                static const char *const kViews[] = {"<  the game's  >", "<  AO alone  >", "<  depth  >", "<  the hero's capsules  >"};
++                debug_row(kViewRow, "Picture shown", kViews[std::clamp(ps2::debug_view(), 0, 3)]);
++                debug_row(kStatsRow, "Stats on screen (FPS, CPU, GPU, scene)", g_stats_on ? "<  on  >" : "<  off >");
+                 if (debug_info().set) debug_row(kInfoRow, "Where am I (scene, camera, place, wetness: for reports)", "show");
+                 if (debug_hero().set) {
+                     debug_row(kHealRow, "Heal, warm and dry the hero", "now");
+@@ -1639,6 +1646,8 @@ void menu_paint(bool show_again) {
+         quickmenu::Menu::draw_debug_menu(w, h, g_debug_cursor.load(), g_menu_picture);
+     } else if (g_toast) {
+         quickmenu::Menu::draw_toast(w, h, "ACHIEVEMENT UNLOCKED", g_toast_title, g_toast_icon, g_toast_w, g_toast_h, g_menu_picture);
++    } else if (g_note_text.empty() && g_stats_on) {
++        quickmenu::Menu::draw_keys_on_screen(w, h, g_stats_rows, "", g_menu_picture, "STATS   (Settings > Debug)");   // v0.9.6: the stats in the keys' place
+     } else if (g_note_text.empty()) {
+         // rawdanger-recomp: the keys at the left (F10); a note or an achievement takes the place for its few seconds
+         quickmenu::Menu::draw_keys_on_screen(w, h, keymap::screen_rows(g_keys, g_keys.mouse_look != 0 && g_look_yaw.set), "", g_menu_picture);
+@@ -2633,6 +2642,20 @@ void menu_command(quickmenu::Command c, int step) {
+             g_recomp_note = g_keep_hero ? "The hero stays healthy and warm (until the game ends or you switch it off)" : "The hero's health and warmth are the game's again";
+             break;
+         }
++        if (row < g_recomp_row_section.size() && g_recomp_row_section[row] == kViewRow) {
++            static const char *const kViews[] = {"Picture: the game's", "Picture: the ambient occlusion alone (white: none)", "Picture: the depth (near white, far dark)",
++                                                 "Picture: the wet look's capsules in blue"};
++            const int k = (ps2::debug_view() + (step < 0 ? 3 : 1)) % 4;
++            ps2::set_debug_view(k);
++            g_recomp_note = kViews[k];
++            break;
++        }
++        if (row < g_recomp_row_section.size() && g_recomp_row_section[row] == kStatsRow) {
++            g_stats_on = !g_stats_on;
++            g_stats_rows = {{"Stats", "in a second"}};
++            g_recomp_note = g_stats_on ? "Stats on screen, at the left (in place of the keys)" : "Stats off";
++            break;
++        }
+         if (row < g_recomp_row_section.size() && g_recomp_row_section[row] == kDryRow) {
+             g_recomp_note = ps2::set_hero_wetness(0.0f) ? "The hero's clothes are dry" : "No hero here (only while playing)";
+             break;
+@@ -3459,6 +3482,23 @@ void show_speed() {
+                   (cpu - cpu_start) / seconds * 100.0, (gpu - gpu_start) / (seconds * 10.0), resident_mb(), queued, stretched);
+     g_speed_title = title;
+     refresh_title();
++    if (g_stats_on) {
++        char a[64], b[64], c[64];
++        std::snprintf(a, sizeof a, "%.1f", static_cast<double>(frames) / seconds);
++        std::snprintf(b, sizeof b, "%.0f %% / %.0f %%", (cpu - cpu_start) / seconds * 100.0, (gpu - gpu_start) / (seconds * 10.0));
++        std::snprintf(c, sizeof c, "%.0f MB, audio %.0f ms", resident_mb(), queued);
++        g_stats_rows = {{"FPS", a}, {"CPU / GPU", b}, {"Memory", c}};
++        if (debug_info().set) {
++            const DebugInfo &d = debug_info();
++            const std::uint32_t cam = ps2::ld32(d.camera);
++            g_stats_rows.push_back({"Scene", std::to_string(ps2::ld32(d.scene)) + (cam >= 0x100000u && cam < 0x2000000u ? ", camera mode " + std::to_string(ps2::ld32(cam + d.mode)) : "")});
++        }
++        if (const float wet = ps2::hero_wetness(); wet >= 0.0f) g_stats_rows.push_back({"Clothes wet", std::to_string(static_cast<int>(wet * 100.0f + 0.5f)) + " %"});
++        static const char *const kViews[] = {"the game's", "AO alone", "depth", "capsules"};
++        g_stats_rows.push_back({"Picture", kViews[std::clamp(ps2::debug_view(), 0, 3)]});
++        g_stats_rows.push_back({"Frame", std::to_string(ps2::frame_count())});
++        menu_paint(true);
++    }
+     start = now;
+     frames = 0;
+     cpu_start = cpu;
+diff --git a/runtime/include/ps2/video.hpp b/runtime/include/ps2/video.hpp
+index f423321..3f02d1b 100644
+--- a/runtime/include/ps2/video.hpp
++++ b/runtime/include/ps2/video.hpp
+@@ -42,6 +42,10 @@ int ambient_occlusion();
+ // rawdanger-recomp: the wet look: how wet the hero is (0 to 1) and the hero's limbs as capsules in GS window coordinates, 7 floats
+ // each (x0, y0, x1, y1, radius, nearest depth, farthest depth); darkened in the AO pass (the GPU only)
+ void set_wet_look(float amount, const float *capsules, int count);
++// rawdanger-recomp (v0.9.6, Settings > Debug): what the 3D picture shows: 0 itself, 1 the AO alone (white: none, dark: shaded),
++// 2 the depth (near white, far dark, the sky black), 3 the wet look's capsules on the picture (the GPU only)
++void set_debug_view(int view);
++int debug_view();
+ int game_filter_pass();   // rawdanger-recomp: a developers' scene is on screen: its font drawn at its own size (gs.cpp, sjis)
+ // rawdanger-recomp: the keys shown instead of the PlayStation symbols in the game's font (cross, circle, square, triangle; short
+ // names of 1 to 3 letters, "" keeps the symbol); see gpu.cpp, draw_prompt_caps
+diff --git a/runtime/src/gs/gpu/gs.wgsl b/runtime/src/gs/gpu/gs.wgsl
+index 7b4ad94..9435065 100644
+--- a/runtime/src/gs/gpu/gs.wgsl
++++ b/runtime/src/gs/gpu/gs.wgsl
+@@ -1781,10 +1781,26 @@ fn game_ao(@builtin(global_invocation_id) gid: vec3<u32>) {
+     let x = (i / n) % w;
+     let y = (i / n) / w;
+     let z0 = f32(read_sample(prm(5u), prm(4u), prm(1u), x, y, k));
++    let view = prm(63u);   // v0.9.6 debug views (Settings > Debug): 1 the AO alone, 2 the depth
++    if (view == 2u) {
++        // the distance in metres (131072 / z, docs/GRAPHICS.md) as grey: 1 m white, 60 m and the sky black
++        let metres = select(1000.0, 131072.0 / max(z0, 1.0), z0 >= 64.0);
++        let g = u32(clamp(1.0 - log2(max(metres, 1.0)) / log2(60.0), 0.0, 1.0) * 255.0);
++        store(locate(0u, prm(0u), prm(1u), x, y), k, g | (g << 8u) | (g << 16u) | 0x80000000u);
++        return;
++    }
+     if (z0 < 64.0) {
++        if (view == 1u) {
++            store(locate(0u, prm(0u), prm(1u), x, y), k, 0x80FFFFFFu);
++        }
+         return;   // nothing drawn (sky, cleared)
+     }
+     let ao = select(1.0, ao_factor(x, y, w, h, k, z0), prm(6u) > 0u);
++    if (view == 1u) {
++        let g = u32(clamp(ao, 0.0, 1.0) * 255.0);
++        store(locate(0u, prm(0u), prm(1u), x, y), k, g | (g << 8u) | (g << 16u) | 0x80000000u);
++        return;
++    }
+     let wet = wet_mask(x, y, k, z0);
+     if (ao >= 1.0 && wet <= 0.0) {
+         return;
+diff --git a/runtime/src/gs/gs.cpp b/runtime/src/gs/gs.cpp
+index 5618a8e..7f0523a 100644
+--- a/runtime/src/gs/gs.cpp
++++ b/runtime/src/gs/gs.cpp
+@@ -1056,7 +1056,8 @@ std::uint64_t g_scene_xyoffset = 0;              // rawdanger-recomp (wet look):
+ std::mutex g_wet_lock;
+ float g_wet_amount = 0.0f;
+ std::vector<float> g_wet_caps;
+-int g_wet_age = 0;   // pictures since they came: the capsules of a hero no longer drawn (another scene, the title) are dropped
++int g_wet_age = 0;
++std::atomic<int> g_debug_view{0};   // v0.9.6 (Settings > Debug): 0 the picture, 1 the AO alone, 2 the depth, 3 the hero's capsules   // pictures since they came: the capsules of a hero no longer drawn (another scene, the title) are dropped
+ std::atomic<int> g_ao{[] { const char *v = std::getenv("PS2_AO"); return v ? std::atoi(v) : 0; }()};   // 0 off, 1 light, 2 strong
+ 
+ std::uint32_t entry(std::uint32_t cbp, std::uint32_t i) {   // palette entry i of a 256-entry 32-bit palette stored at cbp (CSM1)
+@@ -1188,10 +1189,14 @@ bool step(const State &s, std::uint64_t attr) {
+             if (++g_wet_age > 4) wet = 0.0f, caps.clear();
+         }
+         const int ao = g_ao.load(std::memory_order_relaxed);
++        const int view = g_debug_view.load(std::memory_order_relaxed);
++        if (view == 3 && caps.size() >= 7) wet = -1.0f;
+         const bool show = wet < 0.0f;   // debug: the capsules drawn plainly
+         const bool wet_on = (wet > 0.01f || show) && caps.size() >= 7;
+-        if ((ao > 0 || wet_on) && gpu_on() && g_scene_bp && g_scene_bw >= 8 && g_scene_bw <= 16) {
+-            std::uint32_t p[64] = {g_scene_bp, g_scene_bw, g_scene_bw * 64u, 448u, zbp, w.zpsm, ao >= 2 ? 245u : ao > 0 ? 170u : 0u, 80u};   // v0.8.7: radius 80 (38 hardly showed)
++        if ((ao > 0 || wet_on || view > 0) && gpu_on() && g_scene_bp && g_scene_bw >= 8 && g_scene_bw <= 16) {
++            // the AO view shows the strong AO even with AO off
++            std::uint32_t p[64] = {g_scene_bp, g_scene_bw, g_scene_bw * 64u, 448u, zbp, w.zpsm, ao >= 2 || view == 1 ? 245u : ao > 0 ? 170u : 0u, 80u};   // v0.8.7: radius 80 (38 hardly showed)
++            p[63] = static_cast<std::uint32_t>(view == 3 ? 0 : view);
+             if (wet_on) {
+                 // the capsules in the picture's pixels, a quarter pixel a step, +4096 pixels so a part off the left or the top fits
+                 const float ofx = static_cast<float>(g_scene_xyoffset & 0xFFFFu) / 16.0f, ofy = static_cast<float>((g_scene_xyoffset >> 32) & 0xFFFFu) / 16.0f;
+@@ -2569,6 +2574,8 @@ void set_wet_look(float amount, const float *capsules, int count) {
+     ps2::gs::rdfilter::g_wet_caps.assign(capsules, capsules + 7 * std::max(count, 0));
+     ps2::gs::rdfilter::g_wet_age = 0;
+ }
++void set_debug_view(int view) { ps2::gs::rdfilter::g_debug_view = std::clamp(view, 0, 3); }
++int debug_view() { return ps2::gs::rdfilter::g_debug_view.load(); }
+ void set_ambient_occlusion(int level) { ps2::gs::rdfilter::g_ao.store(std::clamp(level, 0, 2), std::memory_order_relaxed); }
+ int ambient_occlusion() { return ps2::gs::rdfilter::g_ao.load(std::memory_order_relaxed); }
+ void set_game_filter_pass(int mode) { ps2::gs::rdfilter::g_mode.store(mode ? 1 : 0, std::memory_order_relaxed); }
+-- 
+2.43.0
+
