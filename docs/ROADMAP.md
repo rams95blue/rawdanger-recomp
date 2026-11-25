@@ -123,7 +123,8 @@ ROOT.FAT); if it does, they are candidates for the Enhanced Edition.
 | v0.8.9 changes | ✅ | The memory-card check at start goes on by itself again: Cross is now tapped in the game's own frames by the runtime (ps2::latch_pads), not by the window's clock, so it no longer depends on the window having the keyboard; with an empty saves folder the card has no system data and the game waits on "Starting the game without using System data" every start. Ambient occlusion measured in metres (depth ≈ 131072 / distance): no dark outlines round far buildings, no smears near the camera, faded out past 20-45 m, at most 16 pixels round, softer (GRAPHICS.md). Switching the regional textures while playing decodes every picture again (the striped NPC face). F7 alone opens the map select; the DEBSEL menu (Shift+F7) is gone, it only led there (DEBUG.md) |
 | v0.9.0 changes | ✅ | Orbit camera: up / down on the right stick or the mouse now circles the hero at the same distance (from just over the floor to 75 degrees over him), through the follow camera's own height and distance words (engine host call at 0x177270; Settings > Controls > Camera up/down: ORBIT or PS2). Fixed cameras OFF (off by default): the places with a fixed camera keep the follow camera while you play; the cutscenes keep their shots (host call at 0x17C9B0; docs/CAMERA.md). The camera's code mapped (docs/CAMERA.md) |
 | v0.9.1 changes | ✅ | First-person view (Triangle): it looks round with the left stick, so the mouse now pushes that stick there (it turned nothing before). Japanese title: the US program's menu boxes covered the right end of 強化版 and the build number; the words now start where the logo starts. Settings > Game > Where am I: the scene, the camera mode, the character and the place, for reports |
-| **Pending (v0.9.1)** | ⏳ | See the list below |
+| v0.9.2 changes | ✅ | Debug lines in Settings > Game: Heal and warm the hero (once) and Keep the hero healthy and warm (every frame): the hero's health and body temperature found (the characters' table 0x5EAC80, +0x368 / +0x370; the body temperature falls while wet and cold, and the HUD's arrow turns blue). A build with the new camera code no longer stops when started without RawDangerPC.exe's camera settings (the engine has Raw Danger's own). The README's banner, badges, highlights and quick start (docs/images, tools/rd_readme_art.py) |
+| **Pending (v0.9.2)** | ⏳ | See the list below |
 | Still open after v0.7.4 | ✅ | All three done: direct mouse look (v0.7.9), the debug menus' text (v0.7.8), saves without the memory card (v0.7.8) |
 | Keyboard prompts | ✅ | v0.7.1: key caps with the player's keys in the game's own font (see *PC keys in the game's texts*) |
 | In-game menu for Raw Danger | ✅ | Engine patch 0005: Resume, Quick save/load, Game options (F3), Graphics page (look, resolution, text filter, full screen, widescreen, pause in the background), Achievements (F4), Key card, Change keys, **Quit to desktop**, hazard-tape look with the game's name. Next: options inside the game's own Options screen (see below) |
@@ -140,7 +141,7 @@ Code patches go into `patches\pnach\SLUS-21501_2905C5C6.pnach` as named sections
 compiled in at build time (the native engine ignores runtime writes to code). Each one is verified on a headless build
 of the same engine: boot or a save state, frames captured every N frames, compared with the unpatched build.
 
-## Pending (as of v0.9.1)
+## Pending (as of v0.9.2)
 
 Asked for and not done yet, roughly by size:
 
@@ -163,7 +164,7 @@ Asked for and not done yet, roughly by size:
 16. **The title words at a higher resolution in the game** (the title picture is 640 x 448; a sharper copy needs a texture
     override of it).
 17. **The hero's head follows the camera** (natural head motion). Found so far: the camera follows a node of the game's scene graph (camera block +0x144 points at it; nodes of 0xF0 bytes with a world matrix at +0x10 and a local place at +0x80, the follow point 1.5 above the hero's root). The head turn needs the hero's head bone and a hook after the animation sets its rotation, before the world matrices are made: a code change, not a memory write.
-18. **Debug menu of our own**: v0.9.1 has its first line, Settings > Game > Where am I. The others need the game's own words found first: 0x48F3E4, thought to be the hero's wetness, is the player's character (0 Joshua, 1 the other one), so "dry the player" still needs the real word; no death, add item and restart at the last gate likewise.
+18. **Debug menu of our own**: Settings > Game has Where am I (v0.9.1), Heal and warm the hero and Keep the hero healthy and warm (v0.9.2). Still to find: the wetness itself (the HUD's drops), the items (add item), the last gate (restart).
 19. **Striped NPC face after switching the textures**: v0.8.9 makes every picture again at the switch; if it still shows, an F9 report at that moment (which map, which person) would say which picture it is.
 20. **Engine pipeline** (see "Engine pipeline" below).
 
@@ -174,7 +175,7 @@ The game is not decompiled: its machine code is translated to C++ mechanically (
 Worth improving, by what it would bring:
 
 1. **Code changes without a new build.** A changed word in already-translated code is not seen (a patch line writing the orbit call had no effect until the program was translated again: 5 minutes here, longer on a slower PC). If the engine re-translated a function when a patch changes its code (it does already for code the game loads itself, ee-live), the camera and debug features could ship as patch files with no rebuild.
-2. **A missing host call stops the game** ("missing code at 0x0FF00320") when the program has the call but the engine was started without its setting (an older launcher): the engine could carry, for each host call, the instructions it stands in for, and do just those.
+2. ~~**A missing host call stops the game**~~ (v0.9.2: the engine carries Raw Danger's own settings for its two calls) ("missing code at 0x0FF00320") when the program has the call but the engine was started without its setting (an older launcher): the engine could carry, for each host call, the instructions it stands in for, and do just those.
 3. **Hand-written functions**: replacing a whole game function with C++ (the camera, the head's look-at, the debug menu) instead of a few patched words; host calls are the first step.
 4. **A symbol map** of the functions found so far (tools/rd_symbols.txt) used by the tools and the notes.
 5. **Uncapped frame rate** needs the native renderer's in-between frames (pending 9, 12).

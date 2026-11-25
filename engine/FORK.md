@@ -160,6 +160,8 @@
   ms_since_cinema_bars().
 - **0036-first-person-mouse-where-am-i** (rawdanger-recomp v0.9.1): PS2_MOUSE_LOOK_FIRST (the mouse pushes the left stick
   while the first-person camera is active) and PS2_DEBUG_INFO (Settings > Game > Where am I).
+- **0037-hero-debug-camera-defaults** (rawdanger-recomp v0.9.2): PS2_DEBUG_HERO (Heal and warm / Keep healthy and warm in
+  Settings > Game); the camera calls default to Raw Danger's settings, so a build never stops for a missing one.
 
 ## Goals of the fork
 

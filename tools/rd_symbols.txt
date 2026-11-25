@@ -19,3 +19,5 @@
 0x003BC810	debug_menu_names	37 names of the stripped developers' menu
 0x0048F3E4	player_character	word: 0 Joshua, 1 the other hero (set at 0x1669D4)
 0x005FDC60	camera_block_1	the first-person view's camera block (Triangle; the left stick looks)
+0x005EAC80	characters	235 character pointers (0x14D6E0 gets one); +0x368 / +0x36C health (100), +0x370 / +0x374 body temperature (30000), +0x40 the place
+0x0014D8E0	characters_reset	fills health and body temperature from each one's parameters (+0x20, +0x24)

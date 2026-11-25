@@ -243,7 +243,41 @@ std::vector<std::size_t> g_recomp_row_section;  // the Game options page's lines
 // before release, and of its values only line 5 (R2 LAND PATH) is still read. The launcher offers both ("0x48F48C;40;41").
 // Opened from Settings > Game (lines at the end), F7 (map select) or Shift+F7 (the debug menu).
 // In the map select: up / down the line, left / right the value, Cross loads the map at that gate.
-constexpr std::size_t kDebugRow = static_cast<std::size_t>(-2), kMapSelRow = static_cast<std::size_t>(-3), kInfoRow = static_cast<std::size_t>(-4);
+constexpr std::size_t kDebugRow = static_cast<std::size_t>(-2), kMapSelRow = static_cast<std::size_t>(-3), kInfoRow = static_cast<std::size_t>(-4),
+                      kHealRow = static_cast<std::size_t>(-5), kKeepRow = static_cast<std::size_t>(-6);
+// rawdanger-recomp (v0.9.2): the hero's two bars. PS2_DEBUG_HERO="TABLE,PLAYER,COUNT,NOW1,MOST1,NOW2,MOST2" (hex: the table of the
+// characters' addresses, the word with the player's number, how many the table has, and two pairs of offsets: a value and its
+// most). Raw Danger: 0x5EAC80, 0x48F3E4, 235; health (+0x368 of +0x36C, 100) and body temperature (+0x370 of +0x374, 30000: it
+// falls while wet and cold, the HUD's arrow turns blue). "Heal and warm" fills both once; "Keep healthy and warm" every frame.
+struct DebugHero {
+    bool set = false;
+    std::uint32_t table = 0, player = 0, count = 0, now1 = 0, most1 = 0, now2 = 0, most2 = 0;
+};
+const DebugHero &debug_hero() {
+    static const DebugHero d = [] {
+        DebugHero r;
+        const char *v = std::getenv("PS2_DEBUG_HERO");
+        unsigned long t = 0, p = 0, n = 0, a = 0, b = 0, c = 0, e = 0;
+        if (v && *v && std::sscanf(v, "%lx,%lx,%lx,%lx,%lx,%lx,%lx", &t, &p, &n, &a, &b, &c, &e) == 7)
+            r = {true, static_cast<std::uint32_t>(t), static_cast<std::uint32_t>(p), static_cast<std::uint32_t>(n), static_cast<std::uint32_t>(a),
+                 static_cast<std::uint32_t>(b), static_cast<std::uint32_t>(c), static_cast<std::uint32_t>(e)};
+        return r;
+    }();
+    return d;
+}
+bool g_keep_hero = false;
+// fills the player's two bars; false when there is no player
+bool heal_hero() {
+    const DebugHero &d = debug_hero();
+    if (!d.set) return false;
+    const std::uint32_t who = ps2::ld32(d.player);
+    if (who >= d.count) return false;
+    const std::uint32_t hero = ps2::ld32(d.table + 4u * who);
+    if (hero < 0x100000u || hero >= 0x2000000u) return false;
+    ps2::st32(hero + d.now1, ps2::ld32(hero + d.most1));
+    ps2::st32(hero + d.now2, ps2::ld32(hero + d.most2));
+    return true;
+}
 // rawdanger-recomp (v0.9.1): "Where am I" for reports: PS2_DEBUG_INFO="SCENE,CAMERA,MODE,PIVOT,PLAYER" (hex: the scene word, the
 // word with the active camera block, the mode's and the follow point's offsets in it, the word with the player's character)
 struct DebugInfo {
@@ -1231,6 +1265,7 @@ void read_keyboard(std::uint16_t &pressed, std::uint8_t &lx, std::uint8_t &ly, s
     // rawdanger-recomp: mouse look while playing (the pointer is caught in the window then, and free again in menus)
     ps2::set_camera_orbit(g_keys.camera_orbit != 0);
     ps2::set_free_camera(g_keys.free_camera != 0);
+    if (g_keep_hero) heal_hero();
     {
         static bool was = false;
         const bool on = mouse_look_on();
@@ -1537,6 +1572,16 @@ void menu_paint(bool show_again) {
                 row.live = sec.live;
                 row.state = sec.on ? "<  on  >" : "<  off >";
                 v.recomp_rows.push_back(row);
+            }
+            if (debug_hero().set) {
+                for (const std::size_t kind : {kHealRow, kKeepRow}) {
+                    g_recomp_row_section.push_back(kind);
+                    quickmenu::Values::RecompRow row;
+                    row.label = kind == kHealRow ? "Heal and warm the hero (debug)" : "Keep the hero healthy and warm (debug)";
+                    row.live = true;
+                    row.state = kind == kHealRow ? "now" : (g_keep_hero ? "<  on  >" : "<  off >");
+                    v.recomp_rows.push_back(row);
+                }
             }
             if (debug_info().set) {
                 g_recomp_row_section.push_back(kInfoRow);
@@ -2541,6 +2586,15 @@ void menu_command(quickmenu::Command c, int step) {
     case Command::recomp_toggle: {
         const bool wide = ps2::g_options.widescreen;
         const std::size_t row = static_cast<std::size_t>(g_menu.recomp_row());
+        if (row < g_recomp_row_section.size() && g_recomp_row_section[row] == kHealRow) {
+            g_recomp_note = heal_hero() ? "The hero's health and body temperature are full" : "No hero to heal here (only while playing)";
+            break;
+        }
+        if (row < g_recomp_row_section.size() && g_recomp_row_section[row] == kKeepRow) {
+            g_keep_hero = !g_keep_hero;
+            g_recomp_note = g_keep_hero ? "The hero stays healthy and warm (until the game ends or you switch it off)" : "The hero's health and warmth are the game's again";
+            break;
+        }
         if (row < g_recomp_row_section.size() && g_recomp_row_section[row] == kInfoRow) {
             const std::string info = debug_info_text();
             std::fprintf(stderr, "[where] %s\n", info.c_str());
@@ -2701,7 +2755,8 @@ bool menu_event(const SDL_Event &e) {
         // the developers' menus are opened with Enter only (left / right on their lines does nothing)
         const std::size_t row = static_cast<std::size_t>(g_menu.recomp_row());
         if (c == Command::recomp_toggle && row < g_recomp_row_section.size() &&
-            (g_recomp_row_section[row] == kDebugRow || g_recomp_row_section[row] == kMapSelRow || g_recomp_row_section[row] == kInfoRow)) return;
+            (g_recomp_row_section[row] == kDebugRow || g_recomp_row_section[row] == kMapSelRow || g_recomp_row_section[row] == kInfoRow ||
+             g_recomp_row_section[row] == kHealRow)) return;
         menu_command(c, step);
     };
     const auto move = [](int step) {

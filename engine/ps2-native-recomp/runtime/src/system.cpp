@@ -1235,8 +1235,11 @@ void orbit_call(Cpu &c) {
 }
 struct OrbitSetup {
     OrbitSetup() {
+        // v0.9.2: without the setting, Raw Danger's (US) own: a build that has the call but was started without RawDangerPC.exe
+        // (or by an older one) stopped at the first camera step with "missing code at 0x0FF00320"; the call only runs when the
+        // game's code calls it, so it does nothing for any other program
         const char *v = std::getenv("PS2_CAMERA_ORBIT");
-        if (!v || !*v) return;
+        if (!v || !*v) v = "48F4E0,35C,3B8,354,C8,177270";
         unsigned long p = 0, h = 0, l = 0, b = 0, n = 0, at = 0;
         if (std::sscanf(v, "%lx,%lx,%lx,%lx,%lx,%lx", &p, &h, &l, &b, &n, &at) != 6 || n >= kHostCalls) return;
         g_orbit = {true, static_cast<std::uint32_t>(p), static_cast<std::uint32_t>(h), static_cast<std::uint32_t>(l), static_cast<std::uint32_t>(b),
@@ -1286,8 +1289,8 @@ void free_camera_call(Cpu &c) {
 }
 struct FreeCameraSetup {
     FreeCameraSetup() {
-        const char *v = std::getenv("PS2_FREE_CAMERA");
-        if (!v || !*v) return;
+        const char *v = std::getenv("PS2_FREE_CAMERA");   // without it, Raw Danger's (US) own, as for the orbit camera
+        if (!v || !*v) v = "C9,17C9B0,17C250,17F610,48F4E0,3EC,A,48F488=15";
         unsigned long n = 0, at = 0, run = 0, sm = 0, p = 0, m = 0, f = 0, w = 0, wv = 0;
         if (std::sscanf(v, "%lx,%lx,%lx,%lx,%lx,%lx,%lx,%lx=%lx", &n, &at, &run, &sm, &p, &m, &f, &w, &wv) != 9 || n >= kHostCalls) return;
         auto u = [](unsigned long x) { return static_cast<std::uint32_t>(x); };
