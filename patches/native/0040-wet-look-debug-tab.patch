@@ -1,0 +1,852 @@
+From 9003c7fd815914e06d2b092b12867b7682161898 Mon Sep 17 00:00:00 2001
+From: rawdanger-recomp <rawdanger-recomp@users.noreply.github.com>
+Date: Wed, 25 Nov 2026 19:54:59 +0000
+Subject: [PATCH] rawdanger-recomp v0.9.5: the wet look and the Debug tab
+
+How wet the hero's worn clothes are (PS2_HERO_WET: the game's thing pool);
+the hero's limbs projected with the game's world-to-screen matrix into
+capsules that the AO pass darkens and saturates at the hero's depth
+(Settings > Picture > Wet look, on). Settings > Debug gathers the test
+switches: Where am I, heal/keep, dry/soak, a forced wetness, the capsules
+shown, a fixed head turn, the developers' menus.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01QNLFPekqhcU2dj7B3Utmea
+---
+ host/keymap.cpp                |   8 ++
+ host/keymap.hpp                |   2 +
+ host/quickmenu.cpp             |  25 ++---
+ host/quickmenu.hpp             |   9 +-
+ host/window.cpp                | 113 ++++++++++++++++------
+ runtime/include/ps2/system.hpp |  11 +++
+ runtime/include/ps2/video.hpp  |   3 +
+ runtime/src/gs/gpu/gpu.cpp     |   6 +-
+ runtime/src/gs/gpu/gpu.hpp     |   2 +-
+ runtime/src/gs/gpu/gs.wgsl     |  62 ++++++++++--
+ runtime/src/gs/gs.cpp          |  46 ++++++++-
+ runtime/src/system.cpp         | 170 +++++++++++++++++++++++++++++++++
+ 12 files changed, 401 insertions(+), 56 deletions(-)
+
+diff --git a/host/keymap.cpp b/host/keymap.cpp
+index 5d41b53..6fdef72 100644
+--- a/host/keymap.cpp
++++ b/host/keymap.cpp
+@@ -162,6 +162,7 @@ std::string with_look(const std::string &file_text, int look) { return with_line
+ std::string with_scale(const std::string &file_text, int scale) { return with_line(file_text, "scale", "scale = " + (scale == kScaleAuto ? std::string("auto") : std::to_string(scale))); }
+ std::string with_mouse_look(const std::string &file_text, int on) { return with_line(file_text, "mouselook", std::string("mouse_look = ") + (on ? "on" : "off")); }
+ std::string with_free_camera(const std::string &file_text, int on) { return with_line(file_text, "freecamera", std::string("free_camera = ") + (on ? "on" : "off")); }
++std::string with_wet_look(const std::string &file_text, int on) { return with_line(file_text, "wetlook", std::string("wet_look = ") + (on ? "on" : "off")); }
+ std::string with_head_follow(const std::string &file_text, int on) { return with_line(file_text, "headfollow", std::string("head_follow = ") + (on ? "on" : "off")); }
+ std::string with_camera_orbit(const std::string &file_text, int on) { return with_line(file_text, "cameraorbit", std::string("camera_orbit = ") + (on ? "on" : "off")); }
+ std::string with_mouse_speed(const std::string &file_text, double speed) {
+@@ -402,6 +403,13 @@ void parse(const std::string &text, Config &config, std::vector<std::string> &pr
+             else bad("look_speed is a number from 0.1 to 10, ignored");
+             continue;
+         }
++        if (name == "wetlook") {
++            const std::string v = squash(value);
++            if (v == "on" || v == "1") config.wet_look = 1;
++            else if (v == "off" || v == "0") config.wet_look = 0;
++            else bad("wet_look is on or off, ignored");
++            continue;
++        }
+         if (name == "headfollow") {
+             const std::string v = squash(value);
+             if (v == "on" || v == "1") config.head_follow = 1;
+diff --git a/host/keymap.hpp b/host/keymap.hpp
+index 1f95a7b..0fa1847 100644
+--- a/host/keymap.hpp
++++ b/host/keymap.hpp
+@@ -55,6 +55,7 @@ struct Config {
+     int sharpen = 0;           // rawdanger-recomp: contrast-adaptive sharpening of the picture: 0 off (the picture is crisp by itself since the copy fix), 1 low, 2 medium, 3 high
+     int mouse_look = 1;        // rawdanger-recomp: the mouse turns the camera while playing (PS2_MOUSE_LOOK_* from the launcher); 0 off
+     int free_camera = 0;       // rawdanger-recomp: the follow camera also where the game has a fixed one (PS2_FREE_CAMERA); off by default
++    int wet_look = 1;          // rawdanger-recomp: the hero looks wet when the clothes are (PS2_HERO_WET, the GPU); 0 off
+     int head_follow = 1;       // rawdanger-recomp: the hero's head turns toward where the camera looks (PS2_HEAD_FOLLOW); 0: as on the PS2
+     int camera_orbit = 1;      // rawdanger-recomp: up / down on the camera (stick or mouse) circles the hero (PS2_CAMERA_ORBIT); 0: the game's own
+     double look_speed = 1.0;   // rawdanger-recomp: how far the mouse look turns (0.2 to 4; 1.0 by default since v0.8.3)
+@@ -94,6 +95,7 @@ std::string with_black_bars(const std::string &file_text, int percent);
+ std::string with_sharpen(const std::string &file_text, int level);
+ std::string with_mouse_look(const std::string &file_text, int on);
+ std::string with_camera_orbit(const std::string &file_text, int on);
++std::string with_wet_look(const std::string &file_text, int on);    // the 'wet_look' line
+ std::string with_head_follow(const std::string &file_text, int on);    // the 'head_follow' line
+ std::string with_free_camera(const std::string &file_text, int on);    // the 'free_camera' line  // the 'camera_orbit' line
+ std::string with_mouse_speed(const std::string &file_text, double speed);
+diff --git a/host/quickmenu.cpp b/host/quickmenu.cpp
+index f1a9797..072161b 100644
+--- a/host/quickmenu.cpp
++++ b/host/quickmenu.cpp
+@@ -115,13 +115,13 @@ constexpr int kEntries = 7;
+ constexpr Command kCommands[kEntries] = {Command::resume, Command::save, Command::load, Command::graphics, Command::achievements, Command::language, Command::quit};
+ // the program's key for the same thing, shown dim at the right end of the entry
+ constexpr const char *kKeys[kEntries] = {"F1", "F5", "F8", "F3", "F4", "", ""};
+-// Settings: one page, five tabs (the Game tab lists the game's own options, filled by the window)
+-constexpr const char *kTabNames[Menu::kTabs] = {"DISPLAY", "PICTURE", "SOUND", "CONTROLS", "GAME"};
++// Settings: one page, six tabs (the Game and Debug tabs list rows the window fills: the game's own options, the test switches)
++constexpr const char *kTabNames[Menu::kTabs] = {"DISPLAY", "PICTURE", "SOUND", "CONTROLS", "GAME", "DEBUG"};
+ constexpr int kAchievementRows = 7;   // rawdanger-recomp: achievements lines shown at a time (bigger panel)
+ constexpr Command kDisplay[] = {Command::scale, Command::window_size, Command::fullscreen, Command::widescreen, Command::integer_scale, Command::menu_game_runs, Command::pause_unfocused, Command::menu_skin, Command::popup_size, Command::back};
+ constexpr const char *kDisplayKeys[] = {"", "", "F11", "", "", "", "", "", "", "Esc"};
+-constexpr Command kPicture[] = {Command::field_of_view, Command::look, Command::antialias, Command::sharpen, Command::sharp_2d, Command::game_blur, Command::filter_pass, Command::ambient_occlusion, Command::black_bars, Command::lens_rain, Command::back};
+-constexpr const char *kPictureKeys[] = {"", "F2", "", "", "", "", "", "", "", "", "Esc"};
++constexpr Command kPicture[] = {Command::field_of_view, Command::look, Command::antialias, Command::sharpen, Command::sharp_2d, Command::game_blur, Command::filter_pass, Command::ambient_occlusion, Command::wet_look, Command::black_bars, Command::lens_rain, Command::back};
++constexpr const char *kPictureKeys[] = {"", "F2", "", "", "", "", "", "", "", "", "", "Esc"};
+ constexpr Command kSound[] = {Command::master_volume, Command::reverb, Command::back};
+ constexpr const char *kSoundKeys[] = {"", "", "Esc"};
+ constexpr Command kControls[] = {Command::change_keys, Command::keys_on_screen, Command::mouse_look, Command::camera_orbit, Command::free_camera, Command::head_follow, Command::mouse_speed, Command::mouse_invert_x, Command::mouse_invert, Command::key_prompts, Command::back};
+@@ -129,7 +129,7 @@ constexpr const char *kControlsKeys[] = {"", "F10", "", "", "", "", "", "", "",
+ struct TabList { const Command *commands; const char *const *keys; int n; };
+ static_assert(std::size(kDisplay) == std::size(kDisplayKeys) && std::size(kPicture) == std::size(kPictureKeys) && std::size(kSound) == std::size(kSoundKeys) &&
+               std::size(kControls) == std::size(kControlsKeys), "one key text per line");
+-constexpr TabList kTabLists[Menu::kTabs - 1] = {{kDisplay, kDisplayKeys, static_cast<int>(std::size(kDisplay))}, {kPicture, kPictureKeys, static_cast<int>(std::size(kPicture))},
++constexpr TabList kTabLists[Menu::kGameTab] = {{kDisplay, kDisplayKeys, static_cast<int>(std::size(kDisplay))}, {kPicture, kPictureKeys, static_cast<int>(std::size(kPicture))},
+                                                 {kSound, kSoundKeys, static_cast<int>(std::size(kSound))}, {kControls, kControlsKeys, static_cast<int>(std::size(kControls))}};
+ constexpr int kVisibleRows = 11;  // lines of the keys page shown at once; the page scrolls
+ constexpr int kKeysPageChars = 58;
+@@ -373,6 +373,7 @@ std::string entry_text(Command c, const Values &v, bool quit_armed) {
+     case Command::free_camera:
+         if (v.free_camera < 0) return "Fixed cameras: not in this game";
+         return std::string("Fixed cameras:  < ") + (v.free_camera ? "off (follow camera)" : "on (as on the PS2)") + " >";
++    case Command::wet_look: return std::string("Wet look (the hero darkens when soaked):  < ") + (v.wet_look ? "on" : "off") + " >";
+     case Command::head_follow:
+         if (v.head_follow < 0) return "Head follows camera: not in this game";
+         return std::string("Head follows camera:  < ") + (v.head_follow ? "on" : "off") + " >";
+@@ -484,7 +485,7 @@ bool Menu::click_tab(int x, int y) {
+ }
+ 
+ int Menu::count() const {
+-    if (page_ == Page::graphics) return tab_ == kGameTab ? recomp_rows_ + 1 : kTabLists[tab_].n;
++    if (page_ == Page::graphics) return tab_ >= kGameTab ? recomp_rows_ + 1 : kTabLists[tab_].n;
+     return page_ == Page::keys ? key_rows_ + 2 : page_ == Page::recomp || page_ == Page::achievements ? recomp_rows_ + 1 : kEntries;
+ }
+ 
+@@ -572,7 +573,7 @@ Command Menu::choose() {
+         return Command::none;
+     }
+     if (page_ == Page::graphics) {
+-        if (tab_ == kGameTab) {
++        if (tab_ >= kGameTab) {
+             if (selected_ < recomp_rows_) return Command::recomp_toggle;
+             back();
+             return Command::none;
+@@ -627,12 +628,12 @@ Command Menu::choose() {
+ 
+ Command Menu::side() const {
+     // rawdanger-recomp: the game's options (Settings > Game, the F3 page) change with left / right too
+-    if ((page_ == Page::recomp || (page_ == Page::graphics && tab_ == kGameTab)) && selected_ < recomp_rows_) return Command::recomp_toggle;
+-    if (page_ != Page::graphics || tab_ == kGameTab) return Command::none;
++    if ((page_ == Page::recomp || (page_ == Page::graphics && tab_ >= kGameTab)) && selected_ < recomp_rows_) return Command::recomp_toggle;
++    if (page_ != Page::graphics || tab_ >= kGameTab) return Command::none;
+     const Command c = kTabLists[tab_].commands[selected_];
+     return c == Command::look || c == Command::scale || c == Command::sharp_2d || c == Command::fullscreen || c == Command::widescreen || c == Command::pause_unfocused || c == Command::menu_game_runs ||
+                    c == Command::master_volume || c == Command::integer_scale || c == Command::lens_rain || c == Command::antialias || c == Command::menu_skin ||
+-                   c == Command::window_size || c == Command::game_blur || c == Command::reverb || c == Command::key_prompts || c == Command::mouse_look || c == Command::camera_orbit || c == Command::free_camera || c == Command::head_follow || c == Command::black_bars || c == Command::sharpen ||
++                   c == Command::window_size || c == Command::game_blur || c == Command::reverb || c == Command::key_prompts || c == Command::mouse_look || c == Command::camera_orbit || c == Command::free_camera || c == Command::head_follow || c == Command::wet_look || c == Command::black_bars || c == Command::sharpen ||
+                    c == Command::mouse_speed || c == Command::mouse_invert || c == Command::mouse_invert_x || c == Command::popup_size || c == Command::keys_on_screen || c == Command::filter_pass || c == Command::ambient_occlusion || c == Command::field_of_view
+                ? c : Command::none;
+ }
+@@ -649,7 +650,7 @@ bool Menu::select_at(int x, int y) {
+         // a tab: hovering does nothing, the click (choose) is handled by click_tab
+         return false;
+     }
+-    if (page_ == Page::recomp || page_ == Page::achievements || (page_ == Page::graphics && tab_ == kGameTab)) {
++    if (page_ == Page::recomp || page_ == Page::achievements || (page_ == Page::graphics && tab_ >= kGameTab)) {
+         const int shown = std::min(recomp_rows_, page_ == Page::achievements ? kAchievementRows : 14);
+         if (entry_h_ <= 0 || x < entry_x_ || x >= entry_x_ + entry_w_ || y < rows_y_ || y >= rows_y_ + (shown + 1) * entry_h_) return false;
+         const int slot = (y - rows_y_) / entry_h_;
+@@ -903,7 +904,7 @@ void Menu::draw_recomp(int window_width, int window_height, const Values &values
+ }
+ 
+ void Menu::draw(int window_width, int window_height, const Values &values, Picture &out) {
+-    if (page_ == Page::recomp || page_ == Page::achievements || (page_ == Page::graphics && tab_ == kGameTab)) {
++    if (page_ == Page::recomp || page_ == Page::achievements || (page_ == Page::graphics && tab_ >= kGameTab)) {
+         draw_recomp(window_width, window_height, values, out);
+         return;
+     }
+diff --git a/host/quickmenu.hpp b/host/quickmenu.hpp
+index 8b53871..a73d582 100644
+--- a/host/quickmenu.hpp
++++ b/host/quickmenu.hpp
+@@ -56,6 +56,7 @@ enum class Command {
+     key_prompts,   // Settings > Controls: the game's texts show the keys (key caps) or the PlayStation symbols
+     mouse_look,    // Settings > Controls: the mouse turns the camera while playing
+     free_camera,   // Settings > Controls: the follow camera also where the game has a fixed one
++    wet_look,      // Settings > Picture: the hero looks wet when the clothes are
+     head_follow,   // Settings > Controls: the hero's head turns toward where the camera looks
+     camera_orbit,  // Settings > Controls: up / down on the camera circles the hero (or the game's own tilt)
+     mouse_speed,   // Settings > Controls: how far the camera turns for a move of the mouse
+@@ -100,6 +101,7 @@ struct Values {
+     int sharpen = 0;
+     int mouse_look = -1;           // -1: this game has no mouse look (PS2_MOUSE_LOOK_YAW), 0 off, 1 on
+     int free_camera = -1;          // -1: not in this game (PS2_FREE_CAMERA), 0 the game's fixed cameras, 1 the follow camera everywhere
++    int wet_look = 1;
+     int head_follow = -1;          // -1: not in this game (PS2_HEAD_FOLLOW), 0 off, 1 on
+     int camera_orbit = -1;         // -1: this game has no orbit camera (PS2_CAMERA_ORBIT), 0 the game's tilt, 1 orbit
+     double mouse_speed = 1.0;
+@@ -155,16 +157,17 @@ public:
+     int click_step(int x) const;
+     // --- the keys page (Change keys): the same panel, one line per button ---
+     bool on_keys_page() const { return page_ == Page::keys; }
+-    bool on_recomp_page() const { return page_ == Page::recomp || (page_ == Page::graphics && tab_ == kGameTab); }
++    bool on_recomp_page() const { return page_ == Page::recomp || (page_ == Page::graphics && tab_ >= kGameTab); }
++    bool on_debug_tab() const { return page_ == Page::graphics && tab_ == kDebugTab; }   // rawdanger-recomp (v0.9.5): the test switches
+     bool on_achievements_page() const { return page_ == Page::achievements; }
+     bool on_graphics_page() const { return page_ == Page::graphics; }
+     void show_achievements() { main_selected_ = 5; page_ = Page::achievements; selected_ = 0; top_ = 0; }
+     void set_recomp_rows(int count) { recomp_rows_ = count; }
+     int recomp_row() const { return selected_; }
+     void show_recomp() { main_selected_ = 3; page_ = Page::graphics; tab_ = kGameTab; selected_ = 0; top_ = 0; }  // F3: Settings > Game
+-    // rawdanger-recomp: Settings is one page with tabs (Display, Picture, Sound, Controls, Game); Tab / Q / E / Page Up / Page Down
++    // rawdanger-recomp: Settings is one page with tabs (Display, Picture, Sound, Controls, Game, Debug); Tab / Q / E / Page Up / Page Down
+     // / L1 / R1 or a click on a tab switch them
+-    static constexpr int kTabs = 5, kGameTab = 4;
++    static constexpr int kTabs = 6, kGameTab = 4, kDebugTab = 5;
+     void tab(int delta);
+     int tab_index() const { return tab_; }
+     bool on_settings_page() const { return page_ == Page::graphics; }
+diff --git a/host/window.cpp b/host/window.cpp
+index fd76197..c8c392e 100644
+--- a/host/window.cpp
++++ b/host/window.cpp
+@@ -244,7 +244,10 @@ std::vector<std::size_t> g_recomp_row_section;  // the Game options page's lines
+ // Opened from Settings > Game (lines at the end), F7 (map select) or Shift+F7 (the debug menu).
+ // In the map select: up / down the line, left / right the value, Cross loads the map at that gate.
+ constexpr std::size_t kDebugRow = static_cast<std::size_t>(-2), kMapSelRow = static_cast<std::size_t>(-3), kInfoRow = static_cast<std::size_t>(-4),
+-                      kHealRow = static_cast<std::size_t>(-5), kKeepRow = static_cast<std::size_t>(-6);
++                      kHealRow = static_cast<std::size_t>(-5), kKeepRow = static_cast<std::size_t>(-6),
++                      // v0.9.5: the Debug tab's test switches
++                      kDryRow = static_cast<std::size_t>(-7), kSoakRow = static_cast<std::size_t>(-8), kWetForceRow = static_cast<std::size_t>(-9),
++                      kWetShowRow = static_cast<std::size_t>(-10), kHeadTestRow = static_cast<std::size_t>(-11);
+ // rawdanger-recomp (v0.9.2): the hero's two bars. PS2_DEBUG_HERO="TABLE,PLAYER,COUNT,NOW1,MOST1,NOW2,MOST2" (hex: the table of the
+ // characters' addresses, the word with the player's number, how many the table has, and two pairs of offsets: a value and its
+ // most). Raw Danger: 0x5EAC80, 0x48F3E4, 235; health (+0x368 of +0x36C, 100) and body temperature (+0x370 of +0x374, 30000: it
+@@ -276,6 +279,7 @@ bool heal_hero() {
+     if (hero < 0x100000u || hero >= 0x2000000u) return false;
+     ps2::st32(hero + d.now1, ps2::ld32(hero + d.most1));
+     ps2::st32(hero + d.now2, ps2::ld32(hero + d.most2));
++    ps2::set_hero_wetness(0.0f);   // v0.9.5: and dry
+     return true;
+ }
+ // rawdanger-recomp (v0.9.1): "Where am I" for reports: PS2_DEBUG_INFO="SCENE,CAMERA,MODE,PIVOT,PLAYER" (hex: the scene word, the
+@@ -305,8 +309,11 @@ std::string debug_info_text() {
+     }
+     float at[3];
+     for (int k = 0; k < 3; ++k) { const std::uint32_t w = ps2::ld32(cam + d.pivot + 4u * k); std::memcpy(&at[k], &w, 4); }
+-    std::snprintf(text, sizeof text, "Scene %u, camera mode %u, character %u, at %.1f %.1f %.1f, frame %llu", ps2::ld32(d.scene), ps2::ld32(cam + d.mode),
+-                  ps2::ld32(d.player), at[0], at[1], at[2], static_cast<unsigned long long>(ps2::frame_count()));
++    const float wet = ps2::hero_wetness();
++    char wet_text[32] = "";
++    if (wet >= 0.0f) std::snprintf(wet_text, sizeof wet_text, ", clothes %d %% wet", static_cast<int>(wet * 100.0f + 0.5f));
++    std::snprintf(text, sizeof text, "Scene %u, camera mode %u, character %u, at %.1f %.1f %.1f%s, frame %llu", ps2::ld32(d.scene), ps2::ld32(cam + d.mode),
++                  ps2::ld32(d.player), at[0], at[1], at[2], wet_text, static_cast<unsigned long long>(ps2::frame_count()));
+     return text;
+ }
+ struct DebugScenes { std::uint32_t address = 0, debug = 0, mapsel = 0, from = 0; bool set = false; };
+@@ -1266,6 +1273,7 @@ void read_keyboard(std::uint16_t &pressed, std::uint8_t &lx, std::uint8_t &ly, s
+     ps2::set_camera_orbit(g_keys.camera_orbit != 0);
+     ps2::set_free_camera(g_keys.free_camera != 0);
+     ps2::set_head_follow(g_keys.head_follow != 0);
++    ps2::set_wet_look_on(g_keys.wet_look != 0);
+     if (g_keep_hero) heal_hero();
+     {
+         static bool was = false;
+@@ -1494,6 +1502,7 @@ void menu_paint(bool show_again) {
+         v.popup_size = g_keys.popup_size;
+         v.filter_pass = ps2::game_filter_pass();
+         v.ambient_occlusion = ps2::ambient_occlusion();
++        v.wet_look = g_keys.wet_look;
+         v.field_of_view = g_keys.field_of_view;
+         v.keys_on_screen = g_keys.keys_on_screen != 0;
+         v.game_waits = g_menu_hold.load();
+@@ -1575,37 +1584,43 @@ void menu_paint(bool show_again) {
+                 row.state = sec.on ? "<  on  >" : "<  off >";
+                 v.recomp_rows.push_back(row);
+             }
+-            if (debug_hero().set) {
+-                for (const std::size_t kind : {kHealRow, kKeepRow}) {
+-                    g_recomp_row_section.push_back(kind);
+-                    quickmenu::Values::RecompRow row;
+-                    row.label = kind == kHealRow ? "Heal and warm the hero (debug)" : "Keep the hero healthy and warm (debug)";
+-                    row.live = true;
+-                    row.state = kind == kHealRow ? "now" : (g_keep_hero ? "<  on  >" : "<  off >");
+-                    v.recomp_rows.push_back(row);
+-                }
+-            }
+-            if (debug_info().set) {
+-                g_recomp_row_section.push_back(kInfoRow);
++            // v0.9.5: the test switches live on their own tab (Settings > Debug), kept in every build for reports and tests
++            const auto debug_row = [&](std::size_t kind, const std::string &label, const std::string &state) {
++                g_recomp_row_section.push_back(kind);
+                 quickmenu::Values::RecompRow row;
+-                row.label = "Where am I (scene, camera, place: for reports)";
++                row.label = label;
+                 row.live = true;
+-                row.state = "show";
++                row.state = state;
+                 v.recomp_rows.push_back(row);
+-            }
+-            if (debug_scenes().set) {
+-                for (const std::size_t kind : {kDebugRow, kMapSelRow}) {
+-                    if ((kind == kMapSelRow && !debug_scenes().mapsel) || (kind == kDebugRow && !debug_scenes().debug)) continue;
+-                    g_recomp_row_section.push_back(kind);
+-                    quickmenu::Values::RecompRow row;
+-                    row.label = kind == kDebugRow ? "Developers' debug menu (on the disc; Shift+F7)" : "Developers' map select (on the disc; F7)";
+-                    row.live = true;
+-                    row.state = "open";
+-                    v.recomp_rows.push_back(row);
++            };
++            if (g_menu.on_debug_tab()) {
++                v.recomp_rows.clear();
++                g_recomp_row_section.clear();
++                if (debug_info().set) debug_row(kInfoRow, "Where am I (scene, camera, place, wetness: for reports)", "show");
++                if (debug_hero().set) {
++                    debug_row(kHealRow, "Heal, warm and dry the hero", "now");
++                    debug_row(kKeepRow, "Keep the hero healthy and warm", g_keep_hero ? "<  on  >" : "<  off >");
++                }
++                if (ps2::hero_wetness() >= 0.0f || ps2::head_follow_available()) {
++                    debug_row(kDryRow, "Dry the hero's clothes", "now");
++                    debug_row(kSoakRow, "Soak the hero's clothes", "now");
++                }
++                if (ps2::head_follow_available()) {
++                    const float f = ps2::wet_force();
++                    debug_row(kWetForceRow, "Wet look: wetness shown", f < 0.0f ? "<  the game's  >" : "<  " + std::to_string(static_cast<int>(f * 100.0f + 0.5f)) + " %  >");
++                    debug_row(kWetShowRow, "Wet look: show the hero's capsules", ps2::wet_show() ? "<  on  >" : "<  off >");
++                    const float t = ps2::head_test();
++                    debug_row(kHeadTestRow, "Head follows camera: a fixed turn", t == 0.0f ? "<  off  >" : "<  " + std::to_string(static_cast<int>(std::lround(t * 57.29578f))) + " deg  >");
++                }
++                if (debug_scenes().set) {
++                    if (debug_scenes().debug) debug_row(kDebugRow, "Developers' debug menu (on the disc; Shift+F7)", "open");
++                    if (debug_scenes().mapsel) debug_row(kMapSelRow, "Developers' map select (on the disc; F7)", "open");
+                 }
+             }
+             g_menu.set_recomp_rows(static_cast<int>(v.recomp_rows.size()));
+             v.recomp_note = g_recomp_note;
++            if (g_menu.on_debug_tab() && g_recomp_note.empty())
++                v.recomp_note = v.recomp_rows.empty() ? "No test switches in this game" : "Test switches, kept in every build for reports";
+         }
+         g_menu.draw(w, h, v, g_menu_picture);
+     } else if (g_note_text.empty() && g_native_hint && g_native_label) {
+@@ -2298,6 +2313,10 @@ void native_option_rows() {
+             const int b = std::clamp(g_keys.black_bars, 0, 100) / 10 * 10;
+             return b == 0 ? std::string("OFF") : std::to_string(b) + " %";
+         }, command(Command::black_bars));
++    {
++        const auto get = [] { return g_keys.wet_look ? 0 : 1; };
++        pick("Wet look", "The hero darkens when soaked", {"ON", "OFF"}, get, toggle_to(Command::wet_look, get));
++    }
+     {
+         const auto get = [] { return lens_rain::level() ? 0 : 1; };
+         pick("Lens rain", "Rain drops on the camera", {"ON", "OFF"}, get, toggle_to(Command::lens_rain, get));
+@@ -2463,6 +2482,12 @@ void menu_command(quickmenu::Command c, int step) {
+         rewrite_keys_file([](const std::string &t) { return keymap::with_free_camera(t, g_keys.free_camera); }, "fixed cameras");
+         set_notice(g_keys.free_camera ? "Fixed cameras off: the follow camera in every place (from the next place that has one)" : "Fixed cameras on: as on the PS2");
+         break;
++    case Command::wet_look:
++        g_keys.wet_look = g_keys.wet_look ? 0 : 1;
++        ps2::set_wet_look_on(g_keys.wet_look != 0);
++        rewrite_keys_file([](const std::string &t) { return keymap::with_wet_look(t, g_keys.wet_look); }, "wet look");
++        set_notice(g_keys.wet_look ? "Wet look: on (the hero darkens as the clothes get wet)" : "Wet look: off");
++        break;
+     case Command::head_follow:
+         if (!ps2::head_follow_available()) break;
+         g_keys.head_follow = g_keys.head_follow ? 0 : 1;
+@@ -2608,6 +2633,38 @@ void menu_command(quickmenu::Command c, int step) {
+             g_recomp_note = g_keep_hero ? "The hero stays healthy and warm (until the game ends or you switch it off)" : "The hero's health and warmth are the game's again";
+             break;
+         }
++        if (row < g_recomp_row_section.size() && g_recomp_row_section[row] == kDryRow) {
++            g_recomp_note = ps2::set_hero_wetness(0.0f) ? "The hero's clothes are dry" : "No hero here (only while playing)";
++            break;
++        }
++        if (row < g_recomp_row_section.size() && g_recomp_row_section[row] == kSoakRow) {
++            g_recomp_note = ps2::set_hero_wetness(1.0f) ? "The hero's clothes are soaked" : "No hero here (only while playing)";
++            break;
++        }
++        if (row < g_recomp_row_section.size() && g_recomp_row_section[row] == kWetForceRow) {
++            // the game's, 0, 25, 50, 75, 100 %
++            const float now = ps2::wet_force();
++            int k = now < 0.0f ? 0 : 1 + static_cast<int>(std::lround(now * 4.0f));
++            k = (k + (step < 0 ? 5 : 1)) % 6;
++            ps2::set_wet_force(k == 0 ? -1.0f : static_cast<float>(k - 1) / 4.0f);
++            g_recomp_note = k == 0 ? "Wet look: the game's wetness" : "Wet look: shown as " + std::to_string((k - 1) * 25) + " % wet (a test; the game's own wetness is unchanged)";
++            break;
++        }
++        if (row < g_recomp_row_section.size() && g_recomp_row_section[row] == kWetShowRow) {
++            ps2::set_wet_show(!ps2::wet_show());
++            g_recomp_note = ps2::wet_show() ? "The wet look's capsules are drawn in blue round the hero" : "The wet look's capsules are hidden";
++            break;
++        }
++        if (row < g_recomp_row_section.size() && g_recomp_row_section[row] == kHeadTestRow) {
++            // off, -60, -30, 30, 60 degrees
++            static const float kTurns[] = {0.0f, -1.047f, -0.524f, 0.524f, 1.047f};
++            int k = 0;
++            while (k < 5 && std::fabs(kTurns[k] - ps2::head_test()) > 0.01f) ++k;
++            k = ((k == 5 ? 0 : k) + (step < 0 ? 4 : 1)) % 5;
++            ps2::set_head_test(kTurns[k]);
++            g_recomp_note = k == 0 ? "The head follows the camera again" : "The head is held turned (a test)";
++            break;
++        }
+         if (row < g_recomp_row_section.size() && g_recomp_row_section[row] == kInfoRow) {
+             const std::string info = debug_info_text();
+             std::fprintf(stderr, "[where] %s\n", info.c_str());
+@@ -2769,7 +2826,7 @@ bool menu_event(const SDL_Event &e) {
+         const std::size_t row = static_cast<std::size_t>(g_menu.recomp_row());
+         if (c == Command::recomp_toggle && row < g_recomp_row_section.size() &&
+             (g_recomp_row_section[row] == kDebugRow || g_recomp_row_section[row] == kMapSelRow || g_recomp_row_section[row] == kInfoRow ||
+-             g_recomp_row_section[row] == kHealRow)) return;
++             g_recomp_row_section[row] == kHealRow || g_recomp_row_section[row] == kDryRow || g_recomp_row_section[row] == kSoakRow)) return;
+         menu_command(c, step);
+     };
+     const auto move = [](int step) {
+diff --git a/runtime/include/ps2/system.hpp b/runtime/include/ps2/system.hpp
+index b4035cb..0e2f535 100644
+--- a/runtime/include/ps2/system.hpp
++++ b/runtime/include/ps2/system.hpp
+@@ -139,6 +139,17 @@ void set_free_camera(bool on);
+ // rawdanger-recomp: the hero's head turns toward where the camera looks (PS2_HEAD_FOLLOW, system.cpp; keys.ini head_follow, on)
+ bool head_follow_available();
+ void set_head_follow(bool on);
++void set_head_test(float radians);   // debug: a fixed turn of the head (0: follows the camera)
++float head_test();
++// rawdanger-recomp (v0.9.5): how wet the hero's worn clothes are (0 ... 1, the wettest; -1 no hero), set them (debug), and the wet
++// look (PS2_HERO_WET, system.cpp; keys.ini wet_look, on) with its debug switches: a forced wetness (-1 the game's), the capsules shown
++float hero_wetness();
++bool set_hero_wetness(float amount);
++void set_wet_look_on(bool on);
++void set_wet_force(float amount);
++float wet_force();
++void set_wet_show(bool on);
++bool wet_show();
+ 
+ bool display_frame(std::vector<std::uint32_t> &rgba, std::uint32_t &width, std::uint32_t &height);
+ 
+diff --git a/runtime/include/ps2/video.hpp b/runtime/include/ps2/video.hpp
+index de520ae..f423321 100644
+--- a/runtime/include/ps2/video.hpp
++++ b/runtime/include/ps2/video.hpp
+@@ -39,6 +39,9 @@ void set_game_filter_pass(int mode);
+ // rawdanger-recomp: ambient occlusion from the game's depth before its colour filter (0 off, 1 light, 2 strong; the GPU only)
+ void set_ambient_occlusion(int level);
+ int ambient_occlusion();
++// rawdanger-recomp: the wet look: how wet the hero is (0 to 1) and the hero's limbs as capsules in GS window coordinates, 7 floats
++// each (x0, y0, x1, y1, radius, nearest depth, farthest depth); darkened in the AO pass (the GPU only)
++void set_wet_look(float amount, const float *capsules, int count);
+ int game_filter_pass();   // rawdanger-recomp: a developers' scene is on screen: its font drawn at its own size (gs.cpp, sjis)
+ // rawdanger-recomp: the keys shown instead of the PlayStation symbols in the game's font (cross, circle, square, triangle; short
+ // names of 1 to 3 letters, "" keeps the symbol); see gpu.cpp, draw_prompt_caps
+diff --git a/runtime/src/gs/gpu/gpu.cpp b/runtime/src/gs/gpu/gpu.cpp
+index 442b7f0..1c70b12 100644
+--- a/runtime/src/gs/gpu/gpu.cpp
++++ b/runtime/src/gs/gpu/gpu.cpp
+@@ -4922,7 +4922,11 @@ void game_ao(const std::uint32_t *p) {
+     if (hwcache::g_on) hwcache::write_region(p[0], p[1], 0x00, 0, 0, w - 1, h - 1, hwcache::kCopy);
+     mark_rendered(frame);
+     if (g_dec_on) stamp_pages(frame, true);
+-    dispatch_linear(kGameAo, static_cast<std::uint32_t>(w * h) * g_scale * g_scale, push_params({p[0], p[1], p[2], p[3], p[4], p[5], p[6], p[7]}));
++    // words 8 on: the wet look's capsules (gs.cpp rdfilter), up to the record's 64
++    std::array<std::uint32_t, kParamStride / 4> record{};
++    for (std::size_t i = 0; i < record.size(); ++i) record[i] = p[i];
++    g_param_records.push_back(record);
++    dispatch_linear(kGameAo, static_cast<std::uint32_t>(w * h) * g_scale * g_scale, static_cast<std::uint32_t>(g_param_records.size() - 1));
+ }
+ 
+ void load_clut(std::uint64_t tex0, std::uint64_t texclut) {
+diff --git a/runtime/src/gs/gpu/gpu.hpp b/runtime/src/gs/gpu/gpu.hpp
+index 1e5b251..c62a4f8 100644
+--- a/runtime/src/gs/gpu/gpu.hpp
++++ b/runtime/src/gs/gpu/gpu.hpp
+@@ -32,7 +32,7 @@ void image_begin(const State &s);
+ void image_data(const std::uint8_t *data, std::size_t bytes);
+ void local_copy(const State &s);
+ void game_filter(const std::uint32_t *p, std::uint32_t n);
+-void game_ao(const std::uint32_t *p);   // rawdanger-recomp: ambient occlusion from the game's depth, before its colour filter (8 words)   // rawdanger-recomp: the game's colour filter in one pass (gs.cpp rdfilter; n words)
++void game_ao(const std::uint32_t *p);   // rawdanger-recomp: ambient occlusion from the game's depth, before its colour filter, and the wet look (64 words)   // rawdanger-recomp: the game's colour filter in one pass (gs.cpp rdfilter; n words)
+ void load_clut(std::uint64_t tex0, std::uint64_t texclut);
+ void flush();
+ void texflush();
+diff --git a/runtime/src/gs/gpu/gs.wgsl b/runtime/src/gs/gpu/gs.wgsl
+index 5200c3d..7b4ad94 100644
+--- a/runtime/src/gs/gpu/gs.wgsl
++++ b/runtime/src/gs/gpu/gs.wgsl
+@@ -1784,6 +1784,58 @@ fn game_ao(@builtin(global_invocation_id) gid: vec3<u32>) {
+     if (z0 < 64.0) {
+         return;   // nothing drawn (sky, cleared)
+     }
++    let ao = select(1.0, ao_factor(x, y, w, h, k, z0), prm(6u) > 0u);
++    let wet = wet_mask(x, y, k, z0);
++    if (ao >= 1.0 && wet <= 0.0) {
++        return;
++    }
++    let fl = locate(0u, prm(0u), prm(1u), x, y);
++    let c = load_at(fl, k);
++    var col = vec3<f32>(f32(c & 255u), f32((c >> 8u) & 255u), f32((c >> 16u) & 255u)) * ao;
++    if (wet > 0.0 && (prm(8u) & 0x8000u) != 0u) {
++        col = mix(col, vec3<f32>(40.0, 120.0, 255.0), wet * 0.6);   // debug: the capsules shown plainly
++    } else if (wet > 0.0) {
++        // v0.9.5: wet cloth and hair: water fills the fibres, less light scatters back (darker) and what does is richer in colour
++        let luma = dot(col, vec3<f32>(0.299, 0.587, 0.114));
++        col = mix(col, (vec3<f32>(luma) + (col - vec3<f32>(luma)) * 1.25) * 0.62, wet);
++    }
++    let o = vec3<u32>(clamp(col, vec3<f32>(0.0), vec3<f32>(255.0)));
++    store(fl, k, o.x | (o.y << 8u) | (o.z << 16u) | (c & 0xFF000000u));
++}
++
++// rawdanger-recomp (v0.9.5): how much of the wet look a pixel gets: inside one of the hero's capsules (prm 9 on, 4 words each:
++// x0 y0, x1 y1 in quarter pixels + 4096 pixels, the radius in quarter pixels, the nearest | farthest depth / 256) and at its
++// depth, times how wet the hero is (prm 8: 0 ... 256, the count in the high half)
++fn wet_mask(x: u32, y: u32, k: u32, z0: f32) -> f32 {
++    let amount = f32(prm(8u) & 0x1FFu) / 256.0;
++    let count = prm(8u) >> 16u;
++    if (amount <= 0.0 || count == 0u) {
++        return 0.0;
++    }
++    let p = vec2<f32>(f32(x) + 0.5, f32(y) + 0.5);
++    var best = 0.0;
++    for (var n = 0u; n < count && n < 13u; n = n + 1u) {
++        let w0 = prm(9u + 4u * n);
++        let w1 = prm(10u + 4u * n);
++        let a = vec2<f32>(f32(w0 & 0xFFFFu), f32(w0 >> 16u)) * 0.25 - vec2<f32>(4096.0);
++        let b = vec2<f32>(f32(w1 & 0xFFFFu), f32(w1 >> 16u)) * 0.25 - vec2<f32>(4096.0);
++        let r = f32(prm(11u + 4u * n)) * 0.25;
++        let zr = prm(12u + 4u * n);
++        let znear = f32(zr & 0xFFFFu) * 256.0;   // the depth grows nearer: the nearest is the biggest
++        let zfar = f32(zr >> 16u) * 256.0;
++        if (z0 < zfar * 0.97 || z0 > znear * 1.03) {
++            continue;
++        }
++        let ab = b - a;
++        let t = clamp(dot(p - a, ab) / max(dot(ab, ab), 1e-4), 0.0, 1.0);
++        let d = length(p - (a + ab * t));
++        best = max(best, 1.0 - smoothstep(r * 0.75, r, d));
++    }
++    return best * amount;
++}
++
++fn ao_factor(x: u32, y: u32, w: u32, h: u32, k: u32, z0: f32) -> f32 {
++
+     // v0.8.9: measured in the world, not in the depth's own steps. The depth grows as the distance shrinks (about 131072 / metres in
+     // Raw Danger's maps: the banquet hall's floor at the camera reads 68000, the city across the river 500), so a crease of the depth
+     // means little far away (one step of the depth there is half a metre: the dark outlines round the far buildings) and a lot near
+@@ -1794,7 +1846,7 @@ fn game_ao(@builtin(global_invocation_id) gid: vec3<u32>) {
+     let radius = min(f32(prm(7u)) * z0 / 72000.0, 16.0);
+     let keep = (1.0 - smoothstep(20.0, 45.0, dist)) * smoothstep(1.5, 3.0, radius);
+     if (keep <= 0.0) {
+-        return;
++        return 1.0;
+     }
+     var occluded = 0.0;
+     var counted = 0.0;
+@@ -1817,11 +1869,5 @@ fn game_ao(@builtin(global_invocation_id) gid: vec3<u32>) {
+         counted = counted + 1.0;
+     }
+     occluded = select(0.0, occluded / counted, counted > 0.0);
+-    let ao = 1.0 - 0.75 * f32(prm(6u)) / 256.0 * keep * clamp(occluded * 2.0, 0.0, 1.0);
+-    let fl = locate(0u, prm(0u), prm(1u), x, y);
+-    let c = load_at(fl, k);
+-    let cr = u32(f32(c & 255u) * ao);
+-    let cg = u32(f32((c >> 8u) & 255u) * ao);
+-    let cb = u32(f32((c >> 16u) & 255u) * ao);
+-    store(fl, k, cr | (cg << 8u) | (cb << 16u) | (c & 0xFF000000u));
++    return 1.0 - 0.75 * f32(prm(6u)) / 256.0 * keep * clamp(occluded * 2.0, 0.0, 1.0);
+ }
+diff --git a/runtime/src/gs/gs.cpp b/runtime/src/gs/gs.cpp
+index 216311c..5618a8e 100644
+--- a/runtime/src/gs/gs.cpp
++++ b/runtime/src/gs/gs.cpp
+@@ -1028,6 +1028,7 @@ namespace rdfilter {
+ std::atomic<int> g_mode{[] { const char *v = std::getenv("PS2_GAME_FILTER_PASS"); return v && *v == '1' ? 1 : 0; }()};
+ bool g_on = true;   // (the walk is looked for always: g_mode says whether it is replaced)
+ constexpr int kMaxDepth = 3, kMaxOps = 8;
++constexpr std::uint32_t kWetCaps = 13;   // capsules of the wet look in one AO pass (4 words each after 9)
+ struct Op {
+     bool alpha = false;          // writes the alpha only (else the colour only)
+     int src = 0;                 // 0 the depth's palette, 1 the brightness' palette, 2 a flat colour
+@@ -1048,6 +1049,14 @@ struct Walk {
+ std::uint32_t g_last_bp[8] = {}, g_last_bw[8] = {};   // the widths of the last few buffers drawn into (the frame's is not in the walk)
+ int g_last_n = 0;
+ std::uint32_t g_scene_bp = 0, g_scene_bw = 0;   // the last 32-bit buffer wider than a page drawn into before the walk: the 3D picture
++std::uint64_t g_scene_xyoffset = 0;              // rawdanger-recomp (wet look): that picture's window offset (XYOFFSET)
++// rawdanger-recomp (v0.9.5): the wet look. The EE side (system.cpp) sends the hero's limbs as capsules on the screen (GS window
++// coordinates: x0 y0 x1 y1, radius, nearest and farthest depth) and how wet the hero is; the AO pass darkens the pixels inside them
++// at the hero's depth.
++std::mutex g_wet_lock;
++float g_wet_amount = 0.0f;
++std::vector<float> g_wet_caps;
++int g_wet_age = 0;   // pictures since they came: the capsules of a hero no longer drawn (another scene, the title) are dropped
+ std::atomic<int> g_ao{[] { const char *v = std::getenv("PS2_AO"); return v ? std::atoi(v) : 0; }()};   // 0 off, 1 light, 2 strong
+ 
+ std::uint32_t entry(std::uint32_t cbp, std::uint32_t i) {   // palette entry i of a 256-entry 32-bit palette stored at cbp (CSM1)
+@@ -1162,7 +1171,7 @@ bool step(const State &s, std::uint64_t attr) {
+             while (i < std::min(g_last_n, 8) && g_last_bp[i] != fbp) ++i;
+             if (i == std::min(g_last_n, 8)) i = g_last_n++ % 8;
+             g_last_bp[i] = fbp, g_last_bw[i] = fbw;
+-            if (fpsm == 0x00) g_scene_bp = fbp, g_scene_bw = fbw;
++            if (fpsm == 0x00) g_scene_bp = fbp, g_scene_bw = fbw, g_scene_xyoffset = c.xyoffset;
+             return true;
+         }
+         const std::uint32_t zbp = static_cast<std::uint32_t>(c.zbuf & 0x1FFu) * 32u;
+@@ -1171,8 +1180,33 @@ bool step(const State &s, std::uint64_t attr) {
+         w.active = true, w.zbp = zbp, w.zpsm = 0x30u | ((static_cast<std::uint32_t>(c.zbuf >> 24)) & 0xFu), w.buf = fbp, w.pages = 1, w.copies = 1;
+ #ifdef PS2_GPU
+         // ambient occlusion on the 3D picture before the filter tints it (only with the GPU)
+-        if (const int ao = g_ao.load(std::memory_order_relaxed); ao > 0 && gpu_on() && g_scene_bp && g_scene_bw >= 8 && g_scene_bw <= 16) {
+-            const std::uint32_t p[8] = {g_scene_bp, g_scene_bw, g_scene_bw * 64u, 448u, zbp, w.zpsm, ao >= 2 ? 245u : 170u, 80u};   // v0.8.7: radius 80 (38 hardly showed)
++        float wet = 0.0f;
++        std::vector<float> caps;
++        {
++            std::lock_guard<std::mutex> hold(g_wet_lock);
++            wet = g_wet_amount, caps = g_wet_caps;
++            if (++g_wet_age > 4) wet = 0.0f, caps.clear();
++        }
++        const int ao = g_ao.load(std::memory_order_relaxed);
++        const bool show = wet < 0.0f;   // debug: the capsules drawn plainly
++        const bool wet_on = (wet > 0.01f || show) && caps.size() >= 7;
++        if ((ao > 0 || wet_on) && gpu_on() && g_scene_bp && g_scene_bw >= 8 && g_scene_bw <= 16) {
++            std::uint32_t p[64] = {g_scene_bp, g_scene_bw, g_scene_bw * 64u, 448u, zbp, w.zpsm, ao >= 2 ? 245u : ao > 0 ? 170u : 0u, 80u};   // v0.8.7: radius 80 (38 hardly showed)
++            if (wet_on) {
++                // the capsules in the picture's pixels, a quarter pixel a step, +4096 pixels so a part off the left or the top fits
++                const float ofx = static_cast<float>(g_scene_xyoffset & 0xFFFFu) / 16.0f, ofy = static_cast<float>((g_scene_xyoffset >> 32) & 0xFFFFu) / 16.0f;
++                const auto pos = [](float v) { return static_cast<std::uint32_t>(std::clamp((v + 4096.0f) * 4.0f, 0.0f, 65535.0f)); };
++                const auto depth = [](float v) { return static_cast<std::uint32_t>(std::clamp(v / 256.0f, 0.0f, 65535.0f)); };
++                std::uint32_t n = 0;
++                for (std::size_t i = 0; i + 7 <= caps.size() && n < kWetCaps; i += 7, ++n) {
++                    const float *c = caps.data() + i;
++                    p[9 + 4 * n] = pos(c[0] - ofx) | pos(c[1] - ofy) << 16;
++                    p[10 + 4 * n] = pos(c[2] - ofx) | pos(c[3] - ofy) << 16;
++                    p[11 + 4 * n] = static_cast<std::uint32_t>(std::clamp(c[4] * 4.0f, 0.0f, 65535.0f));
++                    p[12 + 4 * n] = depth(c[5]) | depth(c[6]) << 16;
++                }
++                p[8] = (show ? 0x8100u : static_cast<std::uint32_t>(std::clamp(wet, 0.0f, 1.0f) * 256.0f)) | n << 16;
++            }
+             gpu::game_ao(p);
+         }
+ #endif
+@@ -2529,6 +2563,12 @@ void state(ps2::state::Stream &s) {
+ 
+ namespace ps2 {
+ void set_debug_text(bool on) { ps2::gs::sjis::g_debug_text.store(on, std::memory_order_relaxed); }
++void set_wet_look(float amount, const float *capsules, int count) {
++    std::lock_guard<std::mutex> hold(ps2::gs::rdfilter::g_wet_lock);
++    ps2::gs::rdfilter::g_wet_amount = amount;
++    ps2::gs::rdfilter::g_wet_caps.assign(capsules, capsules + 7 * std::max(count, 0));
++    ps2::gs::rdfilter::g_wet_age = 0;
++}
+ void set_ambient_occlusion(int level) { ps2::gs::rdfilter::g_ao.store(std::clamp(level, 0, 2), std::memory_order_relaxed); }
+ int ambient_occlusion() { return ps2::gs::rdfilter::g_ao.load(std::memory_order_relaxed); }
+ void set_game_filter_pass(int mode) { ps2::gs::rdfilter::g_mode.store(mode ? 1 : 0, std::memory_order_relaxed); }
+diff --git a/runtime/src/system.cpp b/runtime/src/system.cpp
+index b7a7923..a7aa871 100644
+--- a/runtime/src/system.cpp
++++ b/runtime/src/system.cpp
+@@ -1324,6 +1324,7 @@ struct HeadFollow {
+ HeadFollow g_head;
+ std::atomic<bool> g_head_on{true};
+ float g_head_yaw = 0.0f, g_head_pitch = 0.0f;
++std::atomic<float> g_head_test{0.0f};   // debug (Debug tab): a fixed turn in radians, 0 the camera's
+ std::uint32_t head_bone() {
+     const std::uint32_t pid = ld32(g_head.player);
+     if (pid > 7u) return 0;
+@@ -1345,12 +1346,153 @@ void rotate_rows(std::uint32_t bone, const float axis[3], float angle) {
+         for (int i = 0; i < 3; ++i) st32(a + 4u * i, float_word(v[i] * co + x[i] * s + axis[i] * d * (1.0f - co)));
+     }
+ }
++// rawdanger-recomp (v0.9.5): how wet the hero is, and the wet look. Raw Danger keeps the characters' things in a pool (the word ROOT
++// holds its address): sets at ROOT + SETS (a list: +0 the entries, +4 an entry's size, +0xC how many), one per character (+0xE the
++// character's number, +0xD 0 when in use), each with a chain of things (+0x14 their list, +FIRST the first, +NEXT the next in the
++// chain, -1 at the end); a thing worn has +WORN 1 and its wetness at +WET (0 ... MOST: the HUD shows "Dry" at 0 and drops above).
++// PS2_HERO_WET="ROOT,SETS,FIRST,ITEMS,NEXT,WORN,WET,PLAYER,MOST,MATRIX,POINTER,PLACE" (hex; MATRIX the game's world-to-screen matrix,
++// POINTER / PLACE the active camera block and its place), Raw Danger's (US) own without it.
++struct HeroWet {
++    bool set = false;
++    std::uint32_t root = 0, sets = 0, first = 0, items = 0, next = 0, worn = 0, wet = 0, player = 0, most = 0, matrix = 0, pointer = 0, place = 0;
++};
++const HeroWet &hero_wet_setup() {
++    static const HeroWet h = [] {
++        HeroWet r;
++        const char *v = std::getenv("PS2_HERO_WET");
++        if (!v || !*v) v = "48F730,5C38,24,14,8,1C,30,48F3E4,64,5FD690,48F4E0,160";
++        unsigned long x[12] = {};
++        if (std::sscanf(v, "%lx,%lx,%lx,%lx,%lx,%lx,%lx,%lx,%lx,%lx,%lx,%lx", &x[0], &x[1], &x[2], &x[3], &x[4], &x[5], &x[6], &x[7], &x[8], &x[9], &x[10],
++                        &x[11]) == 12) {
++            auto u = [&](int i) { return static_cast<std::uint32_t>(x[i]); };
++            r = {true, u(0), u(1), u(2), u(3), u(4), u(5), u(6), u(7), u(8), u(9), u(10), u(11)};
++        }
++        return r;
++    }();
++    return h;
++}
++bool in_ram(std::uint32_t a) { return a >= 0x100000u && a < 0x2000000u; }
++// calls `fn(address of the thing)` for each thing the player has; false when there is no player's set
++bool head_call_in_place();
++template <typename F> bool for_hero_things(F fn) {
++    const HeroWet &h = hero_wet_setup();
++    // Raw Danger's own addresses only for its US release: given by RawDangerPC.exe, or with [Head follows camera] in place
++    static const bool given = std::getenv("PS2_HERO_WET") != nullptr;
++    if (!h.set || (!given && !head_call_in_place())) return false;
++    const std::uint32_t root = ld32(h.root);
++    if (!in_ram(root)) return false;
++    const std::uint32_t list = root + h.sets, base = ld32(list), size = ld32(list + 4), count = ld32(list + 0xC);
++    const std::uint32_t pid = ld32(h.player);
++    if (!in_ram(base) || size == 0 || size > 0x1000 || count > 256) return false;
++    for (std::uint32_t i = 0; i < count; ++i) {
++        const std::uint32_t e = base + size * i;
++        if (ld8(e + 0xD) != 0 || static_cast<std::uint32_t>(static_cast<std::int16_t>(ld16(e + 0xE))) != pid) continue;
++        const std::uint32_t ib = ld32(e + h.items), isz = ld32(e + h.items + 4);
++        if (!in_ram(ib) || isz == 0 || isz > 0x1000) return false;
++        std::uint32_t n = ld32(e + h.first);
++        for (int guard = 0; n != 0xFFFFFFFFu && n < 0x1000u && guard < 64; ++guard) {
++            fn(ib + isz * n);
++            n = ld32(ib + isz * n + h.next);
++        }
++        return true;
++    }
++    return false;
++}
++std::atomic<float> g_wet_force{[] { const char *v = std::getenv("PS2_WET_FORCE"); return v && *v ? static_cast<float>(std::atof(v)) : -1.0f; }()};   // debug: a wetness forced (0 ... 1), -1 the game's
++std::atomic<bool> g_wet_look_on{true};
++std::atomic<bool> g_wet_show{[] { const char *v = std::getenv("PS2_WET_SHOW"); return v && *v == '1'; }()};   // debug: the capsules drawn plainly
++float g_wet_shown = 0.0f;                   // eased
++// the hero's limbs: bone pairs (from, to: the list's order, 0 the model's first bone) and the radius in metres
++struct Limb { int from, to; float radius; };
++constexpr Limb kLimbs[] = {{4, 6, 0.19f}, {6, 7, 0.09f}, {7, -1, 0.14f}, {16, 18, 0.075f}, {18, 20, 0.06f}, {23, 25, 0.075f}, {25, 27, 0.06f},
++                           {8, 9, 0.09f},  {9, 11, 0.075f}, {12, 13, 0.09f}, {13, 15, 0.075f}, {4, -2, 0.24f}};
++void update_wet_look(std::uint32_t head) {
++    const HeroWet &h = hero_wet_setup();
++    if (!h.set) return;
++    float wet = 0.0f;
++    for_hero_things([&](std::uint32_t t) {
++        if (ld8(t + h.worn) == 1) wet = std::max(wet, word_float(ld32(t + h.wet)) / static_cast<float>(h.most ? h.most : 100));
++    });
++    if (!std::isfinite(wet)) wet = 0.0f;
++    if (const float forced = g_wet_force.load(std::memory_order_relaxed); forced >= 0.0f) wet = forced;
++    if (!g_wet_look_on.load(std::memory_order_relaxed)) wet = 0.0f;
++    g_wet_shown += (std::clamp(wet, 0.0f, 1.0f) - g_wet_shown) * 0.05f;
++    const bool show = g_wet_show.load(std::memory_order_relaxed);
++    if (g_wet_shown < 0.01f && !show) {
++        set_wet_look(0.0f, nullptr, 0);
++        return;
++    }
++    // the bones in the list's order (from the head's model: the head is bone g_head.index)
++    std::uint32_t bones[48] = {};
++    {
++        const std::uint32_t pid = ld32(g_head.player), ch = ld32(g_head.table + 4u * pid), model = ld32(ch + g_head.model);
++        std::uint32_t n = ld32(model + 4u);
++        for (int i = 0; i < 48 && in_ram(n); ++i) bones[i] = n, n = ld32(n + 4u);
++        if (bones[g_head.index < 48 ? g_head.index : 0] != head) return;
++    }
++    float m[16];
++    for (int i = 0; i < 16; ++i) m[i] = word_float(ld32(h.matrix + 4u * i));
++    const std::uint32_t cam = ld32(h.pointer);
++    if (!in_ram(cam)) return;
++    const float cx = word_float(ld32(cam + h.place)), cy = word_float(ld32(cam + h.place + 4)), cz = word_float(ld32(cam + h.place + 8));
++    struct P { float x, y, z; bool ok; };
++    const auto project = [&](float x, float y, float z) {
++        const float px = x * m[0] + y * m[4] + z * m[8] + m[12], py = x * m[1] + y * m[5] + z * m[9] + m[13];
++        const float pz = x * m[2] + y * m[6] + z * m[10] + m[14], pw = x * m[3] + y * m[7] + z * m[11] + m[15];
++        if (!(pw > 0.05f) || !std::isfinite(px) || !std::isfinite(py)) return P{0, 0, 0, false};
++        return P{px / pw, py / pw, pz / pw, true};
++    };
++    const auto place = [&](int i, float out[3]) {
++        if (i < 0 || i >= 48 || !in_ram(bones[i])) return false;
++        for (int k = 0; k < 3; ++k) out[k] = word_float(ld32(bones[i] + 0x40u + 4u * k));
++        return std::isfinite(out[0]) && std::isfinite(out[1]) && std::isfinite(out[2]);
++    };
++    std::vector<float> caps;
++    for (const Limb &l : kLimbs) {
++        float a[3], b[3];
++        if (!place(l.from, a)) continue;
++        if (l.to == -1) b[0] = a[0], b[1] = a[1] - 0.2f, b[2] = a[2];   // the head: from the neck up (y points down)
++        else if (l.to == -2) {                                            // the skirt or the coat: down to the tails' ends
++            float s[3] = {0, 0, 0};
++            int got = 0;
++            for (int t = 32; t < 48; t += 3) {
++                float e[3];
++                if (place(t, e)) s[0] += e[0], s[1] += e[1], s[2] += e[2], ++got;
++            }
++            if (!got) continue;
++            b[0] = s[0] / got, b[1] = s[1] / got, b[2] = s[2] / got;
++        } else if (!place(l.to, b)) continue;
++        P pa = project(a[0], a[1], a[2]), pb = project(b[0], b[1], b[2]);
++        if (!pa.ok || !pb.ok) continue;
++        // the radius on the screen, and the depths from the nearest to the farthest side
++        float dir[3] = {a[0] - cx, a[1] - cy, a[2] - cz};
++        const float dl = std::sqrt(dir[0] * dir[0] + dir[1] * dir[1] + dir[2] * dir[2]);
++        if (!(dl > 0.1f)) continue;
++        for (float &v : dir) v /= dl;
++        float side[3] = {dir[2], 0.0f, -dir[0]};
++        const float sl = std::sqrt(side[0] * side[0] + side[2] * side[2]);
++        if (sl > 1e-3f) side[0] /= sl, side[2] /= sl; else side[0] = 1.0f, side[2] = 0.0f;
++        const P ps = project(a[0] + side[0] * l.radius, a[1], a[2] + side[2] * l.radius);
++        if (!ps.ok) continue;
++        const float r = std::hypot(ps.x - pa.x, ps.y - pa.y);
++        float znear = 0.0f, zfar = 1e30f;
++        for (const float *e : {a, b})
++            for (const float sgn : {-1.0f, 1.0f}) {
++                const P q = project(e[0] + dir[0] * l.radius * sgn, e[1] + dir[1] * l.radius * sgn, e[2] + dir[2] * l.radius * sgn);
++                if (q.ok) znear = std::max(znear, q.z), zfar = std::min(zfar, q.z);
++            }
++        if (!(zfar < znear)) continue;
++        caps.insert(caps.end(), {pa.x, pa.y, pb.x, pb.y, r, znear, zfar});
++    }
++    set_wet_look(show ? -1.0f : g_wet_shown, caps.data(), static_cast<int>(caps.size() / 7));
++}
+ void head_follow_call(Cpu &c) {
+     const std::uint32_t back = c.r[31].w[0];
+     const std::uint32_t bone = c.r[4].w[0];
+     call(c, g_head.fn, 1);
+     c.r[31].sd[0] = static_cast<std::int32_t>(back);
+     if (bone == 0 || bone != head_bone()) return;
++    update_wet_look(bone);
+     float want_yaw = 0.0f, want_pitch = 0.0f;
+     const std::uint32_t cam = ld32(g_head.pointer);
+     const bool live = g_head_on.load(std::memory_order_relaxed) && ld32(g_head.when) == g_head.when_value && cam >= 0x100000u &&
+@@ -1379,6 +1521,7 @@ void head_follow_call(Cpu &c) {
+         float y = 0, p = 0;
+         if (std::sscanf(t, "%f,%f", &y, &p) == 2) g_head_yaw = y, g_head_pitch = p;
+     }
++    if (const float t = g_head_test.load(std::memory_order_relaxed); t != 0.0f) g_head_yaw = t, g_head_pitch = 0.0f;   // debug: a fixed turn
+     if (std::fabs(g_head_yaw) < 1e-4f && std::fabs(g_head_pitch) < 1e-4f) return;
+     const float up[3] = {0.0f, 1.0f, 0.0f};
+     rotate_rows(bone, up, g_head_yaw);
+@@ -1405,10 +1548,37 @@ struct HeadFollowSetup {
+ };
+ HeadFollowSetup g_head_setup;
+ }  // namespace
++float hero_wetness() {
++    const HeroWet &h = hero_wet_setup();
++    float wet = -1.0f;
++    for_hero_things([&](std::uint32_t t) {
++        if (ld8(t + h.worn) == 1) wet = std::max(wet, word_float(ld32(t + h.wet)) / static_cast<float>(h.most ? h.most : 100));
++    });
++    return wet;
++}
++bool set_hero_wetness(float amount) {
++    const HeroWet &h = hero_wet_setup();
++    const float v = std::clamp(amount, 0.0f, 1.0f) * static_cast<float>(h.most ? h.most : 100);
++    bool any = false;
++    for_hero_things([&](std::uint32_t t) {
++        if (ld8(t + h.worn) == 1) st32(t + h.wet, float_word(v)), any = true;
++    });
++    return any;
++}
++void set_wet_look_on(bool on) { g_wet_look_on = on; }
++void set_wet_force(float amount) { g_wet_force = amount; }
++float wet_force() { return g_wet_force.load(); }
++void set_wet_show(bool on) { g_wet_show = on; }
++bool wet_show() { return g_wet_show.load(); }
+ bool head_follow_available() {
+     return g_head.set && ld32(g_head.at) == (0x0C000000u | (((kHostCallBase + 4u * g_head.call) >> 2) & 0x03FFFFFFu));
+ }
++namespace {
++bool head_call_in_place() { return head_follow_available(); }
++}  // namespace
+ void set_head_follow(bool on) { g_head_on = on; }
++void set_head_test(float radians) { g_head_test = radians; }
++float head_test() { return g_head_test.load(); }
+ void add_camera_orbit_turn(float radians) {
+     float now = g_orbit_turn.load();
+     while (!g_orbit_turn.compare_exchange_weak(now, std::clamp(now + radians, -0.6f, 0.6f))) {}
+-- 
+2.43.0
+

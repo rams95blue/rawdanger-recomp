@@ -56,6 +56,7 @@ enum class Command {
     key_prompts,   // Settings > Controls: the game's texts show the keys (key caps) or the PlayStation symbols
     mouse_look,    // Settings > Controls: the mouse turns the camera while playing
     free_camera,   // Settings > Controls: the follow camera also where the game has a fixed one
+    wet_look,      // Settings > Picture: the hero looks wet when the clothes are
     head_follow,   // Settings > Controls: the hero's head turns toward where the camera looks
     camera_orbit,  // Settings > Controls: up / down on the camera circles the hero (or the game's own tilt)
     mouse_speed,   // Settings > Controls: how far the camera turns for a move of the mouse
@@ -100,6 +101,7 @@ struct Values {
     int sharpen = 0;
     int mouse_look = -1;           // -1: this game has no mouse look (PS2_MOUSE_LOOK_YAW), 0 off, 1 on
     int free_camera = -1;          // -1: not in this game (PS2_FREE_CAMERA), 0 the game's fixed cameras, 1 the follow camera everywhere
+    int wet_look = 1;
     int head_follow = -1;          // -1: not in this game (PS2_HEAD_FOLLOW), 0 off, 1 on
     int camera_orbit = -1;         // -1: this game has no orbit camera (PS2_CAMERA_ORBIT), 0 the game's tilt, 1 orbit
     double mouse_speed = 1.0;
@@ -155,16 +157,17 @@ public:
     int click_step(int x) const;
     // --- the keys page (Change keys): the same panel, one line per button ---
     bool on_keys_page() const { return page_ == Page::keys; }
-    bool on_recomp_page() const { return page_ == Page::recomp || (page_ == Page::graphics && tab_ == kGameTab); }
+    bool on_recomp_page() const { return page_ == Page::recomp || (page_ == Page::graphics && tab_ >= kGameTab); }
+    bool on_debug_tab() const { return page_ == Page::graphics && tab_ == kDebugTab; }   // rawdanger-recomp (v0.9.5): the test switches
     bool on_achievements_page() const { return page_ == Page::achievements; }
     bool on_graphics_page() const { return page_ == Page::graphics; }
     void show_achievements() { main_selected_ = 5; page_ = Page::achievements; selected_ = 0; top_ = 0; }
     void set_recomp_rows(int count) { recomp_rows_ = count; }
     int recomp_row() const { return selected_; }
     void show_recomp() { main_selected_ = 3; page_ = Page::graphics; tab_ = kGameTab; selected_ = 0; top_ = 0; }  // F3: Settings > Game
-    // rawdanger-recomp: Settings is one page with tabs (Display, Picture, Sound, Controls, Game); Tab / Q / E / Page Up / Page Down
+    // rawdanger-recomp: Settings is one page with tabs (Display, Picture, Sound, Controls, Game, Debug); Tab / Q / E / Page Up / Page Down
     // / L1 / R1 or a click on a tab switch them
-    static constexpr int kTabs = 5, kGameTab = 4;
+    static constexpr int kTabs = 6, kGameTab = 4, kDebugTab = 5;
     void tab(int delta);
     int tab_index() const { return tab_; }
     bool on_settings_page() const { return page_ == Page::graphics; }

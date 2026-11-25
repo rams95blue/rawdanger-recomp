@@ -115,13 +115,13 @@ constexpr int kEntries = 7;
 constexpr Command kCommands[kEntries] = {Command::resume, Command::save, Command::load, Command::graphics, Command::achievements, Command::language, Command::quit};
 // the program's key for the same thing, shown dim at the right end of the entry
 constexpr const char *kKeys[kEntries] = {"F1", "F5", "F8", "F3", "F4", "", ""};
-// Settings: one page, five tabs (the Game tab lists the game's own options, filled by the window)
-constexpr const char *kTabNames[Menu::kTabs] = {"DISPLAY", "PICTURE", "SOUND", "CONTROLS", "GAME"};
+// Settings: one page, six tabs (the Game and Debug tabs list rows the window fills: the game's own options, the test switches)
+constexpr const char *kTabNames[Menu::kTabs] = {"DISPLAY", "PICTURE", "SOUND", "CONTROLS", "GAME", "DEBUG"};
 constexpr int kAchievementRows = 7;   // rawdanger-recomp: achievements lines shown at a time (bigger panel)
 constexpr Command kDisplay[] = {Command::scale, Command::window_size, Command::fullscreen, Command::widescreen, Command::integer_scale, Command::menu_game_runs, Command::pause_unfocused, Command::menu_skin, Command::popup_size, Command::back};
 constexpr const char *kDisplayKeys[] = {"", "", "F11", "", "", "", "", "", "", "Esc"};
-constexpr Command kPicture[] = {Command::field_of_view, Command::look, Command::antialias, Command::sharpen, Command::sharp_2d, Command::game_blur, Command::filter_pass, Command::ambient_occlusion, Command::black_bars, Command::lens_rain, Command::back};
-constexpr const char *kPictureKeys[] = {"", "F2", "", "", "", "", "", "", "", "", "Esc"};
+constexpr Command kPicture[] = {Command::field_of_view, Command::look, Command::antialias, Command::sharpen, Command::sharp_2d, Command::game_blur, Command::filter_pass, Command::ambient_occlusion, Command::wet_look, Command::black_bars, Command::lens_rain, Command::back};
+constexpr const char *kPictureKeys[] = {"", "F2", "", "", "", "", "", "", "", "", "", "Esc"};
 constexpr Command kSound[] = {Command::master_volume, Command::reverb, Command::back};
 constexpr const char *kSoundKeys[] = {"", "", "Esc"};
 constexpr Command kControls[] = {Command::change_keys, Command::keys_on_screen, Command::mouse_look, Command::camera_orbit, Command::free_camera, Command::head_follow, Command::mouse_speed, Command::mouse_invert_x, Command::mouse_invert, Command::key_prompts, Command::back};
@@ -129,7 +129,7 @@ constexpr const char *kControlsKeys[] = {"", "F10", "", "", "", "", "", "", "", 
 struct TabList { const Command *commands; const char *const *keys; int n; };
 static_assert(std::size(kDisplay) == std::size(kDisplayKeys) && std::size(kPicture) == std::size(kPictureKeys) && std::size(kSound) == std::size(kSoundKeys) &&
               std::size(kControls) == std::size(kControlsKeys), "one key text per line");
-constexpr TabList kTabLists[Menu::kTabs - 1] = {{kDisplay, kDisplayKeys, static_cast<int>(std::size(kDisplay))}, {kPicture, kPictureKeys, static_cast<int>(std::size(kPicture))},
+constexpr TabList kTabLists[Menu::kGameTab] = {{kDisplay, kDisplayKeys, static_cast<int>(std::size(kDisplay))}, {kPicture, kPictureKeys, static_cast<int>(std::size(kPicture))},
                                                 {kSound, kSoundKeys, static_cast<int>(std::size(kSound))}, {kControls, kControlsKeys, static_cast<int>(std::size(kControls))}};
 constexpr int kVisibleRows = 11;  // lines of the keys page shown at once; the page scrolls
 constexpr int kKeysPageChars = 58;
@@ -373,6 +373,7 @@ std::string entry_text(Command c, const Values &v, bool quit_armed) {
     case Command::free_camera:
         if (v.free_camera < 0) return "Fixed cameras: not in this game";
         return std::string("Fixed cameras:  < ") + (v.free_camera ? "off (follow camera)" : "on (as on the PS2)") + " >";
+    case Command::wet_look: return std::string("Wet look (the hero darkens when soaked):  < ") + (v.wet_look ? "on" : "off") + " >";
     case Command::head_follow:
         if (v.head_follow < 0) return "Head follows camera: not in this game";
         return std::string("Head follows camera:  < ") + (v.head_follow ? "on" : "off") + " >";
@@ -484,7 +485,7 @@ bool Menu::click_tab(int x, int y) {
 }
 
 int Menu::count() const {
-    if (page_ == Page::graphics) return tab_ == kGameTab ? recomp_rows_ + 1 : kTabLists[tab_].n;
+    if (page_ == Page::graphics) return tab_ >= kGameTab ? recomp_rows_ + 1 : kTabLists[tab_].n;
     return page_ == Page::keys ? key_rows_ + 2 : page_ == Page::recomp || page_ == Page::achievements ? recomp_rows_ + 1 : kEntries;
 }
 
@@ -572,7 +573,7 @@ Command Menu::choose() {
         return Command::none;
     }
     if (page_ == Page::graphics) {
-        if (tab_ == kGameTab) {
+        if (tab_ >= kGameTab) {
             if (selected_ < recomp_rows_) return Command::recomp_toggle;
             back();
             return Command::none;
@@ -627,12 +628,12 @@ Command Menu::choose() {
 
 Command Menu::side() const {
     // rawdanger-recomp: the game's options (Settings > Game, the F3 page) change with left / right too
-    if ((page_ == Page::recomp || (page_ == Page::graphics && tab_ == kGameTab)) && selected_ < recomp_rows_) return Command::recomp_toggle;
-    if (page_ != Page::graphics || tab_ == kGameTab) return Command::none;
+    if ((page_ == Page::recomp || (page_ == Page::graphics && tab_ >= kGameTab)) && selected_ < recomp_rows_) return Command::recomp_toggle;
+    if (page_ != Page::graphics || tab_ >= kGameTab) return Command::none;
     const Command c = kTabLists[tab_].commands[selected_];
     return c == Command::look || c == Command::scale || c == Command::sharp_2d || c == Command::fullscreen || c == Command::widescreen || c == Command::pause_unfocused || c == Command::menu_game_runs ||
                    c == Command::master_volume || c == Command::integer_scale || c == Command::lens_rain || c == Command::antialias || c == Command::menu_skin ||
-                   c == Command::window_size || c == Command::game_blur || c == Command::reverb || c == Command::key_prompts || c == Command::mouse_look || c == Command::camera_orbit || c == Command::free_camera || c == Command::head_follow || c == Command::black_bars || c == Command::sharpen ||
+                   c == Command::window_size || c == Command::game_blur || c == Command::reverb || c == Command::key_prompts || c == Command::mouse_look || c == Command::camera_orbit || c == Command::free_camera || c == Command::head_follow || c == Command::wet_look || c == Command::black_bars || c == Command::sharpen ||
                    c == Command::mouse_speed || c == Command::mouse_invert || c == Command::mouse_invert_x || c == Command::popup_size || c == Command::keys_on_screen || c == Command::filter_pass || c == Command::ambient_occlusion || c == Command::field_of_view
                ? c : Command::none;
 }
@@ -649,7 +650,7 @@ bool Menu::select_at(int x, int y) {
         // a tab: hovering does nothing, the click (choose) is handled by click_tab
         return false;
     }
-    if (page_ == Page::recomp || page_ == Page::achievements || (page_ == Page::graphics && tab_ == kGameTab)) {
+    if (page_ == Page::recomp || page_ == Page::achievements || (page_ == Page::graphics && tab_ >= kGameTab)) {
         const int shown = std::min(recomp_rows_, page_ == Page::achievements ? kAchievementRows : 14);
         if (entry_h_ <= 0 || x < entry_x_ || x >= entry_x_ + entry_w_ || y < rows_y_ || y >= rows_y_ + (shown + 1) * entry_h_) return false;
         const int slot = (y - rows_y_) / entry_h_;
@@ -903,7 +904,7 @@ void Menu::draw_recomp(int window_width, int window_height, const Values &values
 }
 
 void Menu::draw(int window_width, int window_height, const Values &values, Picture &out) {
-    if (page_ == Page::recomp || page_ == Page::achievements || (page_ == Page::graphics && tab_ == kGameTab)) {
+    if (page_ == Page::recomp || page_ == Page::achievements || (page_ == Page::graphics && tab_ >= kGameTab)) {
         draw_recomp(window_width, window_height, values, out);
         return;
     }

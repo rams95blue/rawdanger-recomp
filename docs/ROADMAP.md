@@ -126,7 +126,8 @@ ROOT.FAT); if it does, they are candidates for the Enhanced Edition.
 | v0.9.2 changes | ✅ | Debug lines in Settings > Game: Heal and warm the hero (once) and Keep the hero healthy and warm (every frame): the hero's health and body temperature found (the characters' table 0x5EAC80, +0x368 / +0x370; the body temperature falls while wet and cold, and the HUD's arrow turns blue). A build with the new camera code no longer stops when started without RawDangerPC.exe's camera settings (the engine has Raw Danger's own). The README's banner, badges, highlights and quick start (docs/images, tools/rd_readme_art.py) |
 | v0.9.3 changes | ✅ | Your keys in the menus' own button pictures too: the help strips of the Options screen, the map, the character select, the radio, the relations, the memories, the epilogue and the results draw the buttons as ringed symbols in pictures of their own; tools/rd_prompts.py finds them on the disc (a white ring 15 pixels across with the button's own colour inside: 19 pictures, 51 symbols on the US disc) and the engine draws a key cap with your key over each, as it does in the texts (Settings > Controls > Key names in texts) |
 | v0.9.4 changes | ✅ | **The hero's head follows the camera**: with the follow camera while playing, the hero (either one) turns the head toward where the camera looks, up to 60 degrees each way and a little up or down with the camera's pitch, eased in and out; it comes back to the middle when the camera looks at the hero's face, and cutscenes, the first-person view and the fixed cameras keep the animation as it is. Settings > Controls > Head follows camera (on by default; keys.ini head_follow). Engine patch 0039 (host call 202 in the function that builds the bones' world matrices). Detail distance: eleven likely distance words raised three times changed no pixel in three places, so the pop-in is not a single distance setting (see item 7) |
-| **Pending (v0.9.4)** | ⏳ | See the list below |
+| v0.9.5 changes | ✅ | **The wet look**: the hero darkens and the colours deepen as the clothes get wet, and lighten again as they dry, from the game's own wetness (the worn clothes' 0-100, what the HUD's drops show). The hero's limbs are projected with the game's own world-to-screen matrix into capsules on the screen, and the GPU's AO pass darkens only the pixels inside them at the hero's depth, so nothing behind or in front is touched (Settings > Picture > Wet look, on by default). **Settings > Debug**: every test switch in one tab, kept in every build: Where am I (now with the clothes' wetness), Heal, warm and dry the hero, Keep the hero healthy and warm, Dry / Soak the hero's clothes, Wet look: wetness shown (the game's, 0 to 100 %), Wet look: show the capsules (in blue), Head follows camera: a fixed turn, and the developers' debug menu and map select. Engine patch 0040 |
+| **Pending (v0.9.5)** | ⏳ | See the list below |
 | Still open after v0.7.4 | ✅ | All three done: direct mouse look (v0.7.9), the debug menus' text (v0.7.8), saves without the memory card (v0.7.8) |
 | Keyboard prompts | ✅ | v0.7.1: key caps with the player's keys in the game's own font (see *PC keys in the game's texts*) |
 | In-game menu for Raw Danger | ✅ | Engine patch 0005: Resume, Quick save/load, Game options (F3), Graphics page (look, resolution, text filter, full screen, widescreen, pause in the background), Achievements (F4), Key card, Change keys, **Quit to desktop**, hazard-tape look with the game's name. Next: options inside the game's own Options screen (see below) |
@@ -143,7 +144,7 @@ Code patches go into `patches\pnach\SLUS-21501_2905C5C6.pnach` as named sections
 compiled in at build time (the native engine ignores runtime writes to code). Each one is verified on a headless build
 of the same engine: boot or a save state, frames captured every N frames, compared with the unpatched build.
 
-## Pending (as of v0.9.4)
+## Pending (as of v0.9.5)
 
 Asked for and not done yet, roughly by size:
 
@@ -166,9 +167,19 @@ Asked for and not done yet, roughly by size:
 16. **The title words at a higher resolution in the game** (the title picture is 640 x 448; a sharper copy needs a texture
     override of it).
 17. ~~The hero's head follows the camera~~: done in v0.9.4 (docs/CAMERA.md, "The hero's head").
-18. **Debug menu of our own**: Settings > Game has Where am I (v0.9.1), Heal and warm the hero and Keep the hero healthy and warm (v0.9.2). Still to find: the wetness itself (the HUD's drops belong to the clothes, the game's clothing system, not to the hero's data), the items (add item), the last gate (restart).
+18. **Debug menu of our own**: Settings > Debug (v0.9.5) has Where am I, heal / keep, dry / soak, the wet look's tests, a fixed head turn and the developers' menus. Found in v0.9.5: the things pool (docs/CHARACTERS.md). Still to do: add an item (the pool's free entries and the item definitions), the last gate (restart).
 19. **Striped NPC face after switching the textures**: v0.8.9 makes every picture again at the switch; if it still shows, an F9 report at that moment (which map, which person) would say which picture it is.
 20. **Engine pipeline** (see "Engine pipeline" below).
+21. **Animation, made livelier** (asked after v0.9.4; the head turn's call 0x323FB0 sees every bone of every character):
+    1. *Layers on the game's animation*, no new assets: breathing and a shift of weight standing still, a lean into turns,
+       shivering as the body temperature falls (character +0x370), a heavier, hunched walk when soaked (the wetness above),
+       hair and coat sway, feet on slopes. Next.
+    2. *Smoother motion*: the game samples its animation 20 times a second (0x324ED0 every third frame); blending between those
+       samples, and between clips where it snaps from one to the next. Next.
+    3. *New clips*: the game's animation format decoded and new motion (from a source you can use) retargeted to its 48-bone
+       skeleton. Days of work, in steps.
+22. **The wet look, finer**: the shoes and a raised hand can fall outside the capsules; a highlight that follows the light; wet
+    ground and walls in the rain.
 
 ## Engine pipeline
 

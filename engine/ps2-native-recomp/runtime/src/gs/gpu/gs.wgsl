@@ -1784,6 +1784,58 @@ fn game_ao(@builtin(global_invocation_id) gid: vec3<u32>) {
     if (z0 < 64.0) {
         return;   // nothing drawn (sky, cleared)
     }
+    let ao = select(1.0, ao_factor(x, y, w, h, k, z0), prm(6u) > 0u);
+    let wet = wet_mask(x, y, k, z0);
+    if (ao >= 1.0 && wet <= 0.0) {
+        return;
+    }
+    let fl = locate(0u, prm(0u), prm(1u), x, y);
+    let c = load_at(fl, k);
+    var col = vec3<f32>(f32(c & 255u), f32((c >> 8u) & 255u), f32((c >> 16u) & 255u)) * ao;
+    if (wet > 0.0 && (prm(8u) & 0x8000u) != 0u) {
+        col = mix(col, vec3<f32>(40.0, 120.0, 255.0), wet * 0.6);   // debug: the capsules shown plainly
+    } else if (wet > 0.0) {
+        // v0.9.5: wet cloth and hair: water fills the fibres, less light scatters back (darker) and what does is richer in colour
+        let luma = dot(col, vec3<f32>(0.299, 0.587, 0.114));
+        col = mix(col, (vec3<f32>(luma) + (col - vec3<f32>(luma)) * 1.25) * 0.62, wet);
+    }
+    let o = vec3<u32>(clamp(col, vec3<f32>(0.0), vec3<f32>(255.0)));
+    store(fl, k, o.x | (o.y << 8u) | (o.z << 16u) | (c & 0xFF000000u));
+}
+
+// rawdanger-recomp (v0.9.5): how much of the wet look a pixel gets: inside one of the hero's capsules (prm 9 on, 4 words each:
+// x0 y0, x1 y1 in quarter pixels + 4096 pixels, the radius in quarter pixels, the nearest | farthest depth / 256) and at its
+// depth, times how wet the hero is (prm 8: 0 ... 256, the count in the high half)
+fn wet_mask(x: u32, y: u32, k: u32, z0: f32) -> f32 {
+    let amount = f32(prm(8u) & 0x1FFu) / 256.0;
+    let count = prm(8u) >> 16u;
+    if (amount <= 0.0 || count == 0u) {
+        return 0.0;
+    }
+    let p = vec2<f32>(f32(x) + 0.5, f32(y) + 0.5);
+    var best = 0.0;
+    for (var n = 0u; n < count && n < 13u; n = n + 1u) {
+        let w0 = prm(9u + 4u * n);
+        let w1 = prm(10u + 4u * n);
+        let a = vec2<f32>(f32(w0 & 0xFFFFu), f32(w0 >> 16u)) * 0.25 - vec2<f32>(4096.0);
+        let b = vec2<f32>(f32(w1 & 0xFFFFu), f32(w1 >> 16u)) * 0.25 - vec2<f32>(4096.0);
+        let r = f32(prm(11u + 4u * n)) * 0.25;
+        let zr = prm(12u + 4u * n);
+        let znear = f32(zr & 0xFFFFu) * 256.0;   // the depth grows nearer: the nearest is the biggest
+        let zfar = f32(zr >> 16u) * 256.0;
+        if (z0 < zfar * 0.97 || z0 > znear * 1.03) {
+            continue;
+        }
+        let ab = b - a;
+        let t = clamp(dot(p - a, ab) / max(dot(ab, ab), 1e-4), 0.0, 1.0);
+        let d = length(p - (a + ab * t));
+        best = max(best, 1.0 - smoothstep(r * 0.75, r, d));
+    }
+    return best * amount;
+}
+
+fn ao_factor(x: u32, y: u32, w: u32, h: u32, k: u32, z0: f32) -> f32 {
+
     // v0.8.9: measured in the world, not in the depth's own steps. The depth grows as the distance shrinks (about 131072 / metres in
     // Raw Danger's maps: the banquet hall's floor at the camera reads 68000, the city across the river 500), so a crease of the depth
     // means little far away (one step of the depth there is half a metre: the dark outlines round the far buildings) and a lot near
@@ -1794,7 +1846,7 @@ fn game_ao(@builtin(global_invocation_id) gid: vec3<u32>) {
     let radius = min(f32(prm(7u)) * z0 / 72000.0, 16.0);
     let keep = (1.0 - smoothstep(20.0, 45.0, dist)) * smoothstep(1.5, 3.0, radius);
     if (keep <= 0.0) {
-        return;
+        return 1.0;
     }
     var occluded = 0.0;
     var counted = 0.0;
@@ -1817,11 +1869,5 @@ fn game_ao(@builtin(global_invocation_id) gid: vec3<u32>) {
         counted = counted + 1.0;
     }
     occluded = select(0.0, occluded / counted, counted > 0.0);
-    let ao = 1.0 - 0.75 * f32(prm(6u)) / 256.0 * keep * clamp(occluded * 2.0, 0.0, 1.0);
-    let fl = locate(0u, prm(0u), prm(1u), x, y);
-    let c = load_at(fl, k);
-    let cr = u32(f32(c & 255u) * ao);
-    let cg = u32(f32((c >> 8u) & 255u) * ao);
-    let cb = u32(f32((c >> 16u) & 255u) * ao);
-    store(fl, k, cr | (cg << 8u) | (cb << 16u) | (c & 0xFF000000u));
+    return 1.0 - 0.75 * f32(prm(6u)) / 256.0 * keep * clamp(occluded * 2.0, 0.0, 1.0);
 }

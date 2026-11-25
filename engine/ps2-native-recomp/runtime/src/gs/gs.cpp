@@ -1028,6 +1028,7 @@ namespace rdfilter {
 std::atomic<int> g_mode{[] { const char *v = std::getenv("PS2_GAME_FILTER_PASS"); return v && *v == '1' ? 1 : 0; }()};
 bool g_on = true;   // (the walk is looked for always: g_mode says whether it is replaced)
 constexpr int kMaxDepth = 3, kMaxOps = 8;
+constexpr std::uint32_t kWetCaps = 13;   // capsules of the wet look in one AO pass (4 words each after 9)
 struct Op {
     bool alpha = false;          // writes the alpha only (else the colour only)
     int src = 0;                 // 0 the depth's palette, 1 the brightness' palette, 2 a flat colour
@@ -1048,6 +1049,14 @@ struct Walk {
 std::uint32_t g_last_bp[8] = {}, g_last_bw[8] = {};   // the widths of the last few buffers drawn into (the frame's is not in the walk)
 int g_last_n = 0;
 std::uint32_t g_scene_bp = 0, g_scene_bw = 0;   // the last 32-bit buffer wider than a page drawn into before the walk: the 3D picture
+std::uint64_t g_scene_xyoffset = 0;              // rawdanger-recomp (wet look): that picture's window offset (XYOFFSET)
+// rawdanger-recomp (v0.9.5): the wet look. The EE side (system.cpp) sends the hero's limbs as capsules on the screen (GS window
+// coordinates: x0 y0 x1 y1, radius, nearest and farthest depth) and how wet the hero is; the AO pass darkens the pixels inside them
+// at the hero's depth.
+std::mutex g_wet_lock;
+float g_wet_amount = 0.0f;
+std::vector<float> g_wet_caps;
+int g_wet_age = 0;   // pictures since they came: the capsules of a hero no longer drawn (another scene, the title) are dropped
 std::atomic<int> g_ao{[] { const char *v = std::getenv("PS2_AO"); return v ? std::atoi(v) : 0; }()};   // 0 off, 1 light, 2 strong
 
 std::uint32_t entry(std::uint32_t cbp, std::uint32_t i) {   // palette entry i of a 256-entry 32-bit palette stored at cbp (CSM1)
@@ -1162,7 +1171,7 @@ bool step(const State &s, std::uint64_t attr) {
             while (i < std::min(g_last_n, 8) && g_last_bp[i] != fbp) ++i;
             if (i == std::min(g_last_n, 8)) i = g_last_n++ % 8;
             g_last_bp[i] = fbp, g_last_bw[i] = fbw;
-            if (fpsm == 0x00) g_scene_bp = fbp, g_scene_bw = fbw;
+            if (fpsm == 0x00) g_scene_bp = fbp, g_scene_bw = fbw, g_scene_xyoffset = c.xyoffset;
             return true;
         }
         const std::uint32_t zbp = static_cast<std::uint32_t>(c.zbuf & 0x1FFu) * 32u;
@@ -1171,8 +1180,33 @@ bool step(const State &s, std::uint64_t attr) {
         w.active = true, w.zbp = zbp, w.zpsm = 0x30u | ((static_cast<std::uint32_t>(c.zbuf >> 24)) & 0xFu), w.buf = fbp, w.pages = 1, w.copies = 1;
 #ifdef PS2_GPU
         // ambient occlusion on the 3D picture before the filter tints it (only with the GPU)
-        if (const int ao = g_ao.load(std::memory_order_relaxed); ao > 0 && gpu_on() && g_scene_bp && g_scene_bw >= 8 && g_scene_bw <= 16) {
-            const std::uint32_t p[8] = {g_scene_bp, g_scene_bw, g_scene_bw * 64u, 448u, zbp, w.zpsm, ao >= 2 ? 245u : 170u, 80u};   // v0.8.7: radius 80 (38 hardly showed)
+        float wet = 0.0f;
+        std::vector<float> caps;
+        {
+            std::lock_guard<std::mutex> hold(g_wet_lock);
+            wet = g_wet_amount, caps = g_wet_caps;
+            if (++g_wet_age > 4) wet = 0.0f, caps.clear();
+        }
+        const int ao = g_ao.load(std::memory_order_relaxed);
+        const bool show = wet < 0.0f;   // debug: the capsules drawn plainly
+        const bool wet_on = (wet > 0.01f || show) && caps.size() >= 7;
+        if ((ao > 0 || wet_on) && gpu_on() && g_scene_bp && g_scene_bw >= 8 && g_scene_bw <= 16) {
+            std::uint32_t p[64] = {g_scene_bp, g_scene_bw, g_scene_bw * 64u, 448u, zbp, w.zpsm, ao >= 2 ? 245u : ao > 0 ? 170u : 0u, 80u};   // v0.8.7: radius 80 (38 hardly showed)
+            if (wet_on) {
+                // the capsules in the picture's pixels, a quarter pixel a step, +4096 pixels so a part off the left or the top fits
+                const float ofx = static_cast<float>(g_scene_xyoffset & 0xFFFFu) / 16.0f, ofy = static_cast<float>((g_scene_xyoffset >> 32) & 0xFFFFu) / 16.0f;
+                const auto pos = [](float v) { return static_cast<std::uint32_t>(std::clamp((v + 4096.0f) * 4.0f, 0.0f, 65535.0f)); };
+                const auto depth = [](float v) { return static_cast<std::uint32_t>(std::clamp(v / 256.0f, 0.0f, 65535.0f)); };
+                std::uint32_t n = 0;
+                for (std::size_t i = 0; i + 7 <= caps.size() && n < kWetCaps; i += 7, ++n) {
+                    const float *c = caps.data() + i;
+                    p[9 + 4 * n] = pos(c[0] - ofx) | pos(c[1] - ofy) << 16;
+                    p[10 + 4 * n] = pos(c[2] - ofx) | pos(c[3] - ofy) << 16;
+                    p[11 + 4 * n] = static_cast<std::uint32_t>(std::clamp(c[4] * 4.0f, 0.0f, 65535.0f));
+                    p[12 + 4 * n] = depth(c[5]) | depth(c[6]) << 16;
+                }
+                p[8] = (show ? 0x8100u : static_cast<std::uint32_t>(std::clamp(wet, 0.0f, 1.0f) * 256.0f)) | n << 16;
+            }
             gpu::game_ao(p);
         }
 #endif
@@ -2529,6 +2563,12 @@ void state(ps2::state::Stream &s) {
 
 namespace ps2 {
 void set_debug_text(bool on) { ps2::gs::sjis::g_debug_text.store(on, std::memory_order_relaxed); }
+void set_wet_look(float amount, const float *capsules, int count) {
+    std::lock_guard<std::mutex> hold(ps2::gs::rdfilter::g_wet_lock);
+    ps2::gs::rdfilter::g_wet_amount = amount;
+    ps2::gs::rdfilter::g_wet_caps.assign(capsules, capsules + 7 * std::max(count, 0));
+    ps2::gs::rdfilter::g_wet_age = 0;
+}
 void set_ambient_occlusion(int level) { ps2::gs::rdfilter::g_ao.store(std::clamp(level, 0, 2), std::memory_order_relaxed); }
 int ambient_occlusion() { return ps2::gs::rdfilter::g_ao.load(std::memory_order_relaxed); }
 void set_game_filter_pass(int mode) { ps2::gs::rdfilter::g_mode.store(mode ? 1 : 0, std::memory_order_relaxed); }

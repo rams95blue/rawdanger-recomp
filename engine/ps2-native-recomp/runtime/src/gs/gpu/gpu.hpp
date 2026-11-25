@@ -32,7 +32,7 @@ void image_begin(const State &s);
 void image_data(const std::uint8_t *data, std::size_t bytes);
 void local_copy(const State &s);
 void game_filter(const std::uint32_t *p, std::uint32_t n);
-void game_ao(const std::uint32_t *p);   // rawdanger-recomp: ambient occlusion from the game's depth, before its colour filter (8 words)   // rawdanger-recomp: the game's colour filter in one pass (gs.cpp rdfilter; n words)
+void game_ao(const std::uint32_t *p);   // rawdanger-recomp: ambient occlusion from the game's depth, before its colour filter, and the wet look (64 words)   // rawdanger-recomp: the game's colour filter in one pass (gs.cpp rdfilter; n words)
 void load_clut(std::uint64_t tex0, std::uint64_t texclut);
 void flush();
 void texflush();

@@ -16,6 +16,7 @@ L	Anti-aliasing
 L	Sharpen
 L	Text and menus
 L	Cutscene bars
+L	Wet look
 L	Lens rain
 L	Master volume
 L	Reverb

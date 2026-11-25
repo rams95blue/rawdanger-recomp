@@ -1324,6 +1324,7 @@ struct HeadFollow {
 HeadFollow g_head;
 std::atomic<bool> g_head_on{true};
 float g_head_yaw = 0.0f, g_head_pitch = 0.0f;
+std::atomic<float> g_head_test{0.0f};   // debug (Debug tab): a fixed turn in radians, 0 the camera's
 std::uint32_t head_bone() {
     const std::uint32_t pid = ld32(g_head.player);
     if (pid > 7u) return 0;
@@ -1345,12 +1346,153 @@ void rotate_rows(std::uint32_t bone, const float axis[3], float angle) {
         for (int i = 0; i < 3; ++i) st32(a + 4u * i, float_word(v[i] * co + x[i] * s + axis[i] * d * (1.0f - co)));
     }
 }
+// rawdanger-recomp (v0.9.5): how wet the hero is, and the wet look. Raw Danger keeps the characters' things in a pool (the word ROOT
+// holds its address): sets at ROOT + SETS (a list: +0 the entries, +4 an entry's size, +0xC how many), one per character (+0xE the
+// character's number, +0xD 0 when in use), each with a chain of things (+0x14 their list, +FIRST the first, +NEXT the next in the
+// chain, -1 at the end); a thing worn has +WORN 1 and its wetness at +WET (0 ... MOST: the HUD shows "Dry" at 0 and drops above).
+// PS2_HERO_WET="ROOT,SETS,FIRST,ITEMS,NEXT,WORN,WET,PLAYER,MOST,MATRIX,POINTER,PLACE" (hex; MATRIX the game's world-to-screen matrix,
+// POINTER / PLACE the active camera block and its place), Raw Danger's (US) own without it.
+struct HeroWet {
+    bool set = false;
+    std::uint32_t root = 0, sets = 0, first = 0, items = 0, next = 0, worn = 0, wet = 0, player = 0, most = 0, matrix = 0, pointer = 0, place = 0;
+};
+const HeroWet &hero_wet_setup() {
+    static const HeroWet h = [] {
+        HeroWet r;
+        const char *v = std::getenv("PS2_HERO_WET");
+        if (!v || !*v) v = "48F730,5C38,24,14,8,1C,30,48F3E4,64,5FD690,48F4E0,160";
+        unsigned long x[12] = {};
+        if (std::sscanf(v, "%lx,%lx,%lx,%lx,%lx,%lx,%lx,%lx,%lx,%lx,%lx,%lx", &x[0], &x[1], &x[2], &x[3], &x[4], &x[5], &x[6], &x[7], &x[8], &x[9], &x[10],
+                        &x[11]) == 12) {
+            auto u = [&](int i) { return static_cast<std::uint32_t>(x[i]); };
+            r = {true, u(0), u(1), u(2), u(3), u(4), u(5), u(6), u(7), u(8), u(9), u(10), u(11)};
+        }
+        return r;
+    }();
+    return h;
+}
+bool in_ram(std::uint32_t a) { return a >= 0x100000u && a < 0x2000000u; }
+// calls `fn(address of the thing)` for each thing the player has; false when there is no player's set
+bool head_call_in_place();
+template <typename F> bool for_hero_things(F fn) {
+    const HeroWet &h = hero_wet_setup();
+    // Raw Danger's own addresses only for its US release: given by RawDangerPC.exe, or with [Head follows camera] in place
+    static const bool given = std::getenv("PS2_HERO_WET") != nullptr;
+    if (!h.set || (!given && !head_call_in_place())) return false;
+    const std::uint32_t root = ld32(h.root);
+    if (!in_ram(root)) return false;
+    const std::uint32_t list = root + h.sets, base = ld32(list), size = ld32(list + 4), count = ld32(list + 0xC);
+    const std::uint32_t pid = ld32(h.player);
+    if (!in_ram(base) || size == 0 || size > 0x1000 || count > 256) return false;
+    for (std::uint32_t i = 0; i < count; ++i) {
+        const std::uint32_t e = base + size * i;
+        if (ld8(e + 0xD) != 0 || static_cast<std::uint32_t>(static_cast<std::int16_t>(ld16(e + 0xE))) != pid) continue;
+        const std::uint32_t ib = ld32(e + h.items), isz = ld32(e + h.items + 4);
+        if (!in_ram(ib) || isz == 0 || isz > 0x1000) return false;
+        std::uint32_t n = ld32(e + h.first);
+        for (int guard = 0; n != 0xFFFFFFFFu && n < 0x1000u && guard < 64; ++guard) {
+            fn(ib + isz * n);
+            n = ld32(ib + isz * n + h.next);
+        }
+        return true;
+    }
+    return false;
+}
+std::atomic<float> g_wet_force{[] { const char *v = std::getenv("PS2_WET_FORCE"); return v && *v ? static_cast<float>(std::atof(v)) : -1.0f; }()};   // debug: a wetness forced (0 ... 1), -1 the game's
+std::atomic<bool> g_wet_look_on{true};
+std::atomic<bool> g_wet_show{[] { const char *v = std::getenv("PS2_WET_SHOW"); return v && *v == '1'; }()};   // debug: the capsules drawn plainly
+float g_wet_shown = 0.0f;                   // eased
+// the hero's limbs: bone pairs (from, to: the list's order, 0 the model's first bone) and the radius in metres
+struct Limb { int from, to; float radius; };
+constexpr Limb kLimbs[] = {{4, 6, 0.19f}, {6, 7, 0.09f}, {7, -1, 0.14f}, {16, 18, 0.075f}, {18, 20, 0.06f}, {23, 25, 0.075f}, {25, 27, 0.06f},
+                           {8, 9, 0.09f},  {9, 11, 0.075f}, {12, 13, 0.09f}, {13, 15, 0.075f}, {4, -2, 0.24f}};
+void update_wet_look(std::uint32_t head) {
+    const HeroWet &h = hero_wet_setup();
+    if (!h.set) return;
+    float wet = 0.0f;
+    for_hero_things([&](std::uint32_t t) {
+        if (ld8(t + h.worn) == 1) wet = std::max(wet, word_float(ld32(t + h.wet)) / static_cast<float>(h.most ? h.most : 100));
+    });
+    if (!std::isfinite(wet)) wet = 0.0f;
+    if (const float forced = g_wet_force.load(std::memory_order_relaxed); forced >= 0.0f) wet = forced;
+    if (!g_wet_look_on.load(std::memory_order_relaxed)) wet = 0.0f;
+    g_wet_shown += (std::clamp(wet, 0.0f, 1.0f) - g_wet_shown) * 0.05f;
+    const bool show = g_wet_show.load(std::memory_order_relaxed);
+    if (g_wet_shown < 0.01f && !show) {
+        set_wet_look(0.0f, nullptr, 0);
+        return;
+    }
+    // the bones in the list's order (from the head's model: the head is bone g_head.index)
+    std::uint32_t bones[48] = {};
+    {
+        const std::uint32_t pid = ld32(g_head.player), ch = ld32(g_head.table + 4u * pid), model = ld32(ch + g_head.model);
+        std::uint32_t n = ld32(model + 4u);
+        for (int i = 0; i < 48 && in_ram(n); ++i) bones[i] = n, n = ld32(n + 4u);
+        if (bones[g_head.index < 48 ? g_head.index : 0] != head) return;
+    }
+    float m[16];
+    for (int i = 0; i < 16; ++i) m[i] = word_float(ld32(h.matrix + 4u * i));
+    const std::uint32_t cam = ld32(h.pointer);
+    if (!in_ram(cam)) return;
+    const float cx = word_float(ld32(cam + h.place)), cy = word_float(ld32(cam + h.place + 4)), cz = word_float(ld32(cam + h.place + 8));
+    struct P { float x, y, z; bool ok; };
+    const auto project = [&](float x, float y, float z) {
+        const float px = x * m[0] + y * m[4] + z * m[8] + m[12], py = x * m[1] + y * m[5] + z * m[9] + m[13];
+        const float pz = x * m[2] + y * m[6] + z * m[10] + m[14], pw = x * m[3] + y * m[7] + z * m[11] + m[15];
+        if (!(pw > 0.05f) || !std::isfinite(px) || !std::isfinite(py)) return P{0, 0, 0, false};
+        return P{px / pw, py / pw, pz / pw, true};
+    };
+    const auto place = [&](int i, float out[3]) {
+        if (i < 0 || i >= 48 || !in_ram(bones[i])) return false;
+        for (int k = 0; k < 3; ++k) out[k] = word_float(ld32(bones[i] + 0x40u + 4u * k));
+        return std::isfinite(out[0]) && std::isfinite(out[1]) && std::isfinite(out[2]);
+    };
+    std::vector<float> caps;
+    for (const Limb &l : kLimbs) {
+        float a[3], b[3];
+        if (!place(l.from, a)) continue;
+        if (l.to == -1) b[0] = a[0], b[1] = a[1] - 0.2f, b[2] = a[2];   // the head: from the neck up (y points down)
+        else if (l.to == -2) {                                            // the skirt or the coat: down to the tails' ends
+            float s[3] = {0, 0, 0};
+            int got = 0;
+            for (int t = 32; t < 48; t += 3) {
+                float e[3];
+                if (place(t, e)) s[0] += e[0], s[1] += e[1], s[2] += e[2], ++got;
+            }
+            if (!got) continue;
+            b[0] = s[0] / got, b[1] = s[1] / got, b[2] = s[2] / got;
+        } else if (!place(l.to, b)) continue;
+        P pa = project(a[0], a[1], a[2]), pb = project(b[0], b[1], b[2]);
+        if (!pa.ok || !pb.ok) continue;
+        // the radius on the screen, and the depths from the nearest to the farthest side
+        float dir[3] = {a[0] - cx, a[1] - cy, a[2] - cz};
+        const float dl = std::sqrt(dir[0] * dir[0] + dir[1] * dir[1] + dir[2] * dir[2]);
+        if (!(dl > 0.1f)) continue;
+        for (float &v : dir) v /= dl;
+        float side[3] = {dir[2], 0.0f, -dir[0]};
+        const float sl = std::sqrt(side[0] * side[0] + side[2] * side[2]);
+        if (sl > 1e-3f) side[0] /= sl, side[2] /= sl; else side[0] = 1.0f, side[2] = 0.0f;
+        const P ps = project(a[0] + side[0] * l.radius, a[1], a[2] + side[2] * l.radius);
+        if (!ps.ok) continue;
+        const float r = std::hypot(ps.x - pa.x, ps.y - pa.y);
+        float znear = 0.0f, zfar = 1e30f;
+        for (const float *e : {a, b})
+            for (const float sgn : {-1.0f, 1.0f}) {
+                const P q = project(e[0] + dir[0] * l.radius * sgn, e[1] + dir[1] * l.radius * sgn, e[2] + dir[2] * l.radius * sgn);
+                if (q.ok) znear = std::max(znear, q.z), zfar = std::min(zfar, q.z);
+            }
+        if (!(zfar < znear)) continue;
+        caps.insert(caps.end(), {pa.x, pa.y, pb.x, pb.y, r, znear, zfar});
+    }
+    set_wet_look(show ? -1.0f : g_wet_shown, caps.data(), static_cast<int>(caps.size() / 7));
+}
 void head_follow_call(Cpu &c) {
     const std::uint32_t back = c.r[31].w[0];
     const std::uint32_t bone = c.r[4].w[0];
     call(c, g_head.fn, 1);
     c.r[31].sd[0] = static_cast<std::int32_t>(back);
     if (bone == 0 || bone != head_bone()) return;
+    update_wet_look(bone);
     float want_yaw = 0.0f, want_pitch = 0.0f;
     const std::uint32_t cam = ld32(g_head.pointer);
     const bool live = g_head_on.load(std::memory_order_relaxed) && ld32(g_head.when) == g_head.when_value && cam >= 0x100000u &&
@@ -1379,6 +1521,7 @@ void head_follow_call(Cpu &c) {
         float y = 0, p = 0;
         if (std::sscanf(t, "%f,%f", &y, &p) == 2) g_head_yaw = y, g_head_pitch = p;
     }
+    if (const float t = g_head_test.load(std::memory_order_relaxed); t != 0.0f) g_head_yaw = t, g_head_pitch = 0.0f;   // debug: a fixed turn
     if (std::fabs(g_head_yaw) < 1e-4f && std::fabs(g_head_pitch) < 1e-4f) return;
     const float up[3] = {0.0f, 1.0f, 0.0f};
     rotate_rows(bone, up, g_head_yaw);
@@ -1405,10 +1548,37 @@ struct HeadFollowSetup {
 };
 HeadFollowSetup g_head_setup;
 }  // namespace
+float hero_wetness() {
+    const HeroWet &h = hero_wet_setup();
+    float wet = -1.0f;
+    for_hero_things([&](std::uint32_t t) {
+        if (ld8(t + h.worn) == 1) wet = std::max(wet, word_float(ld32(t + h.wet)) / static_cast<float>(h.most ? h.most : 100));
+    });
+    return wet;
+}
+bool set_hero_wetness(float amount) {
+    const HeroWet &h = hero_wet_setup();
+    const float v = std::clamp(amount, 0.0f, 1.0f) * static_cast<float>(h.most ? h.most : 100);
+    bool any = false;
+    for_hero_things([&](std::uint32_t t) {
+        if (ld8(t + h.worn) == 1) st32(t + h.wet, float_word(v)), any = true;
+    });
+    return any;
+}
+void set_wet_look_on(bool on) { g_wet_look_on = on; }
+void set_wet_force(float amount) { g_wet_force = amount; }
+float wet_force() { return g_wet_force.load(); }
+void set_wet_show(bool on) { g_wet_show = on; }
+bool wet_show() { return g_wet_show.load(); }
 bool head_follow_available() {
     return g_head.set && ld32(g_head.at) == (0x0C000000u | (((kHostCallBase + 4u * g_head.call) >> 2) & 0x03FFFFFFu));
 }
+namespace {
+bool head_call_in_place() { return head_follow_available(); }
+}  // namespace
 void set_head_follow(bool on) { g_head_on = on; }
+void set_head_test(float radians) { g_head_test = radians; }
+float head_test() { return g_head_test.load(); }
 void add_camera_orbit_turn(float radians) {
     float now = g_orbit_turn.load();
     while (!g_orbit_turn.compare_exchange_weak(now, std::clamp(now + radians, -0.6f, 0.6f))) {}

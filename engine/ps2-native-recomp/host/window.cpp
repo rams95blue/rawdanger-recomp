@@ -244,7 +244,10 @@ std::vector<std::size_t> g_recomp_row_section;  // the Game options page's lines
 // Opened from Settings > Game (lines at the end), F7 (map select) or Shift+F7 (the debug menu).
 // In the map select: up / down the line, left / right the value, Cross loads the map at that gate.
 constexpr std::size_t kDebugRow = static_cast<std::size_t>(-2), kMapSelRow = static_cast<std::size_t>(-3), kInfoRow = static_cast<std::size_t>(-4),
-                      kHealRow = static_cast<std::size_t>(-5), kKeepRow = static_cast<std::size_t>(-6);
+                      kHealRow = static_cast<std::size_t>(-5), kKeepRow = static_cast<std::size_t>(-6),
+                      // v0.9.5: the Debug tab's test switches
+                      kDryRow = static_cast<std::size_t>(-7), kSoakRow = static_cast<std::size_t>(-8), kWetForceRow = static_cast<std::size_t>(-9),
+                      kWetShowRow = static_cast<std::size_t>(-10), kHeadTestRow = static_cast<std::size_t>(-11);
 // rawdanger-recomp (v0.9.2): the hero's two bars. PS2_DEBUG_HERO="TABLE,PLAYER,COUNT,NOW1,MOST1,NOW2,MOST2" (hex: the table of the
 // characters' addresses, the word with the player's number, how many the table has, and two pairs of offsets: a value and its
 // most). Raw Danger: 0x5EAC80, 0x48F3E4, 235; health (+0x368 of +0x36C, 100) and body temperature (+0x370 of +0x374, 30000: it
@@ -276,6 +279,7 @@ bool heal_hero() {
     if (hero < 0x100000u || hero >= 0x2000000u) return false;
     ps2::st32(hero + d.now1, ps2::ld32(hero + d.most1));
     ps2::st32(hero + d.now2, ps2::ld32(hero + d.most2));
+    ps2::set_hero_wetness(0.0f);   // v0.9.5: and dry
     return true;
 }
 // rawdanger-recomp (v0.9.1): "Where am I" for reports: PS2_DEBUG_INFO="SCENE,CAMERA,MODE,PIVOT,PLAYER" (hex: the scene word, the
@@ -305,8 +309,11 @@ std::string debug_info_text() {
     }
     float at[3];
     for (int k = 0; k < 3; ++k) { const std::uint32_t w = ps2::ld32(cam + d.pivot + 4u * k); std::memcpy(&at[k], &w, 4); }
-    std::snprintf(text, sizeof text, "Scene %u, camera mode %u, character %u, at %.1f %.1f %.1f, frame %llu", ps2::ld32(d.scene), ps2::ld32(cam + d.mode),
-                  ps2::ld32(d.player), at[0], at[1], at[2], static_cast<unsigned long long>(ps2::frame_count()));
+    const float wet = ps2::hero_wetness();
+    char wet_text[32] = "";
+    if (wet >= 0.0f) std::snprintf(wet_text, sizeof wet_text, ", clothes %d %% wet", static_cast<int>(wet * 100.0f + 0.5f));
+    std::snprintf(text, sizeof text, "Scene %u, camera mode %u, character %u, at %.1f %.1f %.1f%s, frame %llu", ps2::ld32(d.scene), ps2::ld32(cam + d.mode),
+                  ps2::ld32(d.player), at[0], at[1], at[2], wet_text, static_cast<unsigned long long>(ps2::frame_count()));
     return text;
 }
 struct DebugScenes { std::uint32_t address = 0, debug = 0, mapsel = 0, from = 0; bool set = false; };
@@ -1266,6 +1273,7 @@ void read_keyboard(std::uint16_t &pressed, std::uint8_t &lx, std::uint8_t &ly, s
     ps2::set_camera_orbit(g_keys.camera_orbit != 0);
     ps2::set_free_camera(g_keys.free_camera != 0);
     ps2::set_head_follow(g_keys.head_follow != 0);
+    ps2::set_wet_look_on(g_keys.wet_look != 0);
     if (g_keep_hero) heal_hero();
     {
         static bool was = false;
@@ -1494,6 +1502,7 @@ void menu_paint(bool show_again) {
         v.popup_size = g_keys.popup_size;
         v.filter_pass = ps2::game_filter_pass();
         v.ambient_occlusion = ps2::ambient_occlusion();
+        v.wet_look = g_keys.wet_look;
         v.field_of_view = g_keys.field_of_view;
         v.keys_on_screen = g_keys.keys_on_screen != 0;
         v.game_waits = g_menu_hold.load();
@@ -1575,37 +1584,43 @@ void menu_paint(bool show_again) {
                 row.state = sec.on ? "<  on  >" : "<  off >";
                 v.recomp_rows.push_back(row);
             }
-            if (debug_hero().set) {
-                for (const std::size_t kind : {kHealRow, kKeepRow}) {
-                    g_recomp_row_section.push_back(kind);
-                    quickmenu::Values::RecompRow row;
-                    row.label = kind == kHealRow ? "Heal and warm the hero (debug)" : "Keep the hero healthy and warm (debug)";
-                    row.live = true;
-                    row.state = kind == kHealRow ? "now" : (g_keep_hero ? "<  on  >" : "<  off >");
-                    v.recomp_rows.push_back(row);
-                }
-            }
-            if (debug_info().set) {
-                g_recomp_row_section.push_back(kInfoRow);
+            // v0.9.5: the test switches live on their own tab (Settings > Debug), kept in every build for reports and tests
+            const auto debug_row = [&](std::size_t kind, const std::string &label, const std::string &state) {
+                g_recomp_row_section.push_back(kind);
                 quickmenu::Values::RecompRow row;
-                row.label = "Where am I (scene, camera, place: for reports)";
+                row.label = label;
                 row.live = true;
-                row.state = "show";
+                row.state = state;
                 v.recomp_rows.push_back(row);
-            }
-            if (debug_scenes().set) {
-                for (const std::size_t kind : {kDebugRow, kMapSelRow}) {
-                    if ((kind == kMapSelRow && !debug_scenes().mapsel) || (kind == kDebugRow && !debug_scenes().debug)) continue;
-                    g_recomp_row_section.push_back(kind);
-                    quickmenu::Values::RecompRow row;
-                    row.label = kind == kDebugRow ? "Developers' debug menu (on the disc; Shift+F7)" : "Developers' map select (on the disc; F7)";
-                    row.live = true;
-                    row.state = "open";
-                    v.recomp_rows.push_back(row);
+            };
+            if (g_menu.on_debug_tab()) {
+                v.recomp_rows.clear();
+                g_recomp_row_section.clear();
+                if (debug_info().set) debug_row(kInfoRow, "Where am I (scene, camera, place, wetness: for reports)", "show");
+                if (debug_hero().set) {
+                    debug_row(kHealRow, "Heal, warm and dry the hero", "now");
+                    debug_row(kKeepRow, "Keep the hero healthy and warm", g_keep_hero ? "<  on  >" : "<  off >");
+                }
+                if (ps2::hero_wetness() >= 0.0f || ps2::head_follow_available()) {
+                    debug_row(kDryRow, "Dry the hero's clothes", "now");
+                    debug_row(kSoakRow, "Soak the hero's clothes", "now");
+                }
+                if (ps2::head_follow_available()) {
+                    const float f = ps2::wet_force();
+                    debug_row(kWetForceRow, "Wet look: wetness shown", f < 0.0f ? "<  the game's  >" : "<  " + std::to_string(static_cast<int>(f * 100.0f + 0.5f)) + " %  >");
+                    debug_row(kWetShowRow, "Wet look: show the hero's capsules", ps2::wet_show() ? "<  on  >" : "<  off >");
+                    const float t = ps2::head_test();
+                    debug_row(kHeadTestRow, "Head follows camera: a fixed turn", t == 0.0f ? "<  off  >" : "<  " + std::to_string(static_cast<int>(std::lround(t * 57.29578f))) + " deg  >");
+                }
+                if (debug_scenes().set) {
+                    if (debug_scenes().debug) debug_row(kDebugRow, "Developers' debug menu (on the disc; Shift+F7)", "open");
+                    if (debug_scenes().mapsel) debug_row(kMapSelRow, "Developers' map select (on the disc; F7)", "open");
                 }
             }
             g_menu.set_recomp_rows(static_cast<int>(v.recomp_rows.size()));
             v.recomp_note = g_recomp_note;
+            if (g_menu.on_debug_tab() && g_recomp_note.empty())
+                v.recomp_note = v.recomp_rows.empty() ? "No test switches in this game" : "Test switches, kept in every build for reports";
         }
         g_menu.draw(w, h, v, g_menu_picture);
     } else if (g_note_text.empty() && g_native_hint && g_native_label) {
@@ -2299,6 +2314,10 @@ void native_option_rows() {
             return b == 0 ? std::string("OFF") : std::to_string(b) + " %";
         }, command(Command::black_bars));
     {
+        const auto get = [] { return g_keys.wet_look ? 0 : 1; };
+        pick("Wet look", "The hero darkens when soaked", {"ON", "OFF"}, get, toggle_to(Command::wet_look, get));
+    }
+    {
         const auto get = [] { return lens_rain::level() ? 0 : 1; };
         pick("Lens rain", "Rain drops on the camera", {"ON", "OFF"}, get, toggle_to(Command::lens_rain, get));
     }
@@ -2463,6 +2482,12 @@ void menu_command(quickmenu::Command c, int step) {
         rewrite_keys_file([](const std::string &t) { return keymap::with_free_camera(t, g_keys.free_camera); }, "fixed cameras");
         set_notice(g_keys.free_camera ? "Fixed cameras off: the follow camera in every place (from the next place that has one)" : "Fixed cameras on: as on the PS2");
         break;
+    case Command::wet_look:
+        g_keys.wet_look = g_keys.wet_look ? 0 : 1;
+        ps2::set_wet_look_on(g_keys.wet_look != 0);
+        rewrite_keys_file([](const std::string &t) { return keymap::with_wet_look(t, g_keys.wet_look); }, "wet look");
+        set_notice(g_keys.wet_look ? "Wet look: on (the hero darkens as the clothes get wet)" : "Wet look: off");
+        break;
     case Command::head_follow:
         if (!ps2::head_follow_available()) break;
         g_keys.head_follow = g_keys.head_follow ? 0 : 1;
@@ -2606,6 +2631,38 @@ void menu_command(quickmenu::Command c, int step) {
         if (row < g_recomp_row_section.size() && g_recomp_row_section[row] == kKeepRow) {
             g_keep_hero = !g_keep_hero;
             g_recomp_note = g_keep_hero ? "The hero stays healthy and warm (until the game ends or you switch it off)" : "The hero's health and warmth are the game's again";
+            break;
+        }
+        if (row < g_recomp_row_section.size() && g_recomp_row_section[row] == kDryRow) {
+            g_recomp_note = ps2::set_hero_wetness(0.0f) ? "The hero's clothes are dry" : "No hero here (only while playing)";
+            break;
+        }
+        if (row < g_recomp_row_section.size() && g_recomp_row_section[row] == kSoakRow) {
+            g_recomp_note = ps2::set_hero_wetness(1.0f) ? "The hero's clothes are soaked" : "No hero here (only while playing)";
+            break;
+        }
+        if (row < g_recomp_row_section.size() && g_recomp_row_section[row] == kWetForceRow) {
+            // the game's, 0, 25, 50, 75, 100 %
+            const float now = ps2::wet_force();
+            int k = now < 0.0f ? 0 : 1 + static_cast<int>(std::lround(now * 4.0f));
+            k = (k + (step < 0 ? 5 : 1)) % 6;
+            ps2::set_wet_force(k == 0 ? -1.0f : static_cast<float>(k - 1) / 4.0f);
+            g_recomp_note = k == 0 ? "Wet look: the game's wetness" : "Wet look: shown as " + std::to_string((k - 1) * 25) + " % wet (a test; the game's own wetness is unchanged)";
+            break;
+        }
+        if (row < g_recomp_row_section.size() && g_recomp_row_section[row] == kWetShowRow) {
+            ps2::set_wet_show(!ps2::wet_show());
+            g_recomp_note = ps2::wet_show() ? "The wet look's capsules are drawn in blue round the hero" : "The wet look's capsules are hidden";
+            break;
+        }
+        if (row < g_recomp_row_section.size() && g_recomp_row_section[row] == kHeadTestRow) {
+            // off, -60, -30, 30, 60 degrees
+            static const float kTurns[] = {0.0f, -1.047f, -0.524f, 0.524f, 1.047f};
+            int k = 0;
+            while (k < 5 && std::fabs(kTurns[k] - ps2::head_test()) > 0.01f) ++k;
+            k = ((k == 5 ? 0 : k) + (step < 0 ? 4 : 1)) % 5;
+            ps2::set_head_test(kTurns[k]);
+            g_recomp_note = k == 0 ? "The head follows the camera again" : "The head is held turned (a test)";
             break;
         }
         if (row < g_recomp_row_section.size() && g_recomp_row_section[row] == kInfoRow) {
@@ -2769,7 +2826,7 @@ bool menu_event(const SDL_Event &e) {
         const std::size_t row = static_cast<std::size_t>(g_menu.recomp_row());
         if (c == Command::recomp_toggle && row < g_recomp_row_section.size() &&
             (g_recomp_row_section[row] == kDebugRow || g_recomp_row_section[row] == kMapSelRow || g_recomp_row_section[row] == kInfoRow ||
-             g_recomp_row_section[row] == kHealRow)) return;
+             g_recomp_row_section[row] == kHealRow || g_recomp_row_section[row] == kDryRow || g_recomp_row_section[row] == kSoakRow)) return;
         menu_command(c, step);
     };
     const auto move = [](int step) {

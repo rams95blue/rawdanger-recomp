@@ -167,6 +167,11 @@
 - **0039-head-follows-camera** (rawdanger-recomp v0.9.4): PS2_HEAD_FOLLOW, host call 202 standing in for the call that builds
   each bone's world matrix (0x323EA4 → 0x323FB0); the player's head (bone 7) turns toward the camera's heading, eased, at most
   60 degrees, only with the follow camera while playing. Settings > Controls > Head follows camera (keys.ini head_follow, on).
+- **0040-wet-look-debug-tab** (rawdanger-recomp v0.9.5): PS2_HERO_WET, how wet the player's worn clothes are (the game's thing
+  pool), and the wet look: the hero's limbs projected with the game's world-to-screen matrix into capsules that the AO pass
+  darkens (about 38 %) and saturates at the hero's depth, eased (Settings > Picture > Wet look, keys.ini wet_look, on). Settings
+  gets a Debug tab gathering every test switch (Where am I, heal / keep, dry / soak, a forced wetness, the capsules shown, a fixed
+  head turn, the developers' menus); heal also dries.
 
 ## Goals of the fork
 

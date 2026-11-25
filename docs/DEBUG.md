@@ -72,3 +72,20 @@ nothing, its exit restarts at the logos), the launcher no longer offers it: `PS2
 `0x48E00C;0;41;21` (Japanese), and F7 alone opens the map select. The 37 names of the stripped menu are all the disc keeps
 of it (no code); the useful ones (no death / damage, dry the player, add item, restart at the last gate, fog and depth of
 field off, a working sound test, an info line) would have to be written anew: ROADMAP, "Debug menu of our own".
+
+## v0.9.5: Settings > Debug
+
+Every test switch lives on its own tab of the F1 menu (Settings > Debug), kept in every build so a report or a test needs nothing
+else:
+
+| Line | What it does |
+|---|---|
+| Where am I | Scene, camera mode, character, place, the clothes' wetness, frame: for reports |
+| Heal, warm and dry the hero | Health, body temperature and the clothes back to full, warm and dry, once |
+| Keep the hero healthy and warm | The same every moment |
+| Dry / Soak the hero's clothes | The worn clothes' wetness to 0 or 100 (the HUD follows) |
+| Wet look: wetness shown | The game's, or 0 / 25 / 50 / 75 / 100 % for the look only |
+| Wet look: show the hero's capsules | The parts of the screen the wet look treats, in blue |
+| Head follows camera: a fixed turn | Off, or the head held at -60 / -30 / 30 / 60 degrees |
+| Developers' debug menu, map select | The disc's own menus (Shift+F7, F7) |
+

@@ -4922,7 +4922,11 @@ void game_ao(const std::uint32_t *p) {
     if (hwcache::g_on) hwcache::write_region(p[0], p[1], 0x00, 0, 0, w - 1, h - 1, hwcache::kCopy);
     mark_rendered(frame);
     if (g_dec_on) stamp_pages(frame, true);
-    dispatch_linear(kGameAo, static_cast<std::uint32_t>(w * h) * g_scale * g_scale, push_params({p[0], p[1], p[2], p[3], p[4], p[5], p[6], p[7]}));
+    // words 8 on: the wet look's capsules (gs.cpp rdfilter), up to the record's 64
+    std::array<std::uint32_t, kParamStride / 4> record{};
+    for (std::size_t i = 0; i < record.size(); ++i) record[i] = p[i];
+    g_param_records.push_back(record);
+    dispatch_linear(kGameAo, static_cast<std::uint32_t>(w * h) * g_scale * g_scale, static_cast<std::uint32_t>(g_param_records.size() - 1));
 }
 
 void load_clut(std::uint64_t tex0, std::uint64_t texclut) {

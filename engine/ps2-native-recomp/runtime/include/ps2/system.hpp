@@ -139,6 +139,17 @@ void set_free_camera(bool on);
 // rawdanger-recomp: the hero's head turns toward where the camera looks (PS2_HEAD_FOLLOW, system.cpp; keys.ini head_follow, on)
 bool head_follow_available();
 void set_head_follow(bool on);
+void set_head_test(float radians);   // debug: a fixed turn of the head (0: follows the camera)
+float head_test();
+// rawdanger-recomp (v0.9.5): how wet the hero's worn clothes are (0 ... 1, the wettest; -1 no hero), set them (debug), and the wet
+// look (PS2_HERO_WET, system.cpp; keys.ini wet_look, on) with its debug switches: a forced wetness (-1 the game's), the capsules shown
+float hero_wetness();
+bool set_hero_wetness(float amount);
+void set_wet_look_on(bool on);
+void set_wet_force(float amount);
+float wet_force();
+void set_wet_show(bool on);
+bool wet_show();
 
 bool display_frame(std::vector<std::uint32_t> &rgba, std::uint32_t &width, std::uint32_t &height);
 

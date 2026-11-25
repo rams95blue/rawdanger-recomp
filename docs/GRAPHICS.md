@@ -112,3 +112,19 @@ metre round it (depth / 900 pixels, at most 16), counts creases of 2 to 20 cm an
 fades out between 20 and 45 m, and darkens at most 72 % (strong) or 50 % (light) of the way. Tuned on depth dumps of four
 scenes (the banquet hall, a view over the city, two streets) with a copy of the shader in numpy before it went in.
 
+## The wet look (v0.9.5)
+
+Raw Danger keeps how wet each worn thing is (0-100, what the HUD's drops show) but the hero looks the same soaked or dry. The PC
+version darkens the hero as the clothes get wet.
+
+- **Which pixels**: no texture belongs to "the hero" in a way the GPU can see (the textures are uploaded sorted by material,
+  mixed with everyone else's), so the hero is found on the screen instead. Each frame the engine takes the hero's bones (the
+  bones' world places, see docs/CAMERA.md) and projects twelve limbs (torso, neck, head, arms with the hands, legs with the feet,
+  the skirt or the coat tails) with the game's own world-to-screen matrix (0x5FD690) into capsules: two ends, a radius, and the
+  nearest and farthest depth.
+- **The look**: the AO pass (before the game's colour filter) darkens the pixels inside a capsule whose depth is between the
+  capsule's nearest and farthest by up to 38 % and deepens their colours by 25 %, with a soft edge, eased in and out as the
+  wetness changes (about two seconds).
+- **What it misses**: a shoe or a raised hand can fall just outside the capsules, and the look has no highlight yet.
+- Settings > Picture > Wet look (keys.ini `wet_look`, on); Settings > Debug: a forced wetness and the capsules drawn in blue.
+

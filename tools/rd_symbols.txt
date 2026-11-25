@@ -25,3 +25,8 @@
 0x00323EA4	bone_build_call	[Head follows camera] calls the engine here (host call 202)
 0x00323FB0	bone_build_world	a0 the bone: world = parent's world x local (+0x50), the parent built first
 0x00324ED0	bone_animate	writes a bone's angles (+0x90) from the animation
+0x0014A924	body_temperature_step	lowers the player's body temperature (character +0x370) by the clothes' cold and more
+0x001B3FB0	worn_things_cold	walks the player's worn things (the pool at gp-0x4740) and reports their cold and wetness
+0x001C4A50	pool_entry	a0 a list {entries, size, -, count}, a1 an index: the entry
+0x005FD690	world_to_screen	the camera's world-to-screen matrix (4 x 4, rows): x/w y/w the GS window, z/w the depth
+0x0048F730	things_pool	the things pool's address (gp - 0x4740)
