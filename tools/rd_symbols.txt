@@ -1,0 +1,19 @@
+# Functions and words of the US program (SLUS-21501) found so far. Address, name, note. docs/CAMERA.md, DEBUG.md.
+0x0011B2B8	fast_load_fix	[Fast loading fix]
+0x00176F70	camera_stick	the follow camera's right stick: turn (f22) and up / down step (f20)
+0x00177270	camera_height_step	the stick's up / down: height, distances, look-at offset ([Orbit camera] calls the engine here)
+0x00177410	camera_follow_mode	mode 0's frame: the stick, then the follow
+0x00177440	camera_follow	puts the camera over and behind the pivot
+0x00176FD0	camera_mouse_turn	[Direct mouse look] adds the word at 0x7F10 to the turn
+0x0017A340	camera_cut	a cutscene shot: switches to mode 10 (0x17A4EC)
+0x0017C250	camera_run	runs the active camera (jump table 0x457660 on the mode)
+0x0017C9B0	camera_run_call	[Free camera everywhere] calls the engine here
+0x0017F610	camera_set_mode	a0 the mode, f12 the blend; block 0x5FD7D0 + mode * 0x490
+0x0017FF30	camera_init	sets up the 22 blocks at a map's start
+0x00187FA0	debsel_task	the developers' scene select (DEBSEL)
+0x002DAB80	pad_axis	a0 pad, a1 axis
+0x0048F488	scene	word: 3 card check, 21 playing, 40 DEBSEL, 41 MAP SEL
+0x0048F48C	scene_request	word
+0x0048F4E0	camera_block	word: the active camera block
+0x003A8380	scene_table	42 scenes, 24 bytes each
+0x003BC810	debug_menu_names	37 names of the stripped developers' menu

@@ -28,6 +28,8 @@ void set_jp_textures(bool on);
 // rawdanger-recomp: the opacity of the cutscenes' black bars (full-width untextured black sprites at the top and bottom edge),
 // 0 (left out: the picture fills the screen) to 100 (as the game draws them)
 void set_bar_opacity(unsigned percent);
+// rawdanger-recomp: milliseconds since the cutscenes' black bars were last drawn (a large number when never; the first call starts the watch)
+std::int64_t ms_since_cinema_bars();
 // rawdanger-recomp: note where the game's 2D lies (HUD, texts) so the rain on the lens stays under it (on while drops fall)
 void set_ui_boxes(bool on);
 void set_debug_text(bool on);

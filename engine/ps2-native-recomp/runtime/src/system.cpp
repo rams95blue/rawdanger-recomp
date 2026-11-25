@@ -29,6 +29,7 @@
 #endif
 
 #include <algorithm>
+#include <cmath>
 #if !defined(_WIN32) && !defined(__EMSCRIPTEN__)
 #include <dlfcn.h>
 #include <pthread.h>
@@ -1183,6 +1184,129 @@ void set_pad_connected(int pad, bool connected) {
     if (g_pad_in[pad].connected != connected) g_pad_dirty |= 1u << pad;
     g_pad_in[pad].connected = connected;
 }
+// rawdanger-recomp: the orbit camera. Raw Danger's follow camera (0x177480 on) puts the camera BASE + LOOK over the point it turns
+// round (camera +0x354, 0.4, plus the look-at offset +0x3B8, which the mouse and the stick change) and keeps it between a nearest and
+// a farthest distance along the ground (+0x360, +0x364: 5 and 6). Up / down on the right stick (the height step at 0x177270) moves
+// all of them together: the distances grow by the step and the offset by 1.2 times it, so the camera goes up and back at once, a
+// zoom more than a turn. With PS2_CAMERA_ORBIT="POINTER,HEIGHT,LOOK,BASE,CALL,AT" (hex: the word holding the camera block's address,
+// the offsets of the height (+0x35C, with the two distances after it), of the look-at offset and of the base height, the host
+// call's number and where the game's code calls it; the setting shows only when that word is the call) the pnach section
+// [Orbit camera] puts a call to the host where the height step starts (the load of the camera block moved into the call's delay
+// slot). The call does the load it stands in for (f2 = the height); with the setting on it reads the camera's angle and distance
+// from the height over the pivot and the distance along the ground, turns the angle by the step (f20, about 0.2 a game step at full
+// tilt, the game's way round: up on the stick lowers the camera, so the view looks up) and by the mouse's turn, keeps the distance,
+// writes the height over the pivot and the distance back (the follow then moves the camera there smoothly, and keeps it under
+// ceilings as before), and sets the step to 0 so the game's own height code that follows changes nothing. From 1.2 under the pivot
+// (the pivot is the follow point, about 1.5 over the hero's feet) to 75 degrees over it.
+namespace {
+struct Orbit {
+    bool set = false;
+    std::uint32_t pointer = 0, height = 0, look = 0, base = 0, call = 0, at = 0;
+};
+Orbit g_orbit;
+std::atomic<bool> g_orbit_on{true};
+std::atomic<float> g_orbit_turn{0.0f};
+float word_float(std::uint32_t w) { float f; std::memcpy(&f, &w, 4); return f; }
+std::uint32_t float_word(float f) { std::uint32_t w; std::memcpy(&w, &f, 4); return w; }
+void orbit_call(Cpu &c) {
+    const std::uint32_t cam = c.r[2].w[0];   // the delay slot loaded it
+    if (cam < 0x100000u || cam >= 0x2000000u) return;
+    c.f[2] = ld32(cam + g_orbit.height);
+    const float turn_mouse = g_orbit_turn.exchange(0.0f);
+    if (!g_orbit_on.load(std::memory_order_relaxed)) return;
+    const float step = word_float(c.f[20]);
+    const float turn = (std::isfinite(step) ? step * 0.25f : 0.0f) + turn_mouse;
+    c.f[20] = 0;
+    if (turn == 0.0f) return;
+    const float base = word_float(ld32(cam + g_orbit.base)), look = word_float(ld32(cam + g_orbit.look));
+    const float near_d = word_float(ld32(cam + g_orbit.height + 4)), far_d = word_float(ld32(cam + g_orbit.height + 8));
+    const float over = base + look, along = (near_d + far_d) * 0.5f, slack = std::max(0.0f, (far_d - near_d) * 0.5f);
+    const float dist = std::sqrt(over * over + along * along);
+    if (!std::isfinite(dist) || dist < 0.5f || along <= 0.0f) return;
+    const float now = std::atan2(over, along);
+    const float low = -std::asin(std::min(1.2f / dist, 0.99f));
+    const float to = std::clamp(now + turn, std::min(low, now), std::max(1.31f, now));
+    const float new_over = dist * std::sin(to), new_along = std::max(0.3f, dist * std::cos(to));
+    st32(cam + g_orbit.look, float_word(new_over - base));
+    st32(cam + g_orbit.height, float_word(new_along));
+    st32(cam + g_orbit.height + 4, float_word(std::max(0.2f, new_along - slack)));
+    st32(cam + g_orbit.height + 8, float_word(new_along + slack));
+    c.f[2] = ld32(cam + g_orbit.height);
+}
+struct OrbitSetup {
+    OrbitSetup() {
+        const char *v = std::getenv("PS2_CAMERA_ORBIT");
+        if (!v || !*v) return;
+        unsigned long p = 0, h = 0, l = 0, b = 0, n = 0, at = 0;
+        if (std::sscanf(v, "%lx,%lx,%lx,%lx,%lx,%lx", &p, &h, &l, &b, &n, &at) != 6 || n >= kHostCalls) return;
+        g_orbit = {true, static_cast<std::uint32_t>(p), static_cast<std::uint32_t>(h), static_cast<std::uint32_t>(l), static_cast<std::uint32_t>(b),
+                   static_cast<std::uint32_t>(n), static_cast<std::uint32_t>(at)};
+        register_host_call(g_orbit.call, &orbit_call);
+    }
+};
+OrbitSetup g_orbit_setup;
+}  // namespace
+bool camera_orbit_available() {
+    // the build has the call (an older build of the game, made before the pnach section, does not)
+    return g_orbit.set && ld32(g_orbit.at) == (0x0C000000u | (((kHostCallBase + 4u * g_orbit.call) >> 2) & 0x03FFFFFFu));
+}
+void set_camera_orbit(bool on) { g_orbit_on = on; }
+
+// rawdanger-recomp: the follow camera everywhere. Raw Danger keeps one camera block per camera mode (0x5FD7D0 + mode * 0x490, the
+// active one's address at POINTER, its mode at +MODE) and switches between them in one function (SETMODE, 0x17F610: a0 the mode,
+// f12 the blend); the places that show the scene from a fixed spot use mode 10, set from the map's data, and so do the cutscenes'
+// shots. PS2_FREE_CAMERA="CALL,AT,RUN,SETMODE,POINTER,MODE,FIXED,WHEN=VALUE" (hex): the pnach section [Free camera everywhere] makes
+// the call that runs the active camera each frame (AT, "jal RUN" with a nop after it) a call to the host, which runs RUN itself;
+// before it, with the setting on, while the game is playing (the word WHEN holds VALUE) and the active camera is FIXED, and no
+// cutscene bars were drawn for a second (the cutscenes keep their shots), it switches to the follow camera (mode 0) the way the
+// game does. Off by default.
+namespace {
+struct FreeCamera {
+    bool set = false;
+    std::uint32_t call = 0, at = 0, run = 0, setmode = 0, pointer = 0, mode = 0, fixed = 0, when = 0, when_value = 0;
+};
+FreeCamera g_free_camera;
+std::atomic<bool> g_free_camera_on{false};
+void free_camera_call(Cpu &c) {
+    const std::uint32_t back = c.r[31].w[0];
+    if (g_free_camera_on.load(std::memory_order_relaxed) && ld32(g_free_camera.when) == g_free_camera.when_value) {
+        const std::uint32_t cam = ld32(g_free_camera.pointer);
+        if (cam >= 0x100000u && cam < 0x2000000u && ld32(cam + g_free_camera.mode) == g_free_camera.fixed && ms_since_cinema_bars() > 1000) {
+            static std::uint32_t told = 0;
+            if (told < 4) ++told, std::fprintf(stderr, "[camera] a fixed camera left for the follow camera (Fixed cameras: OFF)\n");
+            c.r[4].sd[0] = 0;
+            c.f[12] = 0;
+            c.r[31].sd[0] = static_cast<std::int32_t>(back);
+            call(c, g_free_camera.setmode, 1);
+        }
+    }
+    c.r[31].sd[0] = static_cast<std::int32_t>(back);
+    call(c, g_free_camera.run, 1);
+    c.r[31].sd[0] = static_cast<std::int32_t>(back);
+}
+struct FreeCameraSetup {
+    FreeCameraSetup() {
+        const char *v = std::getenv("PS2_FREE_CAMERA");
+        if (!v || !*v) return;
+        unsigned long n = 0, at = 0, run = 0, sm = 0, p = 0, m = 0, f = 0, w = 0, wv = 0;
+        if (std::sscanf(v, "%lx,%lx,%lx,%lx,%lx,%lx,%lx,%lx=%lx", &n, &at, &run, &sm, &p, &m, &f, &w, &wv) != 9 || n >= kHostCalls) return;
+        auto u = [](unsigned long x) { return static_cast<std::uint32_t>(x); };
+        g_free_camera = {true, u(n), u(at), u(run), u(sm), u(p), u(m), u(f), u(w), u(wv)};
+        register_host_call(g_free_camera.call, &free_camera_call);
+        if (const char *on = std::getenv("PS2_FREE_CAMERA_ON"); on && *on == '1') g_free_camera_on = true;   // runs without a window (tests)
+    }
+};
+FreeCameraSetup g_free_camera_setup;
+}  // namespace
+bool free_camera_available() {
+    return g_free_camera.set && ld32(g_free_camera.at) == (0x0C000000u | (((kHostCallBase + 4u * g_free_camera.call) >> 2) & 0x03FFFFFFu));
+}
+void set_free_camera(bool on) { g_free_camera_on = on; }
+void add_camera_orbit_turn(float radians) {
+    float now = g_orbit_turn.load();
+    while (!g_orbit_turn.compare_exchange_weak(now, std::clamp(now + radians, -0.6f, 0.6f))) {}
+}
+
 // For tests without a running emulation (host/pad_test.cpp): take over the host's pad state now, as the next frame boundary would.
 void latch_pads_now() { latch_pads(); }
 std::uint16_t pad_rumble(int pad) { return iop::sio2::rumble(pad); }

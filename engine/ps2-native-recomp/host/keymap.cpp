@@ -161,6 +161,8 @@ std::string with_look(const std::string &file_text, int look) { return with_line
 
 std::string with_scale(const std::string &file_text, int scale) { return with_line(file_text, "scale", "scale = " + (scale == kScaleAuto ? std::string("auto") : std::to_string(scale))); }
 std::string with_mouse_look(const std::string &file_text, int on) { return with_line(file_text, "mouselook", std::string("mouse_look = ") + (on ? "on" : "off")); }
+std::string with_free_camera(const std::string &file_text, int on) { return with_line(file_text, "freecamera", std::string("free_camera = ") + (on ? "on" : "off")); }
+std::string with_camera_orbit(const std::string &file_text, int on) { return with_line(file_text, "cameraorbit", std::string("camera_orbit = ") + (on ? "on" : "off")); }
 std::string with_mouse_speed(const std::string &file_text, double speed) {
     char text[48];
     std::snprintf(text, sizeof text, "look_speed = %.2g", speed);
@@ -397,6 +399,20 @@ void parse(const std::string &text, Config &config, std::vector<std::string> &pr
             const double v = std::strtod(value.c_str(), &end);
             if (end != value.c_str() && v >= 0.1 && v <= 10) config.look_speed = v;
             else bad("look_speed is a number from 0.1 to 10, ignored");
+            continue;
+        }
+        if (name == "freecamera") {
+            const std::string v = squash(value);
+            if (v == "on" || v == "1") config.free_camera = 1;
+            else if (v == "off" || v == "0") config.free_camera = 0;
+            else bad("free_camera is on or off, ignored");
+            continue;
+        }
+        if (name == "cameraorbit") {
+            const std::string v = squash(value);
+            if (v == "on" || v == "1") config.camera_orbit = 1;
+            else if (v == "off" || v == "0") config.camera_orbit = 0;
+            else bad("camera_orbit is on or off, ignored");
             continue;
         }
         if (name == "mouselook") {

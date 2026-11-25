@@ -1187,6 +1187,8 @@ void read_keyboard(std::uint16_t &pressed, std::uint8_t &lx, std::uint8_t &ly, s
         push_stick(walking ? ldx : g_last_dx, walking ? ldy : g_last_dy, rx, ry);
     }
     // rawdanger-recomp: mouse look while playing (the pointer is caught in the window then, and free again in menus)
+    ps2::set_camera_orbit(g_keys.camera_orbit != 0);
+    ps2::set_free_camera(g_keys.free_camera != 0);
     {
         static bool was = false;
         const bool on = mouse_look_on();
@@ -1207,7 +1209,10 @@ void read_keyboard(std::uint16_t &pressed, std::uint8_t &lx, std::uint8_t &ly, s
             // makes the game's turn smaller), else as a push of the stick
             const bool direct = look_direct(-dx * 0.0022 * speed);
             const std::uint8_t sx = direct ? 0x80 : look_axis(g_look_yaw, dx, 0.0022 * speed, frame_in_step, step);
-            const std::uint8_t sy = look_axis(g_look_pitch, dy, 0.008 * speed, frame_in_step, step);
+            // the orbit camera (v0.9.0) takes the mouse's up / down as a turn round the hero: up looks up (the camera goes down)
+            const bool orbit = ps2::camera_orbit_available() && g_keys.camera_orbit;
+            if (orbit && dy != 0) ps2::add_camera_orbit_turn(static_cast<float>(-dy * 0.0022 * speed));
+            const std::uint8_t sy = orbit ? 0x80 : look_axis(g_look_pitch, dy, 0.008 * speed, frame_in_step, step);
             frame_in_step = (frame_in_step + 1) % std::max(1, step);
             if (rx == 0x80) rx = sx;
             if (ry == 0x80) ry = sy;
@@ -1432,6 +1437,8 @@ void menu_paint(bool show_again) {
         v.sharpen = g_keys.sharpen;
         parse_mouse_look();
         v.mouse_look = g_look_yaw.set ? g_keys.mouse_look : -1;
+        v.camera_orbit = ps2::camera_orbit_available() ? g_keys.camera_orbit : -1;
+        v.free_camera = ps2::free_camera_available() ? g_keys.free_camera : -1;
         v.mouse_speed = g_keys.look_speed;
         v.mouse_invert_y = (g_keys.mouse_invert & 2) != 0;
         v.mouse_invert_x = (g_keys.mouse_invert & 1) != 0;
@@ -2197,6 +2204,14 @@ void native_option_rows() {
     if (g_look_yaw.set) {
         const auto get = [] { return g_keys.mouse_look ? 0 : 1; };
         pick("Mouse look", "The mouse turns the camera", {"ON", "OFF"}, get, toggle_to(Command::mouse_look, get));
+        if (ps2::camera_orbit_available()) {
+            const auto get_orbit = [] { return g_keys.camera_orbit ? 0 : 1; };
+            pick("Camera up/down", "Circles the hero, or tilts as on the PS2", {"ORBIT", "PS2"}, get_orbit, toggle_to(Command::camera_orbit, get_orbit));
+        }
+        if (ps2::free_camera_available()) {
+            const auto get_free = [] { return g_keys.free_camera ? 1 : 0; };
+            pick("Fixed cameras", "Off: your camera in every place", {"ON", "OFF"}, get_free, toggle_to(Command::free_camera, get_free));
+        }
         spin("Mouse speed", "How far the camera turns", [] {
                 char t[16];
                 std::snprintf(t, sizeof t, "%.1f", std::clamp(std::round(g_keys.look_speed * 5.0) / 5.0, 0.2, 4.0));
@@ -2324,6 +2339,20 @@ void menu_command(quickmenu::Command c, int step) {
         g_keys.mouse_look = g_keys.mouse_look ? 0 : 1;
         rewrite_keys_file([](const std::string &t) { return keymap::with_mouse_look(t, g_keys.mouse_look); }, "mouse look");
         set_notice(g_keys.mouse_look ? "Mouse look on: the mouse turns the camera while you play" : "Mouse look off");
+        break;
+    case Command::free_camera:
+        if (!ps2::free_camera_available()) break;
+        g_keys.free_camera = g_keys.free_camera ? 0 : 1;
+        ps2::set_free_camera(g_keys.free_camera != 0);
+        rewrite_keys_file([](const std::string &t) { return keymap::with_free_camera(t, g_keys.free_camera); }, "fixed cameras");
+        set_notice(g_keys.free_camera ? "Fixed cameras off: the follow camera in every place (from the next place that has one)" : "Fixed cameras on: as on the PS2");
+        break;
+    case Command::camera_orbit:
+        if (!ps2::camera_orbit_available()) break;
+        g_keys.camera_orbit = g_keys.camera_orbit ? 0 : 1;
+        ps2::set_camera_orbit(g_keys.camera_orbit != 0);
+        rewrite_keys_file([](const std::string &t) { return keymap::with_camera_orbit(t, g_keys.camera_orbit); }, "camera up / down");
+        set_notice(g_keys.camera_orbit ? "Camera up / down: the camera circles the hero" : "Camera up / down: as on the PS2 (the camera tilts)");
         break;
     case Command::mouse_speed: {
         // 0.2 to 4 in steps of 0.2 (Left / Right), round at the ends

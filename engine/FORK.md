@@ -154,6 +154,10 @@
 - **0034-card-check-frames-ao-metres-texture-switch** (rawdanger-recomp v0.8.9): PS2_AUTO_CROSS answered in the game's own
   frames by ps2::latch_pads (it missed when timed by the window); ambient occlusion measured in metres (no far outlines, no near
   smears); every texture decoded again when the regional textures switch while playing.
+- **0035-orbit-camera-fixed-cameras-off** (rawdanger-recomp v0.9.0): PS2_CAMERA_ORBIT (host call 200: up / down circles the
+  hero through the follow camera's own words; keys.ini camera_orbit) and PS2_FREE_CAMERA (host call 201 runs the active camera,
+  leaving a fixed camera for the follow one while playing and with no cutscene bars; keys.ini free_camera, off); gs
+  ms_since_cinema_bars().
 
 ## Goals of the fork
 

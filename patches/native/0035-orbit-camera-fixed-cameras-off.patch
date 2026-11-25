@@ -1,0 +1,440 @@
+From 257ff003bf679b7e62d6740471ca619ab6539057 Mon Sep 17 00:00:00 2001
+From: rawdanger-recomp <rawdanger-recomp@users.noreply.github.com>
+Date: Wed, 25 Nov 2026 10:32:33 +0000
+Subject: [PATCH] rawdanger-recomp v0.9.0: orbit camera and fixed cameras off
+ (host calls)
+
+PS2_CAMERA_ORBIT: host call at the follow camera's height step turns the camera
+round the pivot through the game's own height-over-pivot (+0x354 + look-at offset
++0x3B8) and ground distances (+0x360/+0x364), keeping the distance; mouse up/down
+goes straight in as a turn. keys.ini camera_orbit, Settings > Controls.
+
+PS2_FREE_CAMERA: host call replaces the per-frame 'run the active camera' call;
+with the setting on, a fixed camera (mode 10) while playing and with no cutscene
+bars for a second is switched to the follow camera. keys.ini free_camera (off).
+gs: ms_since_cinema_bars().
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01QNLFPekqhcU2dj7B3Utmea
+---
+ host/keymap.cpp                |  16 +++++
+ host/keymap.hpp                |   4 ++
+ host/quickmenu.cpp             |  15 ++--
+ host/quickmenu.hpp             |   4 ++
+ host/window.cpp                |  31 ++++++++-
+ runtime/include/ps2/system.hpp |   8 +++
+ runtime/include/ps2/video.hpp  |   2 +
+ runtime/src/gs/gs.cpp          |  13 ++++
+ runtime/src/system.cpp         | 124 +++++++++++++++++++++++++++++++++
+ 9 files changed, 212 insertions(+), 5 deletions(-)
+
+diff --git a/host/keymap.cpp b/host/keymap.cpp
+index e98722e..942b4cf 100644
+--- a/host/keymap.cpp
++++ b/host/keymap.cpp
+@@ -161,6 +161,8 @@ std::string with_look(const std::string &file_text, int look) { return with_line
+ 
+ std::string with_scale(const std::string &file_text, int scale) { return with_line(file_text, "scale", "scale = " + (scale == kScaleAuto ? std::string("auto") : std::to_string(scale))); }
+ std::string with_mouse_look(const std::string &file_text, int on) { return with_line(file_text, "mouselook", std::string("mouse_look = ") + (on ? "on" : "off")); }
++std::string with_free_camera(const std::string &file_text, int on) { return with_line(file_text, "freecamera", std::string("free_camera = ") + (on ? "on" : "off")); }
++std::string with_camera_orbit(const std::string &file_text, int on) { return with_line(file_text, "cameraorbit", std::string("camera_orbit = ") + (on ? "on" : "off")); }
+ std::string with_mouse_speed(const std::string &file_text, double speed) {
+     char text[48];
+     std::snprintf(text, sizeof text, "look_speed = %.2g", speed);
+@@ -399,6 +401,20 @@ void parse(const std::string &text, Config &config, std::vector<std::string> &pr
+             else bad("look_speed is a number from 0.1 to 10, ignored");
+             continue;
+         }
++        if (name == "freecamera") {
++            const std::string v = squash(value);
++            if (v == "on" || v == "1") config.free_camera = 1;
++            else if (v == "off" || v == "0") config.free_camera = 0;
++            else bad("free_camera is on or off, ignored");
++            continue;
++        }
++        if (name == "cameraorbit") {
++            const std::string v = squash(value);
++            if (v == "on" || v == "1") config.camera_orbit = 1;
++            else if (v == "off" || v == "0") config.camera_orbit = 0;
++            else bad("camera_orbit is on or off, ignored");
++            continue;
++        }
+         if (name == "mouselook") {
+             const std::string v = squash(value);
+             if (v == "on" || v == "1") config.mouse_look = 1;
+diff --git a/host/keymap.hpp b/host/keymap.hpp
+index 1271a83..73e000f 100644
+--- a/host/keymap.hpp
++++ b/host/keymap.hpp
+@@ -54,6 +54,8 @@ struct Config {
+     int black_bars = 100;      // rawdanger-recomp: the cutscenes' black bars, opacity in % (0: left out, the picture fills the screen)
+     int sharpen = 0;           // rawdanger-recomp: contrast-adaptive sharpening of the picture: 0 off (the picture is crisp by itself since the copy fix), 1 low, 2 medium, 3 high
+     int mouse_look = 1;        // rawdanger-recomp: the mouse turns the camera while playing (PS2_MOUSE_LOOK_* from the launcher); 0 off
++    int free_camera = 0;       // rawdanger-recomp: the follow camera also where the game has a fixed one (PS2_FREE_CAMERA); off by default
++    int camera_orbit = 1;      // rawdanger-recomp: up / down on the camera (stick or mouse) circles the hero (PS2_CAMERA_ORBIT); 0: the game's own
+     double look_speed = 1.0;   // rawdanger-recomp: how far the mouse look turns (0.2 to 4; 1.0 by default since v0.8.3)
+     int window_w = 0, window_h = 0;  // rawdanger-recomp: the window's size from the menu's presets (0: the default)
+     int integer_scale = 0;     // rawdanger-recomp: the picture is enlarged by whole numbers only (every console pixel row the same height)
+@@ -90,6 +92,8 @@ std::string with_key_prompts(const std::string &file_text, int on);
+ std::string with_black_bars(const std::string &file_text, int percent);
+ std::string with_sharpen(const std::string &file_text, int level);
+ std::string with_mouse_look(const std::string &file_text, int on);
++std::string with_camera_orbit(const std::string &file_text, int on);
++std::string with_free_camera(const std::string &file_text, int on);    // the 'free_camera' line  // the 'camera_orbit' line
+ std::string with_mouse_speed(const std::string &file_text, double speed);
+ std::string with_mouse_invert(const std::string &file_text, int invert);
+ // rawdanger-recomp: a key's name in at most 3 capitals for the caps drawn in the game's font ("E", "SP", "ML", "F10")
+diff --git a/host/quickmenu.cpp b/host/quickmenu.cpp
+index 48d4192..273d684 100644
+--- a/host/quickmenu.cpp
++++ b/host/quickmenu.cpp
+@@ -124,8 +124,8 @@ constexpr Command kPicture[] = {Command::field_of_view, Command::look, Command::
+ constexpr const char *kPictureKeys[] = {"", "F2", "", "", "", "", "", "", "", "", "Esc"};
+ constexpr Command kSound[] = {Command::master_volume, Command::reverb, Command::back};
+ constexpr const char *kSoundKeys[] = {"", "", "Esc"};
+-constexpr Command kControls[] = {Command::change_keys, Command::keys_on_screen, Command::mouse_look, Command::mouse_speed, Command::mouse_invert_x, Command::mouse_invert, Command::key_prompts, Command::back};
+-constexpr const char *kControlsKeys[] = {"", "F10", "", "", "", "", "", "Esc"};
++constexpr Command kControls[] = {Command::change_keys, Command::keys_on_screen, Command::mouse_look, Command::camera_orbit, Command::free_camera, Command::mouse_speed, Command::mouse_invert_x, Command::mouse_invert, Command::key_prompts, Command::back};
++constexpr const char *kControlsKeys[] = {"", "F10", "", "", "", "", "", "", "", "Esc"};
+ struct TabList { const Command *commands; const char *const *keys; int n; };
+ static_assert(std::size(kDisplay) == std::size(kDisplayKeys) && std::size(kPicture) == std::size(kPictureKeys) && std::size(kSound) == std::size(kSoundKeys) &&
+               std::size(kControls) == std::size(kControlsKeys), "one key text per line");
+@@ -370,6 +370,12 @@ std::string entry_text(Command c, const Values &v, bool quit_armed) {
+     case Command::mouse_look:
+         if (v.mouse_look < 0) return "Mouse look: not in this game";
+         return std::string("Mouse look (camera):  < ") + (v.mouse_look ? "on" : "off") + " >";
++    case Command::free_camera:
++        if (v.free_camera < 0) return "Fixed cameras: not in this game";
++        return std::string("Fixed cameras:  < ") + (v.free_camera ? "off (follow camera)" : "on (as on the PS2)") + " >";
++    case Command::camera_orbit:
++        if (v.camera_orbit < 0) return "Camera up / down: not in this game";
++        return std::string("Camera up / down:  < ") + (v.camera_orbit ? "circles the hero" : "as on the PS2") + " >";
+     case Command::mouse_speed: {
+         char text[64];
+         std::snprintf(text, sizeof text, "Mouse speed:  < %.1f >", v.mouse_speed);
+@@ -623,7 +629,7 @@ Command Menu::side() const {
+     const Command c = kTabLists[tab_].commands[selected_];
+     return c == Command::look || c == Command::scale || c == Command::sharp_2d || c == Command::fullscreen || c == Command::widescreen || c == Command::pause_unfocused || c == Command::menu_game_runs ||
+                    c == Command::master_volume || c == Command::integer_scale || c == Command::lens_rain || c == Command::antialias || c == Command::menu_skin ||
+-                   c == Command::window_size || c == Command::game_blur || c == Command::reverb || c == Command::key_prompts || c == Command::mouse_look || c == Command::black_bars || c == Command::sharpen ||
++                   c == Command::window_size || c == Command::game_blur || c == Command::reverb || c == Command::key_prompts || c == Command::mouse_look || c == Command::camera_orbit || c == Command::free_camera || c == Command::black_bars || c == Command::sharpen ||
+                    c == Command::mouse_speed || c == Command::mouse_invert || c == Command::mouse_invert_x || c == Command::popup_size || c == Command::keys_on_screen || c == Command::filter_pass || c == Command::ambient_occlusion || c == Command::field_of_view
+                ? c : Command::none;
+ }
+@@ -981,7 +987,8 @@ void Menu::draw_list(int window_width, int window_height, const Values &values,
+         if (lit) c.fill(pad * s, y, out.width - 2 * pad * s, bar_h * s, quit ? kAlarm : kBar);
+         const bool unusable = (commands[i] == Command::widescreen && values.widescreen < 0) || (commands[i] == Command::language && values.language_other.empty()) ||
+                               (commands[i] == Command::game_blur && values.game_blur < 0) || (commands[i] == Command::key_prompts && values.key_prompts < 0) ||
+-                              (commands[i] == Command::mouse_look && values.mouse_look < 0);
++                              (commands[i] == Command::mouse_look && values.mouse_look < 0) || (commands[i] == Command::camera_orbit && values.camera_orbit < 0) ||
++                              (commands[i] == Command::free_camera && values.free_camera < 0);
+         c.text((pad + bar_pad) * s, y + 3 * s, s, lines[i], lit ? (quit ? kText : kBarText) : unusable ? kDim : kText);
+         const std::string key = keys[i];
+         c.text(out.width - (pad + bar_pad) * s - static_cast<int>(key.size()) * 6 * s + s, y + 3 * s, s, key, lit ? (quit ? kText : kBarDim) : kDim);
+diff --git a/host/quickmenu.hpp b/host/quickmenu.hpp
+index 8fc2490..504b99c 100644
+--- a/host/quickmenu.hpp
++++ b/host/quickmenu.hpp
+@@ -55,6 +55,8 @@ enum class Command {
+     black_bars,    // Settings > Picture: the cutscenes' black bars shown or left out
+     key_prompts,   // Settings > Controls: the game's texts show the keys (key caps) or the PlayStation symbols
+     mouse_look,    // Settings > Controls: the mouse turns the camera while playing
++    free_camera,   // Settings > Controls: the follow camera also where the game has a fixed one
++    camera_orbit,  // Settings > Controls: up / down on the camera circles the hero (or the game's own tilt)
+     mouse_speed,   // Settings > Controls: how far the camera turns for a move of the mouse
+     mouse_invert,  // Settings > Controls: the mouse's up and down the other way round
+     mouse_invert_x, // Settings > Controls: the mouse's left and right the other way round
+@@ -96,6 +98,8 @@ struct Values {
+     int black_bars = 100;
+     int sharpen = 0;
+     int mouse_look = -1;           // -1: this game has no mouse look (PS2_MOUSE_LOOK_YAW), 0 off, 1 on
++    int free_camera = -1;          // -1: not in this game (PS2_FREE_CAMERA), 0 the game's fixed cameras, 1 the follow camera everywhere
++    int camera_orbit = -1;         // -1: this game has no orbit camera (PS2_CAMERA_ORBIT), 0 the game's tilt, 1 orbit
+     double mouse_speed = 1.0;
+     bool mouse_invert_y = false, mouse_invert_x = false;          // -1: this game has no prompt font (PS2_PROMPT_FONT_KEY), 0 symbols, 1 keys
+     // the keys page: one row per button (label and its keys, in the order of keys.ini) and a message line (what the last change did)
+diff --git a/host/window.cpp b/host/window.cpp
+index 8924b66..e14b72b 100644
+--- a/host/window.cpp
++++ b/host/window.cpp
+@@ -1187,6 +1187,8 @@ void read_keyboard(std::uint16_t &pressed, std::uint8_t &lx, std::uint8_t &ly, s
+         push_stick(walking ? ldx : g_last_dx, walking ? ldy : g_last_dy, rx, ry);
+     }
+     // rawdanger-recomp: mouse look while playing (the pointer is caught in the window then, and free again in menus)
++    ps2::set_camera_orbit(g_keys.camera_orbit != 0);
++    ps2::set_free_camera(g_keys.free_camera != 0);
+     {
+         static bool was = false;
+         const bool on = mouse_look_on();
+@@ -1207,7 +1209,10 @@ void read_keyboard(std::uint16_t &pressed, std::uint8_t &lx, std::uint8_t &ly, s
+             // makes the game's turn smaller), else as a push of the stick
+             const bool direct = look_direct(-dx * 0.0022 * speed);
+             const std::uint8_t sx = direct ? 0x80 : look_axis(g_look_yaw, dx, 0.0022 * speed, frame_in_step, step);
+-            const std::uint8_t sy = look_axis(g_look_pitch, dy, 0.008 * speed, frame_in_step, step);
++            // the orbit camera (v0.9.0) takes the mouse's up / down as a turn round the hero: up looks up (the camera goes down)
++            const bool orbit = ps2::camera_orbit_available() && g_keys.camera_orbit;
++            if (orbit && dy != 0) ps2::add_camera_orbit_turn(static_cast<float>(-dy * 0.0022 * speed));
++            const std::uint8_t sy = orbit ? 0x80 : look_axis(g_look_pitch, dy, 0.008 * speed, frame_in_step, step);
+             frame_in_step = (frame_in_step + 1) % std::max(1, step);
+             if (rx == 0x80) rx = sx;
+             if (ry == 0x80) ry = sy;
+@@ -1432,6 +1437,8 @@ void menu_paint(bool show_again) {
+         v.sharpen = g_keys.sharpen;
+         parse_mouse_look();
+         v.mouse_look = g_look_yaw.set ? g_keys.mouse_look : -1;
++        v.camera_orbit = ps2::camera_orbit_available() ? g_keys.camera_orbit : -1;
++        v.free_camera = ps2::free_camera_available() ? g_keys.free_camera : -1;
+         v.mouse_speed = g_keys.look_speed;
+         v.mouse_invert_y = (g_keys.mouse_invert & 2) != 0;
+         v.mouse_invert_x = (g_keys.mouse_invert & 1) != 0;
+@@ -2197,6 +2204,14 @@ void native_option_rows() {
+     if (g_look_yaw.set) {
+         const auto get = [] { return g_keys.mouse_look ? 0 : 1; };
+         pick("Mouse look", "The mouse turns the camera", {"ON", "OFF"}, get, toggle_to(Command::mouse_look, get));
++        if (ps2::camera_orbit_available()) {
++            const auto get_orbit = [] { return g_keys.camera_orbit ? 0 : 1; };
++            pick("Camera up/down", "Circles the hero, or tilts as on the PS2", {"ORBIT", "PS2"}, get_orbit, toggle_to(Command::camera_orbit, get_orbit));
++        }
++        if (ps2::free_camera_available()) {
++            const auto get_free = [] { return g_keys.free_camera ? 1 : 0; };
++            pick("Fixed cameras", "Off: your camera in every place", {"ON", "OFF"}, get_free, toggle_to(Command::free_camera, get_free));
++        }
+         spin("Mouse speed", "How far the camera turns", [] {
+                 char t[16];
+                 std::snprintf(t, sizeof t, "%.1f", std::clamp(std::round(g_keys.look_speed * 5.0) / 5.0, 0.2, 4.0));
+@@ -2325,6 +2340,20 @@ void menu_command(quickmenu::Command c, int step) {
+         rewrite_keys_file([](const std::string &t) { return keymap::with_mouse_look(t, g_keys.mouse_look); }, "mouse look");
+         set_notice(g_keys.mouse_look ? "Mouse look on: the mouse turns the camera while you play" : "Mouse look off");
+         break;
++    case Command::free_camera:
++        if (!ps2::free_camera_available()) break;
++        g_keys.free_camera = g_keys.free_camera ? 0 : 1;
++        ps2::set_free_camera(g_keys.free_camera != 0);
++        rewrite_keys_file([](const std::string &t) { return keymap::with_free_camera(t, g_keys.free_camera); }, "fixed cameras");
++        set_notice(g_keys.free_camera ? "Fixed cameras off: the follow camera in every place (from the next place that has one)" : "Fixed cameras on: as on the PS2");
++        break;
++    case Command::camera_orbit:
++        if (!ps2::camera_orbit_available()) break;
++        g_keys.camera_orbit = g_keys.camera_orbit ? 0 : 1;
++        ps2::set_camera_orbit(g_keys.camera_orbit != 0);
++        rewrite_keys_file([](const std::string &t) { return keymap::with_camera_orbit(t, g_keys.camera_orbit); }, "camera up / down");
++        set_notice(g_keys.camera_orbit ? "Camera up / down: the camera circles the hero" : "Camera up / down: as on the PS2 (the camera tilts)");
++        break;
+     case Command::mouse_speed: {
+         // 0.2 to 4 in steps of 0.2 (Left / Right), round at the ends
+         double v = std::round(g_keys.look_speed * 5.0) / 5.0 + (step < 0 ? -0.2 : 0.2);
+diff --git a/runtime/include/ps2/system.hpp b/runtime/include/ps2/system.hpp
+index f656d0a..dee6b09 100644
+--- a/runtime/include/ps2/system.hpp
++++ b/runtime/include/ps2/system.hpp
+@@ -128,6 +128,14 @@ bool load_state(const std::uint8_t *data, std::size_t size);
+ bool halted();
+ const std::string &halt_reason();
+ std::uint64_t frame_count();
++// rawdanger-recomp: the orbit camera (PS2_CAMERA_ORBIT, system.cpp). True when the game has it; the setting (keys.ini camera_orbit)
++// and the mouse's up / down turn (radians, + raises the camera) are handed in by the window.
++bool camera_orbit_available();
++void set_camera_orbit(bool on);
++void add_camera_orbit_turn(float radians);
++// rawdanger-recomp: the follow camera in the places that have a fixed one (PS2_FREE_CAMERA, system.cpp; keys.ini free_camera, off)
++bool free_camera_available();
++void set_free_camera(bool on);
+ 
+ bool display_frame(std::vector<std::uint32_t> &rgba, std::uint32_t &width, std::uint32_t &height);
+ 
+diff --git a/runtime/include/ps2/video.hpp b/runtime/include/ps2/video.hpp
+index d4e8c83..de520ae 100644
+--- a/runtime/include/ps2/video.hpp
++++ b/runtime/include/ps2/video.hpp
+@@ -28,6 +28,8 @@ void set_jp_textures(bool on);
+ // rawdanger-recomp: the opacity of the cutscenes' black bars (full-width untextured black sprites at the top and bottom edge),
+ // 0 (left out: the picture fills the screen) to 100 (as the game draws them)
+ void set_bar_opacity(unsigned percent);
++// rawdanger-recomp: milliseconds since the cutscenes' black bars were last drawn (a large number when never; the first call starts the watch)
++std::int64_t ms_since_cinema_bars();
+ // rawdanger-recomp: note where the game's 2D lies (HUD, texts) so the rain on the lens stays under it (on while drops fall)
+ void set_ui_boxes(bool on);
+ void set_debug_text(bool on);
+diff --git a/runtime/src/gs/gs.cpp b/runtime/src/gs/gs.cpp
+index 2774894..216311c 100644
+--- a/runtime/src/gs/gs.cpp
++++ b/runtime/src/gs/gs.cpp
+@@ -779,6 +779,12 @@ std::atomic<int> g_bar_opacity{[] { const char *v = std::getenv("PS2_BAR_OPACITY
+     return (attr & 0x40u) ? 1 : 2;
+ }
+ 
++// rawdanger-recomp: when the cutscenes' bars were last drawn (steady clock, ms), for the follow camera to leave the cutscenes' own
++// cameras alone (system.cpp, PS2_FREE_CAMERA); watched only while that asks for it
++std::atomic<bool> g_watch_bars{false};
++std::atomic<std::int64_t> g_bars_ms{0};
++std::int64_t now_ms() { return std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now().time_since_epoch()).count(); }
++
+ // rawdanger-recomp: where the game's 2D lies on the picture (its HUD, texts, subtitles, the cutscenes' bars), for the rain on
+ // the lens to stay under it (blit.wgsl, ui boxes). The game draws its 2D as sprites at the front of the depth range (z of
+ // 0xFFFF0000 and up); its full-screen passes (the blur strips, fades) are left out by size. Sprites next to each other are
+@@ -1228,6 +1234,8 @@ bool step(const State &s, std::uint64_t attr) {
+     const std::uint32_t prim = static_cast<std::uint32_t>(s.prim) & 7u;
+     const int needed = prim == 0 ? 1 : (prim == 1 || prim == 2 || prim == 6) ? 2 : prim == 7 ? 1 : 3;
+     if (s.count < needed) return;
++    if (draw && prim == 6 && g_watch_bars.load(std::memory_order_relaxed) && cinema_bar(s)) [[unlikely]]
++        g_bars_ms.store(now_ms(), std::memory_order_relaxed);
+     if (draw && prim == 6) {
+         const int opacity = g_bar_opacity.load(std::memory_order_relaxed);
+         if (opacity < 100) {
+@@ -2525,6 +2533,11 @@ void set_ambient_occlusion(int level) { ps2::gs::rdfilter::g_ao.store(std::clamp
+ int ambient_occlusion() { return ps2::gs::rdfilter::g_ao.load(std::memory_order_relaxed); }
+ void set_game_filter_pass(int mode) { ps2::gs::rdfilter::g_mode.store(mode ? 1 : 0, std::memory_order_relaxed); }
+ int game_filter_pass() { return ps2::gs::rdfilter::g_mode.load(std::memory_order_relaxed); }
++std::int64_t ms_since_cinema_bars() {
++    ps2::gs::g_watch_bars.store(true, std::memory_order_relaxed);
++    const std::int64_t at = ps2::gs::g_bars_ms.load(std::memory_order_relaxed);
++    return at ? ps2::gs::now_ms() - at : 1000000;
++}
+ void set_bar_opacity(unsigned percent) { ps2::gs::g_bar_opacity.store(static_cast<int>(std::min(percent, 100u)), std::memory_order_relaxed); }
+ void set_ui_boxes(bool on) { ps2::gs::ui::g_on.store(on, std::memory_order_relaxed); }
+ }
+diff --git a/runtime/src/system.cpp b/runtime/src/system.cpp
+index 312423d..00db392 100644
+--- a/runtime/src/system.cpp
++++ b/runtime/src/system.cpp
+@@ -29,6 +29,7 @@
+ #endif
+ 
+ #include <algorithm>
++#include <cmath>
+ #if !defined(_WIN32) && !defined(__EMSCRIPTEN__)
+ #include <dlfcn.h>
+ #include <pthread.h>
+@@ -1183,6 +1184,129 @@ void set_pad_connected(int pad, bool connected) {
+     if (g_pad_in[pad].connected != connected) g_pad_dirty |= 1u << pad;
+     g_pad_in[pad].connected = connected;
+ }
++// rawdanger-recomp: the orbit camera. Raw Danger's follow camera (0x177480 on) puts the camera BASE + LOOK over the point it turns
++// round (camera +0x354, 0.4, plus the look-at offset +0x3B8, which the mouse and the stick change) and keeps it between a nearest and
++// a farthest distance along the ground (+0x360, +0x364: 5 and 6). Up / down on the right stick (the height step at 0x177270) moves
++// all of them together: the distances grow by the step and the offset by 1.2 times it, so the camera goes up and back at once, a
++// zoom more than a turn. With PS2_CAMERA_ORBIT="POINTER,HEIGHT,LOOK,BASE,CALL,AT" (hex: the word holding the camera block's address,
++// the offsets of the height (+0x35C, with the two distances after it), of the look-at offset and of the base height, the host
++// call's number and where the game's code calls it; the setting shows only when that word is the call) the pnach section
++// [Orbit camera] puts a call to the host where the height step starts (the load of the camera block moved into the call's delay
++// slot). The call does the load it stands in for (f2 = the height); with the setting on it reads the camera's angle and distance
++// from the height over the pivot and the distance along the ground, turns the angle by the step (f20, about 0.2 a game step at full
++// tilt, the game's way round: up on the stick lowers the camera, so the view looks up) and by the mouse's turn, keeps the distance,
++// writes the height over the pivot and the distance back (the follow then moves the camera there smoothly, and keeps it under
++// ceilings as before), and sets the step to 0 so the game's own height code that follows changes nothing. From 1.2 under the pivot
++// (the pivot is the follow point, about 1.5 over the hero's feet) to 75 degrees over it.
++namespace {
++struct Orbit {
++    bool set = false;
++    std::uint32_t pointer = 0, height = 0, look = 0, base = 0, call = 0, at = 0;
++};
++Orbit g_orbit;
++std::atomic<bool> g_orbit_on{true};
++std::atomic<float> g_orbit_turn{0.0f};
++float word_float(std::uint32_t w) { float f; std::memcpy(&f, &w, 4); return f; }
++std::uint32_t float_word(float f) { std::uint32_t w; std::memcpy(&w, &f, 4); return w; }
++void orbit_call(Cpu &c) {
++    const std::uint32_t cam = c.r[2].w[0];   // the delay slot loaded it
++    if (cam < 0x100000u || cam >= 0x2000000u) return;
++    c.f[2] = ld32(cam + g_orbit.height);
++    const float turn_mouse = g_orbit_turn.exchange(0.0f);
++    if (!g_orbit_on.load(std::memory_order_relaxed)) return;
++    const float step = word_float(c.f[20]);
++    const float turn = (std::isfinite(step) ? step * 0.25f : 0.0f) + turn_mouse;
++    c.f[20] = 0;
++    if (turn == 0.0f) return;
++    const float base = word_float(ld32(cam + g_orbit.base)), look = word_float(ld32(cam + g_orbit.look));
++    const float near_d = word_float(ld32(cam + g_orbit.height + 4)), far_d = word_float(ld32(cam + g_orbit.height + 8));
++    const float over = base + look, along = (near_d + far_d) * 0.5f, slack = std::max(0.0f, (far_d - near_d) * 0.5f);
++    const float dist = std::sqrt(over * over + along * along);
++    if (!std::isfinite(dist) || dist < 0.5f || along <= 0.0f) return;
++    const float now = std::atan2(over, along);
++    const float low = -std::asin(std::min(1.2f / dist, 0.99f));
++    const float to = std::clamp(now + turn, std::min(low, now), std::max(1.31f, now));
++    const float new_over = dist * std::sin(to), new_along = std::max(0.3f, dist * std::cos(to));
++    st32(cam + g_orbit.look, float_word(new_over - base));
++    st32(cam + g_orbit.height, float_word(new_along));
++    st32(cam + g_orbit.height + 4, float_word(std::max(0.2f, new_along - slack)));
++    st32(cam + g_orbit.height + 8, float_word(new_along + slack));
++    c.f[2] = ld32(cam + g_orbit.height);
++}
++struct OrbitSetup {
++    OrbitSetup() {
++        const char *v = std::getenv("PS2_CAMERA_ORBIT");
++        if (!v || !*v) return;
++        unsigned long p = 0, h = 0, l = 0, b = 0, n = 0, at = 0;
++        if (std::sscanf(v, "%lx,%lx,%lx,%lx,%lx,%lx", &p, &h, &l, &b, &n, &at) != 6 || n >= kHostCalls) return;
++        g_orbit = {true, static_cast<std::uint32_t>(p), static_cast<std::uint32_t>(h), static_cast<std::uint32_t>(l), static_cast<std::uint32_t>(b),
++                   static_cast<std::uint32_t>(n), static_cast<std::uint32_t>(at)};
++        register_host_call(g_orbit.call, &orbit_call);
++    }
++};
++OrbitSetup g_orbit_setup;
++}  // namespace
++bool camera_orbit_available() {
++    // the build has the call (an older build of the game, made before the pnach section, does not)
++    return g_orbit.set && ld32(g_orbit.at) == (0x0C000000u | (((kHostCallBase + 4u * g_orbit.call) >> 2) & 0x03FFFFFFu));
++}
++void set_camera_orbit(bool on) { g_orbit_on = on; }
++
++// rawdanger-recomp: the follow camera everywhere. Raw Danger keeps one camera block per camera mode (0x5FD7D0 + mode * 0x490, the
++// active one's address at POINTER, its mode at +MODE) and switches between them in one function (SETMODE, 0x17F610: a0 the mode,
++// f12 the blend); the places that show the scene from a fixed spot use mode 10, set from the map's data, and so do the cutscenes'
++// shots. PS2_FREE_CAMERA="CALL,AT,RUN,SETMODE,POINTER,MODE,FIXED,WHEN=VALUE" (hex): the pnach section [Free camera everywhere] makes
++// the call that runs the active camera each frame (AT, "jal RUN" with a nop after it) a call to the host, which runs RUN itself;
++// before it, with the setting on, while the game is playing (the word WHEN holds VALUE) and the active camera is FIXED, and no
++// cutscene bars were drawn for a second (the cutscenes keep their shots), it switches to the follow camera (mode 0) the way the
++// game does. Off by default.
++namespace {
++struct FreeCamera {
++    bool set = false;
++    std::uint32_t call = 0, at = 0, run = 0, setmode = 0, pointer = 0, mode = 0, fixed = 0, when = 0, when_value = 0;
++};
++FreeCamera g_free_camera;
++std::atomic<bool> g_free_camera_on{false};
++void free_camera_call(Cpu &c) {
++    const std::uint32_t back = c.r[31].w[0];
++    if (g_free_camera_on.load(std::memory_order_relaxed) && ld32(g_free_camera.when) == g_free_camera.when_value) {
++        const std::uint32_t cam = ld32(g_free_camera.pointer);
++        if (cam >= 0x100000u && cam < 0x2000000u && ld32(cam + g_free_camera.mode) == g_free_camera.fixed && ms_since_cinema_bars() > 1000) {
++            static std::uint32_t told = 0;
++            if (told < 4) ++told, std::fprintf(stderr, "[camera] a fixed camera left for the follow camera (Fixed cameras: OFF)\n");
++            c.r[4].sd[0] = 0;
++            c.f[12] = 0;
++            c.r[31].sd[0] = static_cast<std::int32_t>(back);
++            call(c, g_free_camera.setmode, 1);
++        }
++    }
++    c.r[31].sd[0] = static_cast<std::int32_t>(back);
++    call(c, g_free_camera.run, 1);
++    c.r[31].sd[0] = static_cast<std::int32_t>(back);
++}
++struct FreeCameraSetup {
++    FreeCameraSetup() {
++        const char *v = std::getenv("PS2_FREE_CAMERA");
++        if (!v || !*v) return;
++        unsigned long n = 0, at = 0, run = 0, sm = 0, p = 0, m = 0, f = 0, w = 0, wv = 0;
++        if (std::sscanf(v, "%lx,%lx,%lx,%lx,%lx,%lx,%lx,%lx=%lx", &n, &at, &run, &sm, &p, &m, &f, &w, &wv) != 9 || n >= kHostCalls) return;
++        auto u = [](unsigned long x) { return static_cast<std::uint32_t>(x); };
++        g_free_camera = {true, u(n), u(at), u(run), u(sm), u(p), u(m), u(f), u(w), u(wv)};
++        register_host_call(g_free_camera.call, &free_camera_call);
++        if (const char *on = std::getenv("PS2_FREE_CAMERA_ON"); on && *on == '1') g_free_camera_on = true;   // runs without a window (tests)
++    }
++};
++FreeCameraSetup g_free_camera_setup;
++}  // namespace
++bool free_camera_available() {
++    return g_free_camera.set && ld32(g_free_camera.at) == (0x0C000000u | (((kHostCallBase + 4u * g_free_camera.call) >> 2) & 0x03FFFFFFu));
++}
++void set_free_camera(bool on) { g_free_camera_on = on; }
++void add_camera_orbit_turn(float radians) {
++    float now = g_orbit_turn.load();
++    while (!g_orbit_turn.compare_exchange_weak(now, std::clamp(now + radians, -0.6f, 0.6f))) {}
++}
++
+ // For tests without a running emulation (host/pad_test.cpp): take over the host's pad state now, as the next frame boundary would.
+ void latch_pads_now() { latch_pads(); }
+ std::uint16_t pad_rumble(int pad) { return iop::sio2::rumble(pad); }
+-- 
+2.43.0
+

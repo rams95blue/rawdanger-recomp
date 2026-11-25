@@ -28,7 +28,7 @@ namespace RawDangerLauncher
 {
     public static class Program
     {
-        public const string Version = "0.8.9";
+        public const string Version = "0.9.0";
         public const string AppName = "Raw Danger PC";
         public static bool Restart;
 
@@ -568,6 +568,8 @@ namespace RawDangerLauncher
                     psi.EnvironmentVariables["PS2_LENS_WEATHER"] = "0x48F310";
                     psi.EnvironmentVariables["PS2_LENS_YAW"] = "0x5FDBAC";   // the camera's angle: the drops slant when it turns
                     psi.EnvironmentVariables["PS2_LENS_MOTION"] = "@5FD7D0,310,1B0";   // the player's movement seen from the camera
+                    psi.EnvironmentVariables["PS2_FREE_CAMERA"] = "C9,17C9B0,17C250,17F610,48F4E0,3EC,A,48F488=15";   // v0.9.0: the follow camera in the places with a fixed one (pnach [Free camera everywhere]; keys.ini free_camera, off): host call 201 at 0x17C9B0 runs 0x17C250, switching mode 10 to 0 with 0x17F610 while playing (scene 21) and no cutscene bars
+                    psi.EnvironmentVariables["PS2_CAMERA_ORBIT"] = "48F4E0,35C,3B8,354,C8,177270";   // v0.9.0: the orbit camera (pnach [Orbit camera]): the camera block's pointer, its height (the two distances after it), look-at offset and base height, host call 200, called at 0x177270
                     psi.EnvironmentVariables["PS2_CAMERA_PITCH"] = "@5FD7D0,14,18,2.5,6.5,0.5,10";   // the camera's up / down range, wider
                     psi.EnvironmentVariables["PS2_CAMERA_ZOOM"] = "@5FD7D0,450,448";   // field of view (keys.ini field_of_view): the camera's zoom factor
                     // the game's own Options list (from the title and from the in-game menu's Options tab) gets real PC rows of its

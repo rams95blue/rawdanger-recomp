@@ -20,6 +20,8 @@ L	Lens rain
 L	Master volume
 L	Reverb
 L	Mouse look
+L	Camera up/down
+L	Fixed cameras
 L	Mouse speed
 L	Mouse left/right
 L	Mouse up/down
@@ -112,3 +114,5 @@ V	120 %
 V	130 %
 V	140 %
 V	150 %
+B	ORBIT
+B	PS2

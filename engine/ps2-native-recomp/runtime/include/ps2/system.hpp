@@ -128,6 +128,14 @@ bool load_state(const std::uint8_t *data, std::size_t size);
 bool halted();
 const std::string &halt_reason();
 std::uint64_t frame_count();
+// rawdanger-recomp: the orbit camera (PS2_CAMERA_ORBIT, system.cpp). True when the game has it; the setting (keys.ini camera_orbit)
+// and the mouse's up / down turn (radians, + raises the camera) are handed in by the window.
+bool camera_orbit_available();
+void set_camera_orbit(bool on);
+void add_camera_orbit_turn(float radians);
+// rawdanger-recomp: the follow camera in the places that have a fixed one (PS2_FREE_CAMERA, system.cpp; keys.ini free_camera, off)
+bool free_camera_available();
+void set_free_camera(bool on);
 
 bool display_frame(std::vector<std::uint32_t> &rgba, std::uint32_t &width, std::uint32_t &height);
 

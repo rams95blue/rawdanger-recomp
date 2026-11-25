@@ -779,6 +779,12 @@ std::atomic<int> g_bar_opacity{[] { const char *v = std::getenv("PS2_BAR_OPACITY
     return (attr & 0x40u) ? 1 : 2;
 }
 
+// rawdanger-recomp: when the cutscenes' bars were last drawn (steady clock, ms), for the follow camera to leave the cutscenes' own
+// cameras alone (system.cpp, PS2_FREE_CAMERA); watched only while that asks for it
+std::atomic<bool> g_watch_bars{false};
+std::atomic<std::int64_t> g_bars_ms{0};
+std::int64_t now_ms() { return std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now().time_since_epoch()).count(); }
+
 // rawdanger-recomp: where the game's 2D lies on the picture (its HUD, texts, subtitles, the cutscenes' bars), for the rain on
 // the lens to stay under it (blit.wgsl, ui boxes). The game draws its 2D as sprites at the front of the depth range (z of
 // 0xFFFF0000 and up); its full-screen passes (the blur strips, fades) are left out by size. Sprites next to each other are
@@ -1228,6 +1234,8 @@ bool step(const State &s, std::uint64_t attr) {
     const std::uint32_t prim = static_cast<std::uint32_t>(s.prim) & 7u;
     const int needed = prim == 0 ? 1 : (prim == 1 || prim == 2 || prim == 6) ? 2 : prim == 7 ? 1 : 3;
     if (s.count < needed) return;
+    if (draw && prim == 6 && g_watch_bars.load(std::memory_order_relaxed) && cinema_bar(s)) [[unlikely]]
+        g_bars_ms.store(now_ms(), std::memory_order_relaxed);
     if (draw && prim == 6) {
         const int opacity = g_bar_opacity.load(std::memory_order_relaxed);
         if (opacity < 100) {
@@ -2525,6 +2533,11 @@ void set_ambient_occlusion(int level) { ps2::gs::rdfilter::g_ao.store(std::clamp
 int ambient_occlusion() { return ps2::gs::rdfilter::g_ao.load(std::memory_order_relaxed); }
 void set_game_filter_pass(int mode) { ps2::gs::rdfilter::g_mode.store(mode ? 1 : 0, std::memory_order_relaxed); }
 int game_filter_pass() { return ps2::gs::rdfilter::g_mode.load(std::memory_order_relaxed); }
+std::int64_t ms_since_cinema_bars() {
+    ps2::gs::g_watch_bars.store(true, std::memory_order_relaxed);
+    const std::int64_t at = ps2::gs::g_bars_ms.load(std::memory_order_relaxed);
+    return at ? ps2::gs::now_ms() - at : 1000000;
+}
 void set_bar_opacity(unsigned percent) { ps2::gs::g_bar_opacity.store(static_cast<int>(std::min(percent, 100u)), std::memory_order_relaxed); }
 void set_ui_boxes(bool on) { ps2::gs::ui::g_on.store(on, std::memory_order_relaxed); }
 }

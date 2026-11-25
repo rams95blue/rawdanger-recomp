@@ -121,7 +121,8 @@ ROOT.FAT); if it does, they are candidates for the Enhanced Edition.
 | v0.8.7 changes | ✅ | Options list: the PC rows were gone (rd_options.py stopped when its words did not fit: now only live options, and never all or nothing); Field of view and FXAA words added. Ambient occlusion much stronger (it hardly showed). The debug menu (Shift+F7, US and Japanese builds) drawn in the PC font. Title words in the Japanese logo's look (white, over it) when the Japanese logo is on; a layered PSD (8 times the size) to refine them, read back from tools/title_art_us.png / title_art_jp.png. Engine patch 0033 |
 | v0.8.8 changes | ✅ | The title words redrawn by hand (v2 PSDs): ENHANCED EDITION with a bevel under the US logo, 強化版 over the Japanese one (tools/title_art_us.png, title_art_jp.png, cut from the PSDs with `rd_title_art_source.py png`); the build number sits on the words' line and leans with them |
 | v0.8.9 changes | ✅ | The memory-card check at start goes on by itself again: Cross is now tapped in the game's own frames by the runtime (ps2::latch_pads), not by the window's clock, so it no longer depends on the window having the keyboard; with an empty saves folder the card has no system data and the game waits on "Starting the game without using System data" every start. Ambient occlusion measured in metres (depth ≈ 131072 / distance): no dark outlines round far buildings, no smears near the camera, faded out past 20-45 m, at most 16 pixels round, softer (GRAPHICS.md). Switching the regional textures while playing decodes every picture again (the striped NPC face). F7 alone opens the map select; the DEBSEL menu (Shift+F7) is gone, it only led there (DEBUG.md) |
-| **Pending (v0.8.9)** | ⏳ | See the list below |
+| v0.9.0 changes | ✅ | Orbit camera: up / down on the right stick or the mouse now circles the hero at the same distance (from just over the floor to 75 degrees over him), through the follow camera's own height and distance words (engine host call at 0x177270; Settings > Controls > Camera up/down: ORBIT or PS2). Fixed cameras OFF (off by default): the places with a fixed camera keep the follow camera while you play; the cutscenes keep their shots (host call at 0x17C9B0; docs/CAMERA.md). The camera's code mapped (docs/CAMERA.md) |
+| **Pending (v0.9.0)** | ⏳ | See the list below |
 | Still open after v0.7.4 | ✅ | All three done: direct mouse look (v0.7.9), the debug menus' text (v0.7.8), saves without the memory card (v0.7.8) |
 | Keyboard prompts | ✅ | v0.7.1: key caps with the player's keys in the game's own font (see *PC keys in the game's texts*) |
 | In-game menu for Raw Danger | ✅ | Engine patch 0005: Resume, Quick save/load, Game options (F3), Graphics page (look, resolution, text filter, full screen, widescreen, pause in the background), Achievements (F4), Key card, Change keys, **Quit to desktop**, hazard-tape look with the game's name. Next: options inside the game's own Options screen (see below) |
@@ -138,11 +139,11 @@ Code patches go into `patches\pnach\SLUS-21501_2905C5C6.pnach` as named sections
 compiled in at build time (the native engine ignores runtime writes to code). Each one is verified on a headless build
 of the same engine: boot or a save state, frames captured every N frames, compared with the unpatched build.
 
-## Pending (as of v0.8.9)
+## Pending (as of v0.9.0)
 
 Asked for and not done yet, roughly by size:
 
-1. **Orbit camera**: the camera moving around the hero (up over him, down under), not only tilting. v0.8.6 has the free tilt and the field of view; the orbit needs a code change where the stick moves the camera (0x1772FC: its sideways move set from the height, -(h/d) times the step), with room for the new code.
+1. ~~Orbit camera~~: done in v0.9.0. **Fixed cameras OFF** is in too but has not been tried in a place with a fixed camera while playing (the saved states have none): a report from such a place (F9) would confirm it.
 2. **First-person mouse**: Triangle (right mouse button) is the first-person view; the mouse there is not confirmed yet.
 3. **Japanese title**: a few stray pixels on the copyright line.
 4. **Japanese text** for the menus and subtitles (an option, like the voices).
@@ -163,4 +164,16 @@ Asked for and not done yet, roughly by size:
 17. **The hero's head follows the camera** (natural head motion). Found so far: the camera follows a node of the game's scene graph (camera block +0x144 points at it; nodes of 0xF0 bytes with a world matrix at +0x10 and a local place at +0x80, the follow point 1.5 above the hero's root). The head turn needs the hero's head bone and a hook after the animation sets its rotation, before the world matrices are made: a code change, not a memory write.
 18. **Debug menu of our own** (one native panel on F7): the disc keeps only the names of the developers' 37-line menu (DEBUG.md); the useful lines would be written anew: no death or damage, dry the player, add item, restart at the last gate, fog and depth of field off, a sound test, an info line.
 19. **Striped NPC face after switching the textures**: v0.8.9 makes every picture again at the switch; if it still shows, an F9 report at that moment (which map, which person) would say which picture it is.
+20. **Engine pipeline** (see "Engine pipeline" below).
 
+## Engine pipeline
+
+The game is not decompiled: its machine code is translated to C++ mechanically (eerecomp), function by function, so it runs natively but reads like the machine code it came from. What is understood is mapped by hand (docs/CAMERA.md, DEBUG.md, NATIVE_RENDERER.md) and changed in two ways: words written into the program before it is translated (the pnach sections), and since v0.9.0 calls into the engine's own C++ from the game (host calls), for logic too big for a few words.
+
+Worth improving, by what it would bring:
+
+1. **Code changes without a new build.** A changed word in already-translated code is not seen (a patch line writing the orbit call had no effect until the program was translated again: 5 minutes here, longer on a slower PC). If the engine re-translated a function when a patch changes its code (it does already for code the game loads itself, ee-live), the camera and debug features could ship as patch files with no rebuild.
+2. **A missing host call stops the game** ("missing code at 0x0FF00320") when the program has the call but the engine was started without its setting (an older launcher): the engine could carry, for each host call, the instructions it stands in for, and do just those.
+3. **Hand-written functions**: replacing a whole game function with C++ (the camera, the head's look-at, the debug menu) instead of a few patched words; host calls are the first step.
+4. **A symbol map** of the functions found so far (tools/rd_symbols.txt) used by the tools and the notes.
+5. **Uncapped frame rate** needs the native renderer's in-between frames (pending 9, 12).

@@ -42,7 +42,8 @@ tools...** lists them with their links and where they are found (docs/BUILD_TOOL
   which follows the map's weather and stays under the HUD, the texts and the bars), **Sound** (master volume, reverb),
   **Controls** (change keys with key caps, **mouse look** with speed and invert (since v0.7.9 the mouse turns the camera
   itself: as far as it moved, no top speed; build the game again once to get it), the PC keys shown in the game's own texts
-  in place of the PlayStation symbols), **Game** (the game's other switches, and the developers' map select). Every one of
+  in place of the PlayStation symbols, **Camera up/down** (v0.9.0: ORBIT circles the hero at the same distance, PS2 tilts and
+  zooms as on the console) and **Fixed cameras** (OFF keeps your camera in the places that have a fixed one; ON by default)), **Game** (the game's other switches, and the developers' map select). Every one of
   these settings is also a **row of the game's own Options screen** (from the title and from the in-game menu's Options
   tab), with the game's live options of recomp.ini: they sit in the game's list like its own lines (the same cursor,
   Left / Right, help line; "< value >" for settings with more steps), and the list scrolls. The game **goes on behind the
