@@ -136,6 +136,9 @@ void add_camera_orbit_turn(float radians);
 // rawdanger-recomp: the follow camera in the places that have a fixed one (PS2_FREE_CAMERA, system.cpp; keys.ini free_camera, off)
 bool free_camera_available();
 void set_free_camera(bool on);
+// rawdanger-recomp: the hero's head turns toward where the camera looks (PS2_HEAD_FOLLOW, system.cpp; keys.ini head_follow, on)
+bool head_follow_available();
+void set_head_follow(bool on);
 
 bool display_frame(std::vector<std::uint32_t> &rgba, std::uint32_t &width, std::uint32_t &height);
 

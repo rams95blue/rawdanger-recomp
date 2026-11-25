@@ -28,7 +28,7 @@ namespace RawDangerLauncher
 {
     public static class Program
     {
-        public const string Version = "0.9.3";
+        public const string Version = "0.9.4";
         public const string AppName = "Raw Danger PC";
         public static bool Restart;
 
@@ -472,7 +472,8 @@ namespace RawDangerLauncher
                                System.IO.File.GetLastWriteTimeUtc(optIndex) < System.IO.File.GetLastWriteTimeUtc(jpList);
                 if (!System.IO.File.Exists(optIndex) || !System.IO.File.Exists(optArt) || System.IO.File.GetLastWriteTimeUtc(optIndex) < System.IO.File.GetLastWriteTimeUtc(iso) ||
                     recompNewer || jpNewer || !System.IO.File.ReadAllText(optArt).Contains("A:up\t") ||
-                    !System.IO.File.ReadAllText(optArt).Contains("L:Keys on screen\t"))   // v0.8.0 rows
+                    !System.IO.File.ReadAllText(optArt).Contains("L:Keys on screen\t") ||   // v0.8.0 rows
+                    !System.IO.File.ReadAllText(optArt).Contains("L:Head follows camera\t"))   // v0.9.4 rows (and v0.9.2's Fixed cameras)
                 {
                     string python = Path.Combine(Path.Combine(Path.Combine(Path.Combine(s.PnrDir, "tools"), "portable"), "python"), "python.exe");
                     if (!System.IO.File.Exists(python)) python = "python";
@@ -570,6 +571,7 @@ namespace RawDangerLauncher
                     psi.EnvironmentVariables["PS2_LENS_MOTION"] = "@5FD7D0,310,1B0";   // the player's movement seen from the camera
                     psi.EnvironmentVariables["PS2_FREE_CAMERA"] = "C9,17C9B0,17C250,17F610,48F4E0,3EC,A,48F488=15";   // v0.9.0: the follow camera in the places with a fixed one (pnach [Free camera everywhere]; keys.ini free_camera, off): host call 201 at 0x17C9B0 runs 0x17C250, switching mode 10 to 0 with 0x17F610 while playing (scene 21) and no cutscene bars
                     psi.EnvironmentVariables["PS2_CAMERA_ORBIT"] = "48F4E0,35C,3B8,354,C8,177270";   // v0.9.0: the orbit camera (pnach [Orbit camera]): the camera block's pointer, its height (the two distances after it), look-at offset and base height, host call 200, called at 0x177270
+                    psi.EnvironmentVariables["PS2_HEAD_FOLLOW"] = "CA,323EA4,323FB0,5EAC80,48F3E4,F0,7,48F4E0,3EC,160,310,48F488=15";   // v0.9.4: the hero's head looks where the camera looks (pnach [Head follows camera]; keys.ini head_follow, on): host call 202 at 0x323EA4 builds each bone's world matrix (0x323FB0) and turns the player's head (bone 7 of the model at character +0xF0) toward the active camera's heading (+0x160 to +0x310) while the follow camera (mode 0 at +0x3EC) runs in play (scene 21)
                     psi.EnvironmentVariables["PS2_CAMERA_PITCH"] = "@5FD7D0,14,18,2.5,6.5,0.5,10";   // the camera's up / down range, wider
                     psi.EnvironmentVariables["PS2_CAMERA_ZOOM"] = "@5FD7D0,450,448";   // field of view (keys.ini field_of_view): the camera's zoom factor
                     // the game's own Options list (from the title and from the in-game menu's Options tab) gets real PC rows of its

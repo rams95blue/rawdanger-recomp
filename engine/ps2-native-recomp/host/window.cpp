@@ -1265,6 +1265,7 @@ void read_keyboard(std::uint16_t &pressed, std::uint8_t &lx, std::uint8_t &ly, s
     // rawdanger-recomp: mouse look while playing (the pointer is caught in the window then, and free again in menus)
     ps2::set_camera_orbit(g_keys.camera_orbit != 0);
     ps2::set_free_camera(g_keys.free_camera != 0);
+    ps2::set_head_follow(g_keys.head_follow != 0);
     if (g_keep_hero) heal_hero();
     {
         static bool was = false;
@@ -1531,6 +1532,7 @@ void menu_paint(bool show_again) {
         v.mouse_look = g_look_yaw.set ? g_keys.mouse_look : -1;
         v.camera_orbit = ps2::camera_orbit_available() ? g_keys.camera_orbit : -1;
         v.free_camera = ps2::free_camera_available() ? g_keys.free_camera : -1;
+        v.head_follow = ps2::head_follow_available() ? g_keys.head_follow : -1;
         v.mouse_speed = g_keys.look_speed;
         v.mouse_invert_y = (g_keys.mouse_invert & 2) != 0;
         v.mouse_invert_x = (g_keys.mouse_invert & 1) != 0;
@@ -2322,6 +2324,10 @@ void native_option_rows() {
             const auto get_free = [] { return g_keys.free_camera ? 1 : 0; };
             pick("Fixed cameras", "Off: your camera in every place", {"ON", "OFF"}, get_free, toggle_to(Command::free_camera, get_free));
         }
+        if (ps2::head_follow_available()) {
+            const auto get_head = [] { return g_keys.head_follow ? 0 : 1; };
+            pick("Head follows camera", "The hero looks where you look", {"ON", "OFF"}, get_head, toggle_to(Command::head_follow, get_head));
+        }
         spin("Mouse speed", "How far the camera turns", [] {
                 char t[16];
                 std::snprintf(t, sizeof t, "%.1f", std::clamp(std::round(g_keys.look_speed * 5.0) / 5.0, 0.2, 4.0));
@@ -2456,6 +2462,13 @@ void menu_command(quickmenu::Command c, int step) {
         ps2::set_free_camera(g_keys.free_camera != 0);
         rewrite_keys_file([](const std::string &t) { return keymap::with_free_camera(t, g_keys.free_camera); }, "fixed cameras");
         set_notice(g_keys.free_camera ? "Fixed cameras off: the follow camera in every place (from the next place that has one)" : "Fixed cameras on: as on the PS2");
+        break;
+    case Command::head_follow:
+        if (!ps2::head_follow_available()) break;
+        g_keys.head_follow = g_keys.head_follow ? 0 : 1;
+        ps2::set_head_follow(g_keys.head_follow != 0);
+        rewrite_keys_file([](const std::string &t) { return keymap::with_head_follow(t, g_keys.head_follow); }, "head follows camera");
+        set_notice(g_keys.head_follow ? "Head follows camera: on" : "Head follows camera: off (as on the PS2)");
         break;
     case Command::camera_orbit:
         if (!ps2::camera_orbit_available()) break;

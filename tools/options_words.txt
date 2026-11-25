@@ -22,6 +22,7 @@ L	Reverb
 L	Mouse look
 L	Camera up/down
 L	Fixed cameras
+L	Head follows camera
 L	Mouse speed
 L	Mouse left/right
 L	Mouse up/down

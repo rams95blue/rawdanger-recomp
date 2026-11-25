@@ -124,8 +124,8 @@ constexpr Command kPicture[] = {Command::field_of_view, Command::look, Command::
 constexpr const char *kPictureKeys[] = {"", "F2", "", "", "", "", "", "", "", "", "Esc"};
 constexpr Command kSound[] = {Command::master_volume, Command::reverb, Command::back};
 constexpr const char *kSoundKeys[] = {"", "", "Esc"};
-constexpr Command kControls[] = {Command::change_keys, Command::keys_on_screen, Command::mouse_look, Command::camera_orbit, Command::free_camera, Command::mouse_speed, Command::mouse_invert_x, Command::mouse_invert, Command::key_prompts, Command::back};
-constexpr const char *kControlsKeys[] = {"", "F10", "", "", "", "", "", "", "", "Esc"};
+constexpr Command kControls[] = {Command::change_keys, Command::keys_on_screen, Command::mouse_look, Command::camera_orbit, Command::free_camera, Command::head_follow, Command::mouse_speed, Command::mouse_invert_x, Command::mouse_invert, Command::key_prompts, Command::back};
+constexpr const char *kControlsKeys[] = {"", "F10", "", "", "", "", "", "", "", "", "Esc"};
 struct TabList { const Command *commands; const char *const *keys; int n; };
 static_assert(std::size(kDisplay) == std::size(kDisplayKeys) && std::size(kPicture) == std::size(kPictureKeys) && std::size(kSound) == std::size(kSoundKeys) &&
               std::size(kControls) == std::size(kControlsKeys), "one key text per line");
@@ -373,6 +373,9 @@ std::string entry_text(Command c, const Values &v, bool quit_armed) {
     case Command::free_camera:
         if (v.free_camera < 0) return "Fixed cameras: not in this game";
         return std::string("Fixed cameras:  < ") + (v.free_camera ? "off (follow camera)" : "on (as on the PS2)") + " >";
+    case Command::head_follow:
+        if (v.head_follow < 0) return "Head follows camera: not in this game";
+        return std::string("Head follows camera:  < ") + (v.head_follow ? "on" : "off") + " >";
     case Command::camera_orbit:
         if (v.camera_orbit < 0) return "Camera up / down: not in this game";
         return std::string("Camera up / down:  < ") + (v.camera_orbit ? "circles the hero" : "as on the PS2") + " >";
@@ -629,7 +632,7 @@ Command Menu::side() const {
     const Command c = kTabLists[tab_].commands[selected_];
     return c == Command::look || c == Command::scale || c == Command::sharp_2d || c == Command::fullscreen || c == Command::widescreen || c == Command::pause_unfocused || c == Command::menu_game_runs ||
                    c == Command::master_volume || c == Command::integer_scale || c == Command::lens_rain || c == Command::antialias || c == Command::menu_skin ||
-                   c == Command::window_size || c == Command::game_blur || c == Command::reverb || c == Command::key_prompts || c == Command::mouse_look || c == Command::camera_orbit || c == Command::free_camera || c == Command::black_bars || c == Command::sharpen ||
+                   c == Command::window_size || c == Command::game_blur || c == Command::reverb || c == Command::key_prompts || c == Command::mouse_look || c == Command::camera_orbit || c == Command::free_camera || c == Command::head_follow || c == Command::black_bars || c == Command::sharpen ||
                    c == Command::mouse_speed || c == Command::mouse_invert || c == Command::mouse_invert_x || c == Command::popup_size || c == Command::keys_on_screen || c == Command::filter_pass || c == Command::ambient_occlusion || c == Command::field_of_view
                ? c : Command::none;
 }
@@ -988,7 +991,7 @@ void Menu::draw_list(int window_width, int window_height, const Values &values, 
         const bool unusable = (commands[i] == Command::widescreen && values.widescreen < 0) || (commands[i] == Command::language && values.language_other.empty()) ||
                               (commands[i] == Command::game_blur && values.game_blur < 0) || (commands[i] == Command::key_prompts && values.key_prompts < 0) ||
                               (commands[i] == Command::mouse_look && values.mouse_look < 0) || (commands[i] == Command::camera_orbit && values.camera_orbit < 0) ||
-                              (commands[i] == Command::free_camera && values.free_camera < 0);
+                              (commands[i] == Command::free_camera && values.free_camera < 0) || (commands[i] == Command::head_follow && values.head_follow < 0);
         c.text((pad + bar_pad) * s, y + 3 * s, s, lines[i], lit ? (quit ? kText : kBarText) : unusable ? kDim : kText);
         const std::string key = keys[i];
         c.text(out.width - (pad + bar_pad) * s - static_cast<int>(key.size()) * 6 * s + s, y + 3 * s, s, key, lit ? (quit ? kText : kBarDim) : kDim);

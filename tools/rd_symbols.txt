@@ -21,3 +21,7 @@
 0x005FDC60	camera_block_1	the first-person view's camera block (Triangle; the left stick looks)
 0x005EAC80	characters	235 character pointers (0x14D6E0 gets one); +0x368 / +0x36C health (100), +0x370 / +0x374 body temperature (30000), +0x40 the place
 0x0014D8E0	characters_reset	fills health and body temperature from each one's parameters (+0x20, +0x24)
+0x00323E40	model_build_world	a0 the model; clears each bone's flag, builds every bone's world matrix
+0x00323EA4	bone_build_call	[Head follows camera] calls the engine here (host call 202)
+0x00323FB0	bone_build_world	a0 the bone: world = parent's world x local (+0x50), the parent built first
+0x00324ED0	bone_animate	writes a bone's angles (+0x90) from the animation

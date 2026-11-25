@@ -125,7 +125,8 @@ ROOT.FAT); if it does, they are candidates for the Enhanced Edition.
 | v0.9.1 changes | ✅ | First-person view (Triangle): it looks round with the left stick, so the mouse now pushes that stick there (it turned nothing before). Japanese title: the US program's menu boxes covered the right end of 強化版 and the build number; the words now start where the logo starts. Settings > Game > Where am I: the scene, the camera mode, the character and the place, for reports |
 | v0.9.2 changes | ✅ | Debug lines in Settings > Game: Heal and warm the hero (once) and Keep the hero healthy and warm (every frame): the hero's health and body temperature found (the characters' table 0x5EAC80, +0x368 / +0x370; the body temperature falls while wet and cold, and the HUD's arrow turns blue). A build with the new camera code no longer stops when started without RawDangerPC.exe's camera settings (the engine has Raw Danger's own). The README's banner, badges, highlights and quick start (docs/images, tools/rd_readme_art.py) |
 | v0.9.3 changes | ✅ | Your keys in the menus' own button pictures too: the help strips of the Options screen, the map, the character select, the radio, the relations, the memories, the epilogue and the results draw the buttons as ringed symbols in pictures of their own; tools/rd_prompts.py finds them on the disc (a white ring 15 pixels across with the button's own colour inside: 19 pictures, 51 symbols on the US disc) and the engine draws a key cap with your key over each, as it does in the texts (Settings > Controls > Key names in texts) |
-| **Pending (v0.9.3)** | ⏳ | See the list below |
+| v0.9.4 changes | ✅ | **The hero's head follows the camera**: with the follow camera while playing, the hero (either one) turns the head toward where the camera looks, up to 60 degrees each way and a little up or down with the camera's pitch, eased in and out; it comes back to the middle when the camera looks at the hero's face, and cutscenes, the first-person view and the fixed cameras keep the animation as it is. Settings > Controls > Head follows camera (on by default; keys.ini head_follow). Engine patch 0039 (host call 202 in the function that builds the bones' world matrices). Detail distance: eleven likely distance words raised three times changed no pixel in three places, so the pop-in is not a single distance setting (see item 7) |
+| **Pending (v0.9.4)** | ⏳ | See the list below |
 | Still open after v0.7.4 | ✅ | All three done: direct mouse look (v0.7.9), the debug menus' text (v0.7.8), saves without the memory card (v0.7.8) |
 | Keyboard prompts | ✅ | v0.7.1: key caps with the player's keys in the game's own font (see *PC keys in the game's texts*) |
 | In-game menu for Raw Danger | ✅ | Engine patch 0005: Resume, Quick save/load, Game options (F3), Graphics page (look, resolution, text filter, full screen, widescreen, pause in the background), Achievements (F4), Key card, Change keys, **Quit to desktop**, hazard-tape look with the game's name. Next: options inside the game's own Options screen (see below) |
@@ -142,7 +143,7 @@ Code patches go into `patches\pnach\SLUS-21501_2905C5C6.pnach` as named sections
 compiled in at build time (the native engine ignores runtime writes to code). Each one is verified on a headless build
 of the same engine: boot or a save state, frames captured every N frames, compared with the unpatched build.
 
-## Pending (as of v0.9.3)
+## Pending (as of v0.9.4)
 
 Asked for and not done yet, roughly by size:
 
@@ -152,7 +153,7 @@ Asked for and not done yet, roughly by size:
 4. **Japanese text** for the menus and subtitles (an option, like the voices).
 5. ~~Menus' button pictures for keyboard and mouse~~: done in v0.9.3 for the four face buttons. The D-pad, L1 / R1 and SELECT pictures in the same strips stay as they are.
 6. **The hero's voice switching at once** (his lines are in sound banks loaded per area; the other characters' switch at once).
-7. **Detail distance**: the pop-in (the crowd's flat cut-outs, map pieces loaded by zone); the setting has not been found yet (the disc has no lower-detail models).
+7. **Detail distance**: the pop-in (the crowd's flat cut-outs, map pieces loaded by zone); the setting has not been found yet (the disc has no lower-detail models). v0.9.4: eleven global words that look like distances (0x48C0B8, 0x48C0F0, 0x48D714, 0x48FA44, 0x48C9BC/C0, 0x48BFB8, 0x48C1FC, 0x48DCD8, 0x48DC78, 0x48E9CC, 0x48C254/0x48C1B0) raised two to three times changed no pixel in a street, a raised view of the city and a captioned scene. Next: a place where things visibly pop in (an F9 report there), then the culling code itself.
 8. **Minimap** from the game's own map (R3).
 9. **Uncapped frame rate**: the game steps a fixed 20 times a second; more frames on screen come from drawing in-between frames in the native renderer (phase 3).
 10. **Water**: movement and reflections.
@@ -164,7 +165,7 @@ Asked for and not done yet, roughly by size:
     English voices, the window and the launcher's settings): an F9 report taken during it would show where it waits.
 16. **The title words at a higher resolution in the game** (the title picture is 640 x 448; a sharper copy needs a texture
     override of it).
-17. **The hero's head follows the camera** (natural head motion). Found so far: the camera follows a node of the game's scene graph (camera block +0x144 points at it; nodes of 0xF0 bytes with a world matrix at +0x10 and a local place at +0x80, the follow point 1.5 above the hero's root). The head turn needs the hero's head bone and a hook after the animation sets its rotation, before the world matrices are made: a code change, not a memory write.
+17. ~~The hero's head follows the camera~~: done in v0.9.4 (docs/CAMERA.md, "The hero's head").
 18. **Debug menu of our own**: Settings > Game has Where am I (v0.9.1), Heal and warm the hero and Keep the hero healthy and warm (v0.9.2). Still to find: the wetness itself (the HUD's drops belong to the clothes, the game's clothing system, not to the hero's data), the items (add item), the last gate (restart).
 19. **Striped NPC face after switching the textures**: v0.8.9 makes every picture again at the switch; if it still shows, an F9 report at that moment (which map, which person) would say which picture it is.
 20. **Engine pipeline** (see "Engine pipeline" below).

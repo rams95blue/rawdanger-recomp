@@ -917,6 +917,7 @@ namespace RawDangerLauncher
                 else if (s.StartsWith("Free camera tilt", StringComparison.OrdinalIgnoreCase)) list.Add(s);   // a switch, on by default (v0.8.6)
                 else if (s.StartsWith("Orbit camera", StringComparison.OrdinalIgnoreCase)) list.Add(s);   // built in: up / down circles the hero, a setting in the game (v0.9.0)
                 else if (s.StartsWith("Free camera everywhere", StringComparison.OrdinalIgnoreCase)) list.Add(s);   // built in: a setting in the game, off by default (v0.9.0)
+                else if (s.StartsWith("Head follows camera", StringComparison.OrdinalIgnoreCase)) list.Add(s);   // built in: a setting in the game, on by default (v0.9.4)
                 else if (s.StartsWith("Debug menu", StringComparison.OrdinalIgnoreCase)) list.Add(s);   // built in: the developers' menu answers Cross (v0.8.6)
                 else if (s.StartsWith("Widescreen", StringComparison.OrdinalIgnoreCase) && (wideBox.Checked || Enhanced.Is(d))) list.Add(s);
                 else if (s.IndexOf("post", StringComparison.OrdinalIgnoreCase) >= 0) list.Add(s);   // always built in: a switch (Original PS2 Post Processing Filter, on by default)

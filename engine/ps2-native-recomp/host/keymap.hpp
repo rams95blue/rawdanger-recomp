@@ -55,6 +55,7 @@ struct Config {
     int sharpen = 0;           // rawdanger-recomp: contrast-adaptive sharpening of the picture: 0 off (the picture is crisp by itself since the copy fix), 1 low, 2 medium, 3 high
     int mouse_look = 1;        // rawdanger-recomp: the mouse turns the camera while playing (PS2_MOUSE_LOOK_* from the launcher); 0 off
     int free_camera = 0;       // rawdanger-recomp: the follow camera also where the game has a fixed one (PS2_FREE_CAMERA); off by default
+    int head_follow = 1;       // rawdanger-recomp: the hero's head turns toward where the camera looks (PS2_HEAD_FOLLOW); 0: as on the PS2
     int camera_orbit = 1;      // rawdanger-recomp: up / down on the camera (stick or mouse) circles the hero (PS2_CAMERA_ORBIT); 0: the game's own
     double look_speed = 1.0;   // rawdanger-recomp: how far the mouse look turns (0.2 to 4; 1.0 by default since v0.8.3)
     int window_w = 0, window_h = 0;  // rawdanger-recomp: the window's size from the menu's presets (0: the default)
@@ -93,6 +94,7 @@ std::string with_black_bars(const std::string &file_text, int percent);
 std::string with_sharpen(const std::string &file_text, int level);
 std::string with_mouse_look(const std::string &file_text, int on);
 std::string with_camera_orbit(const std::string &file_text, int on);
+std::string with_head_follow(const std::string &file_text, int on);    // the 'head_follow' line
 std::string with_free_camera(const std::string &file_text, int on);    // the 'free_camera' line  // the 'camera_orbit' line
 std::string with_mouse_speed(const std::string &file_text, double speed);
 std::string with_mouse_invert(const std::string &file_text, int invert);

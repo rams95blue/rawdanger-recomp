@@ -4,7 +4,7 @@
 
 <p align="center">
   <a href="https://github.com/rams95blue/rawdanger-recomp/releases"><img alt="release" src="https://img.shields.io/github/v/release/rams95blue/rawdanger-recomp?style=flat-square&color=f2c14e&labelColor=0b1324&label=release"></a>
-  <img alt="version" src="https://img.shields.io/badge/build-v0.9.3-96c4ff?style=flat-square&labelColor=0b1324">
+  <img alt="version" src="https://img.shields.io/badge/build-v0.9.4-96c4ff?style=flat-square&labelColor=0b1324">
   <img alt="platform" src="https://img.shields.io/badge/platform-Windows%2010%2F11%20x64-96c4ff?style=flat-square&labelColor=0b1324">
   <img alt="engine" src="https://img.shields.io/badge/engine-ps2--native--recomp%20fork-96c4ff?style=flat-square&labelColor=0b1324">
   <img alt="game data" src="https://img.shields.io/badge/game%20data-not%20included-e05a4f?style=flat-square&labelColor=0b1324">
@@ -32,7 +32,7 @@
 | **Enhanced Edition** | Built from your four discs: the US game with the Japanese voices, faces, signs, logo and opening film, each switchable while you play. Its title reads ENHANCED EDITION with the build number. |
 | **Any resolution, any screen** | Internal resolution 1x to 8x, widescreen, full screen, FSR 1, SMAA, sharpening, field of view 80 to 150 %. |
 | **The PS2 look, kept or cleaned** | The game's own glow, tint and haze in one cheap GPU pass; ambient occlusion; rain on the lens that follows the weather; cutscene bars from 100 % to none. |
-| **A modern camera** | Mouse look in the follow and first-person views, an orbit camera that circles the hero, free tilt, and an option to keep your camera where the game has a fixed one. |
+| **A modern camera** | Mouse look in the follow and first-person views, an orbit camera that circles the hero, free tilt, a hero who turns the head where you look, and an option to keep your camera where the game has a fixed one. |
 | **Achievements, offline** | RetroAchievements' set of 83, checked on your PC: no account, no connection, badges and progress in the game. |
 | **Saves as folders** | Every save is a plain folder next to the launcher: copy it, back it up, share it. |
 | **PC controls** | Rebindable keys with key caps, the PC keys shown in the game's own texts, F-key shortcuts, fast forward. |
@@ -98,7 +98,7 @@ tools...** lists them with their links and where they are found (docs/BUILD_TOOL
   **Controls** (change keys with key caps, **mouse look** with speed and invert (since v0.7.9 the mouse turns the camera
   itself: as far as it moved, no top speed; build the game again once to get it), the PC keys shown in the game's own texts
   and in its menus' button pictures (v0.9.3) in place of the PlayStation symbols, **Camera up/down** (v0.9.0: ORBIT circles the hero at the same distance, PS2 tilts and
-  zooms as on the console) and **Fixed cameras** (OFF keeps your camera in the places that have a fixed one; ON by default)), **Game** (the game's other switches, and the developers' map select). Every one of
+  zooms as on the console) and **Fixed cameras** (OFF keeps your camera in the places that have a fixed one; ON by default) and **Head follows camera** (v0.9.4: the hero looks where the camera looks; on by default)), **Game** (the game's other switches, and the developers' map select). Every one of
   these settings is also a **row of the game's own Options screen** (from the title and from the in-game menu's Options
   tab), with the game's live options of recomp.ini: they sit in the game's list like its own lines (the same cursor,
   Left / Right, help line; "< value >" for settings with more steps), and the list scrolls. The game **goes on behind the

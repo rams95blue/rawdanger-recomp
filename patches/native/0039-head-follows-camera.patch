@@ -1,0 +1,308 @@
+From 30eae4c81488a6d47bda41c3a272a1a3515e2937 Mon Sep 17 00:00:00 2001
+From: rawdanger-recomp <rawdanger-recomp@users.noreply.github.com>
+Date: Wed, 25 Nov 2026 17:10:02 +0000
+Subject: [PATCH] rawdanger-recomp v0.9.4: the hero's head follows the camera
+
+Host call 202 (PS2_HEAD_FOLLOW) stands in for the call that builds each
+bone's world matrix; for the player's head it turns the axes toward the
+camera's heading, eased, only with the follow camera while playing.
+Settings > Controls > Head follows camera (keys.ini head_follow, on).
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01QNLFPekqhcU2dj7B3Utmea
+---
+ host/keymap.cpp                |   8 +++
+ host/keymap.hpp                |   2 +
+ host/quickmenu.cpp             |  11 ++--
+ host/quickmenu.hpp             |   2 +
+ host/window.cpp                |  13 +++++
+ runtime/include/ps2/system.hpp |   3 +
+ runtime/src/system.cpp         | 104 +++++++++++++++++++++++++++++++++
+ 7 files changed, 139 insertions(+), 4 deletions(-)
+
+diff --git a/host/keymap.cpp b/host/keymap.cpp
+index 942b4cf..5d41b53 100644
+--- a/host/keymap.cpp
++++ b/host/keymap.cpp
+@@ -162,6 +162,7 @@ std::string with_look(const std::string &file_text, int look) { return with_line
+ std::string with_scale(const std::string &file_text, int scale) { return with_line(file_text, "scale", "scale = " + (scale == kScaleAuto ? std::string("auto") : std::to_string(scale))); }
+ std::string with_mouse_look(const std::string &file_text, int on) { return with_line(file_text, "mouselook", std::string("mouse_look = ") + (on ? "on" : "off")); }
+ std::string with_free_camera(const std::string &file_text, int on) { return with_line(file_text, "freecamera", std::string("free_camera = ") + (on ? "on" : "off")); }
++std::string with_head_follow(const std::string &file_text, int on) { return with_line(file_text, "headfollow", std::string("head_follow = ") + (on ? "on" : "off")); }
+ std::string with_camera_orbit(const std::string &file_text, int on) { return with_line(file_text, "cameraorbit", std::string("camera_orbit = ") + (on ? "on" : "off")); }
+ std::string with_mouse_speed(const std::string &file_text, double speed) {
+     char text[48];
+@@ -401,6 +402,13 @@ void parse(const std::string &text, Config &config, std::vector<std::string> &pr
+             else bad("look_speed is a number from 0.1 to 10, ignored");
+             continue;
+         }
++        if (name == "headfollow") {
++            const std::string v = squash(value);
++            if (v == "on" || v == "1") config.head_follow = 1;
++            else if (v == "off" || v == "0") config.head_follow = 0;
++            else bad("head_follow is on or off, ignored");
++            continue;
++        }
+         if (name == "freecamera") {
+             const std::string v = squash(value);
+             if (v == "on" || v == "1") config.free_camera = 1;
+diff --git a/host/keymap.hpp b/host/keymap.hpp
+index 73e000f..1f95a7b 100644
+--- a/host/keymap.hpp
++++ b/host/keymap.hpp
+@@ -55,6 +55,7 @@ struct Config {
+     int sharpen = 0;           // rawdanger-recomp: contrast-adaptive sharpening of the picture: 0 off (the picture is crisp by itself since the copy fix), 1 low, 2 medium, 3 high
+     int mouse_look = 1;        // rawdanger-recomp: the mouse turns the camera while playing (PS2_MOUSE_LOOK_* from the launcher); 0 off
+     int free_camera = 0;       // rawdanger-recomp: the follow camera also where the game has a fixed one (PS2_FREE_CAMERA); off by default
++    int head_follow = 1;       // rawdanger-recomp: the hero's head turns toward where the camera looks (PS2_HEAD_FOLLOW); 0: as on the PS2
+     int camera_orbit = 1;      // rawdanger-recomp: up / down on the camera (stick or mouse) circles the hero (PS2_CAMERA_ORBIT); 0: the game's own
+     double look_speed = 1.0;   // rawdanger-recomp: how far the mouse look turns (0.2 to 4; 1.0 by default since v0.8.3)
+     int window_w = 0, window_h = 0;  // rawdanger-recomp: the window's size from the menu's presets (0: the default)
+@@ -93,6 +94,7 @@ std::string with_black_bars(const std::string &file_text, int percent);
+ std::string with_sharpen(const std::string &file_text, int level);
+ std::string with_mouse_look(const std::string &file_text, int on);
+ std::string with_camera_orbit(const std::string &file_text, int on);
++std::string with_head_follow(const std::string &file_text, int on);    // the 'head_follow' line
+ std::string with_free_camera(const std::string &file_text, int on);    // the 'free_camera' line  // the 'camera_orbit' line
+ std::string with_mouse_speed(const std::string &file_text, double speed);
+ std::string with_mouse_invert(const std::string &file_text, int invert);
+diff --git a/host/quickmenu.cpp b/host/quickmenu.cpp
+index 273d684..f1a9797 100644
+--- a/host/quickmenu.cpp
++++ b/host/quickmenu.cpp
+@@ -124,8 +124,8 @@ constexpr Command kPicture[] = {Command::field_of_view, Command::look, Command::
+ constexpr const char *kPictureKeys[] = {"", "F2", "", "", "", "", "", "", "", "", "Esc"};
+ constexpr Command kSound[] = {Command::master_volume, Command::reverb, Command::back};
+ constexpr const char *kSoundKeys[] = {"", "", "Esc"};
+-constexpr Command kControls[] = {Command::change_keys, Command::keys_on_screen, Command::mouse_look, Command::camera_orbit, Command::free_camera, Command::mouse_speed, Command::mouse_invert_x, Command::mouse_invert, Command::key_prompts, Command::back};
+-constexpr const char *kControlsKeys[] = {"", "F10", "", "", "", "", "", "", "", "Esc"};
++constexpr Command kControls[] = {Command::change_keys, Command::keys_on_screen, Command::mouse_look, Command::camera_orbit, Command::free_camera, Command::head_follow, Command::mouse_speed, Command::mouse_invert_x, Command::mouse_invert, Command::key_prompts, Command::back};
++constexpr const char *kControlsKeys[] = {"", "F10", "", "", "", "", "", "", "", "", "Esc"};
+ struct TabList { const Command *commands; const char *const *keys; int n; };
+ static_assert(std::size(kDisplay) == std::size(kDisplayKeys) && std::size(kPicture) == std::size(kPictureKeys) && std::size(kSound) == std::size(kSoundKeys) &&
+               std::size(kControls) == std::size(kControlsKeys), "one key text per line");
+@@ -373,6 +373,9 @@ std::string entry_text(Command c, const Values &v, bool quit_armed) {
+     case Command::free_camera:
+         if (v.free_camera < 0) return "Fixed cameras: not in this game";
+         return std::string("Fixed cameras:  < ") + (v.free_camera ? "off (follow camera)" : "on (as on the PS2)") + " >";
++    case Command::head_follow:
++        if (v.head_follow < 0) return "Head follows camera: not in this game";
++        return std::string("Head follows camera:  < ") + (v.head_follow ? "on" : "off") + " >";
+     case Command::camera_orbit:
+         if (v.camera_orbit < 0) return "Camera up / down: not in this game";
+         return std::string("Camera up / down:  < ") + (v.camera_orbit ? "circles the hero" : "as on the PS2") + " >";
+@@ -629,7 +632,7 @@ Command Menu::side() const {
+     const Command c = kTabLists[tab_].commands[selected_];
+     return c == Command::look || c == Command::scale || c == Command::sharp_2d || c == Command::fullscreen || c == Command::widescreen || c == Command::pause_unfocused || c == Command::menu_game_runs ||
+                    c == Command::master_volume || c == Command::integer_scale || c == Command::lens_rain || c == Command::antialias || c == Command::menu_skin ||
+-                   c == Command::window_size || c == Command::game_blur || c == Command::reverb || c == Command::key_prompts || c == Command::mouse_look || c == Command::camera_orbit || c == Command::free_camera || c == Command::black_bars || c == Command::sharpen ||
++                   c == Command::window_size || c == Command::game_blur || c == Command::reverb || c == Command::key_prompts || c == Command::mouse_look || c == Command::camera_orbit || c == Command::free_camera || c == Command::head_follow || c == Command::black_bars || c == Command::sharpen ||
+                    c == Command::mouse_speed || c == Command::mouse_invert || c == Command::mouse_invert_x || c == Command::popup_size || c == Command::keys_on_screen || c == Command::filter_pass || c == Command::ambient_occlusion || c == Command::field_of_view
+                ? c : Command::none;
+ }
+@@ -988,7 +991,7 @@ void Menu::draw_list(int window_width, int window_height, const Values &values,
+         const bool unusable = (commands[i] == Command::widescreen && values.widescreen < 0) || (commands[i] == Command::language && values.language_other.empty()) ||
+                               (commands[i] == Command::game_blur && values.game_blur < 0) || (commands[i] == Command::key_prompts && values.key_prompts < 0) ||
+                               (commands[i] == Command::mouse_look && values.mouse_look < 0) || (commands[i] == Command::camera_orbit && values.camera_orbit < 0) ||
+-                              (commands[i] == Command::free_camera && values.free_camera < 0);
++                              (commands[i] == Command::free_camera && values.free_camera < 0) || (commands[i] == Command::head_follow && values.head_follow < 0);
+         c.text((pad + bar_pad) * s, y + 3 * s, s, lines[i], lit ? (quit ? kText : kBarText) : unusable ? kDim : kText);
+         const std::string key = keys[i];
+         c.text(out.width - (pad + bar_pad) * s - static_cast<int>(key.size()) * 6 * s + s, y + 3 * s, s, key, lit ? (quit ? kText : kBarDim) : kDim);
+diff --git a/host/quickmenu.hpp b/host/quickmenu.hpp
+index 504b99c..8b53871 100644
+--- a/host/quickmenu.hpp
++++ b/host/quickmenu.hpp
+@@ -56,6 +56,7 @@ enum class Command {
+     key_prompts,   // Settings > Controls: the game's texts show the keys (key caps) or the PlayStation symbols
+     mouse_look,    // Settings > Controls: the mouse turns the camera while playing
+     free_camera,   // Settings > Controls: the follow camera also where the game has a fixed one
++    head_follow,   // Settings > Controls: the hero's head turns toward where the camera looks
+     camera_orbit,  // Settings > Controls: up / down on the camera circles the hero (or the game's own tilt)
+     mouse_speed,   // Settings > Controls: how far the camera turns for a move of the mouse
+     mouse_invert,  // Settings > Controls: the mouse's up and down the other way round
+@@ -99,6 +100,7 @@ struct Values {
+     int sharpen = 0;
+     int mouse_look = -1;           // -1: this game has no mouse look (PS2_MOUSE_LOOK_YAW), 0 off, 1 on
+     int free_camera = -1;          // -1: not in this game (PS2_FREE_CAMERA), 0 the game's fixed cameras, 1 the follow camera everywhere
++    int head_follow = -1;          // -1: not in this game (PS2_HEAD_FOLLOW), 0 off, 1 on
+     int camera_orbit = -1;         // -1: this game has no orbit camera (PS2_CAMERA_ORBIT), 0 the game's tilt, 1 orbit
+     double mouse_speed = 1.0;
+     bool mouse_invert_y = false, mouse_invert_x = false;          // -1: this game has no prompt font (PS2_PROMPT_FONT_KEY), 0 symbols, 1 keys
+diff --git a/host/window.cpp b/host/window.cpp
+index 81da93b..fd76197 100644
+--- a/host/window.cpp
++++ b/host/window.cpp
+@@ -1265,6 +1265,7 @@ void read_keyboard(std::uint16_t &pressed, std::uint8_t &lx, std::uint8_t &ly, s
+     // rawdanger-recomp: mouse look while playing (the pointer is caught in the window then, and free again in menus)
+     ps2::set_camera_orbit(g_keys.camera_orbit != 0);
+     ps2::set_free_camera(g_keys.free_camera != 0);
++    ps2::set_head_follow(g_keys.head_follow != 0);
+     if (g_keep_hero) heal_hero();
+     {
+         static bool was = false;
+@@ -1531,6 +1532,7 @@ void menu_paint(bool show_again) {
+         v.mouse_look = g_look_yaw.set ? g_keys.mouse_look : -1;
+         v.camera_orbit = ps2::camera_orbit_available() ? g_keys.camera_orbit : -1;
+         v.free_camera = ps2::free_camera_available() ? g_keys.free_camera : -1;
++        v.head_follow = ps2::head_follow_available() ? g_keys.head_follow : -1;
+         v.mouse_speed = g_keys.look_speed;
+         v.mouse_invert_y = (g_keys.mouse_invert & 2) != 0;
+         v.mouse_invert_x = (g_keys.mouse_invert & 1) != 0;
+@@ -2322,6 +2324,10 @@ void native_option_rows() {
+             const auto get_free = [] { return g_keys.free_camera ? 1 : 0; };
+             pick("Fixed cameras", "Off: your camera in every place", {"ON", "OFF"}, get_free, toggle_to(Command::free_camera, get_free));
+         }
++        if (ps2::head_follow_available()) {
++            const auto get_head = [] { return g_keys.head_follow ? 0 : 1; };
++            pick("Head follows camera", "The hero looks where you look", {"ON", "OFF"}, get_head, toggle_to(Command::head_follow, get_head));
++        }
+         spin("Mouse speed", "How far the camera turns", [] {
+                 char t[16];
+                 std::snprintf(t, sizeof t, "%.1f", std::clamp(std::round(g_keys.look_speed * 5.0) / 5.0, 0.2, 4.0));
+@@ -2457,6 +2463,13 @@ void menu_command(quickmenu::Command c, int step) {
+         rewrite_keys_file([](const std::string &t) { return keymap::with_free_camera(t, g_keys.free_camera); }, "fixed cameras");
+         set_notice(g_keys.free_camera ? "Fixed cameras off: the follow camera in every place (from the next place that has one)" : "Fixed cameras on: as on the PS2");
+         break;
++    case Command::head_follow:
++        if (!ps2::head_follow_available()) break;
++        g_keys.head_follow = g_keys.head_follow ? 0 : 1;
++        ps2::set_head_follow(g_keys.head_follow != 0);
++        rewrite_keys_file([](const std::string &t) { return keymap::with_head_follow(t, g_keys.head_follow); }, "head follows camera");
++        set_notice(g_keys.head_follow ? "Head follows camera: on" : "Head follows camera: off (as on the PS2)");
++        break;
+     case Command::camera_orbit:
+         if (!ps2::camera_orbit_available()) break;
+         g_keys.camera_orbit = g_keys.camera_orbit ? 0 : 1;
+diff --git a/runtime/include/ps2/system.hpp b/runtime/include/ps2/system.hpp
+index dee6b09..b4035cb 100644
+--- a/runtime/include/ps2/system.hpp
++++ b/runtime/include/ps2/system.hpp
+@@ -136,6 +136,9 @@ void add_camera_orbit_turn(float radians);
+ // rawdanger-recomp: the follow camera in the places that have a fixed one (PS2_FREE_CAMERA, system.cpp; keys.ini free_camera, off)
+ bool free_camera_available();
+ void set_free_camera(bool on);
++// rawdanger-recomp: the hero's head turns toward where the camera looks (PS2_HEAD_FOLLOW, system.cpp; keys.ini head_follow, on)
++bool head_follow_available();
++void set_head_follow(bool on);
+ 
+ bool display_frame(std::vector<std::uint32_t> &rgba, std::uint32_t &width, std::uint32_t &height);
+ 
+diff --git a/runtime/src/system.cpp b/runtime/src/system.cpp
+index 4f142b6..b7a7923 100644
+--- a/runtime/src/system.cpp
++++ b/runtime/src/system.cpp
+@@ -1305,6 +1305,110 @@ bool free_camera_available() {
+     return g_free_camera.set && ld32(g_free_camera.at) == (0x0C000000u | (((kHostCallBase + 4u * g_free_camera.call) >> 2) & 0x03FFFFFFu));
+ }
+ void set_free_camera(bool on) { g_free_camera_on = on; }
++
++// rawdanger-recomp: the hero's head follows the camera. Raw Danger keeps each model as a list of bones (the model at character
++// +MODEL, its next-bone link at +4, each bone's parent at +0, the world matrix's rows at +0x10..+0x40); one function (0x323E40)
++// walks a model's list and builds each bone's world matrix from its parent's and its own (FN, 0x323FB0). The pnach section [Head
++// follows camera] makes that call (AT, "jal FN" with the bone's address set in its delay slot) a call to the host, which builds the
++// matrix itself and then, for the hero's head (bone INDEX of the player's model, a bone with no children), turns the head's axes in
++// the world toward where the camera looks: by the difference between the camera's heading (the active camera block's place +PLACE
++// to the point it looks at +PIVOT) and the head's own (its -Z axis), at most 60 degrees each way and none when the camera looks at
++// the hero's face, and up or down by half the camera's pitch, eased over a few frames. Only while playing (WHEN = VALUE) with the
++// follow camera (the block's +MODE 0) and no cutscene bars. PS2_HEAD_FOLLOW="CALL,AT,FN,TABLE,PLAYER,MODEL,INDEX,POINTER,MODE,
++// PLACE,PIVOT,WHEN=VALUE" (hex), without it Raw Danger's (US) own. On by default (keys.ini head_follow).
++namespace {
++struct HeadFollow {
++    bool set = false;
++    std::uint32_t call = 0, at = 0, fn = 0, table = 0, player = 0, model = 0, index = 0, pointer = 0, mode = 0, place = 0, pivot = 0, when = 0, when_value = 0;
++};
++HeadFollow g_head;
++std::atomic<bool> g_head_on{true};
++float g_head_yaw = 0.0f, g_head_pitch = 0.0f;
++std::uint32_t head_bone() {
++    const std::uint32_t pid = ld32(g_head.player);
++    if (pid > 7u) return 0;
++    const std::uint32_t ch = ld32(g_head.table + 4u * pid);
++    if (ch < 0x100000u || ch >= 0x2000000u) return 0;
++    const std::uint32_t model = ld32(ch + g_head.model);
++    if (model < 0x100000u || model >= 0x2000000u) return 0;
++    std::uint32_t n = ld32(model + 4u);
++    for (std::uint32_t i = 0; i < g_head.index && n >= 0x100000u && n < 0x2000000u; ++i) n = ld32(n + 4u);
++    return n >= 0x100000u && n < 0x2000000u ? n : 0;
++}
++void rotate_rows(std::uint32_t bone, const float axis[3], float angle) {
++    const float s = std::sin(angle), co = std::cos(angle);
++    for (int r = 0; r < 3; ++r) {
++        const std::uint32_t a = bone + 0x10u + 0x10u * r;
++        const float v[3] = {word_float(ld32(a)), word_float(ld32(a + 4)), word_float(ld32(a + 8))};
++        const float d = axis[0] * v[0] + axis[1] * v[1] + axis[2] * v[2];
++        const float x[3] = {axis[1] * v[2] - axis[2] * v[1], axis[2] * v[0] - axis[0] * v[2], axis[0] * v[1] - axis[1] * v[0]};
++        for (int i = 0; i < 3; ++i) st32(a + 4u * i, float_word(v[i] * co + x[i] * s + axis[i] * d * (1.0f - co)));
++    }
++}
++void head_follow_call(Cpu &c) {
++    const std::uint32_t back = c.r[31].w[0];
++    const std::uint32_t bone = c.r[4].w[0];
++    call(c, g_head.fn, 1);
++    c.r[31].sd[0] = static_cast<std::int32_t>(back);
++    if (bone == 0 || bone != head_bone()) return;
++    float want_yaw = 0.0f, want_pitch = 0.0f;
++    const std::uint32_t cam = ld32(g_head.pointer);
++    const bool live = g_head_on.load(std::memory_order_relaxed) && ld32(g_head.when) == g_head.when_value && cam >= 0x100000u &&
++                      cam < 0x2000000u && ld32(cam + g_head.mode) == 0 && ms_since_cinema_bars() > 1000;
++    if (live) {
++        const float cx = word_float(ld32(cam + g_head.pivot)) - word_float(ld32(cam + g_head.place));
++        const float cy = word_float(ld32(cam + g_head.pivot + 4)) - word_float(ld32(cam + g_head.place + 4));
++        const float cz = word_float(ld32(cam + g_head.pivot + 8)) - word_float(ld32(cam + g_head.place + 8));
++        const float hx = -word_float(ld32(bone + 0x30)), hz = -word_float(ld32(bone + 0x38));
++        const float ground = std::sqrt(cx * cx + cz * cz);
++        if (std::isfinite(ground) && ground > 0.05f && hx * hx + hz * hz > 0.01f) {
++            float d = std::atan2(cx, cz) - std::atan2(hx, hz);
++            while (d > 3.14159265f) d -= 6.28318531f;
++            while (d < -3.14159265f) d += 6.28318531f;
++            const float limit = 1.05f;
++            // past 60 degrees the head stays at the limit; past 120 (the camera in front of the hero) it comes back to the middle
++            const float fade = 1.0f - std::clamp((std::fabs(d) - 2.0f) / 0.6f, 0.0f, 1.0f);
++            want_yaw = std::clamp(d, -limit, limit) * fade;
++            // y grows downward in Raw Danger: a camera looking down has the pivot under (greater y than) its place
++            want_pitch = std::clamp(std::atan2(cy, ground) * 0.5f, -0.35f, 0.35f) * fade;
++        }
++    }
++    g_head_yaw += (want_yaw - g_head_yaw) * 0.12f;
++    g_head_pitch += (want_pitch - g_head_pitch) * 0.12f;
++    if (const char *t = std::getenv("PS2_HEAD_TEST")) {   // tests: a fixed turn "yaw,pitch" in radians
++        float y = 0, p = 0;
++        if (std::sscanf(t, "%f,%f", &y, &p) == 2) g_head_yaw = y, g_head_pitch = p;
++    }
++    if (std::fabs(g_head_yaw) < 1e-4f && std::fabs(g_head_pitch) < 1e-4f) return;
++    const float up[3] = {0.0f, 1.0f, 0.0f};
++    rotate_rows(bone, up, g_head_yaw);
++    float right[3] = {word_float(ld32(bone + 0x10)), 0.0f, word_float(ld32(bone + 0x18))};
++    const float rl = std::sqrt(right[0] * right[0] + right[2] * right[2]);
++    if (rl > 0.1f) {
++        right[0] /= rl, right[2] /= rl;
++        rotate_rows(bone, right, g_head_pitch);
++    }
++}
++struct HeadFollowSetup {
++    HeadFollowSetup() {
++        const char *v = std::getenv("PS2_HEAD_FOLLOW");
++        if (!v || !*v) v = "CA,323EA4,323FB0,5EAC80,48F3E4,F0,7,48F4E0,3EC,160,310,48F488=15";
++        unsigned long x[13] = {};
++        if (std::sscanf(v, "%lx,%lx,%lx,%lx,%lx,%lx,%lx,%lx,%lx,%lx,%lx,%lx=%lx", &x[0], &x[1], &x[2], &x[3], &x[4], &x[5], &x[6], &x[7], &x[8],
++                        &x[9], &x[10], &x[11], &x[12]) != 13 || x[0] >= kHostCalls)
++            return;
++        auto u = [&](int i) { return static_cast<std::uint32_t>(x[i]); };
++        g_head = {true, u(0), u(1), u(2), u(3), u(4), u(5), u(6), u(7), u(8), u(9), u(10), u(11), u(12)};
++        register_host_call(g_head.call, &head_follow_call);
++        if (const char *on = std::getenv("PS2_HEAD_FOLLOW_ON"); on && *on == '0') g_head_on = false;
++    }
++};
++HeadFollowSetup g_head_setup;
++}  // namespace
++bool head_follow_available() {
++    return g_head.set && ld32(g_head.at) == (0x0C000000u | (((kHostCallBase + 4u * g_head.call) >> 2) & 0x03FFFFFFu));
++}
++void set_head_follow(bool on) { g_head_on = on; }
+ void add_camera_orbit_turn(float radians) {
+     float now = g_orbit_turn.load();
+     while (!g_orbit_turn.compare_exchange_weak(now, std::clamp(now + radians, -0.6f, 0.6f))) {}
+-- 
+2.43.0
+

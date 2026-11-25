@@ -1305,6 +1305,110 @@ bool free_camera_available() {
     return g_free_camera.set && ld32(g_free_camera.at) == (0x0C000000u | (((kHostCallBase + 4u * g_free_camera.call) >> 2) & 0x03FFFFFFu));
 }
 void set_free_camera(bool on) { g_free_camera_on = on; }
+
+// rawdanger-recomp: the hero's head follows the camera. Raw Danger keeps each model as a list of bones (the model at character
+// +MODEL, its next-bone link at +4, each bone's parent at +0, the world matrix's rows at +0x10..+0x40); one function (0x323E40)
+// walks a model's list and builds each bone's world matrix from its parent's and its own (FN, 0x323FB0). The pnach section [Head
+// follows camera] makes that call (AT, "jal FN" with the bone's address set in its delay slot) a call to the host, which builds the
+// matrix itself and then, for the hero's head (bone INDEX of the player's model, a bone with no children), turns the head's axes in
+// the world toward where the camera looks: by the difference between the camera's heading (the active camera block's place +PLACE
+// to the point it looks at +PIVOT) and the head's own (its -Z axis), at most 60 degrees each way and none when the camera looks at
+// the hero's face, and up or down by half the camera's pitch, eased over a few frames. Only while playing (WHEN = VALUE) with the
+// follow camera (the block's +MODE 0) and no cutscene bars. PS2_HEAD_FOLLOW="CALL,AT,FN,TABLE,PLAYER,MODEL,INDEX,POINTER,MODE,
+// PLACE,PIVOT,WHEN=VALUE" (hex), without it Raw Danger's (US) own. On by default (keys.ini head_follow).
+namespace {
+struct HeadFollow {
+    bool set = false;
+    std::uint32_t call = 0, at = 0, fn = 0, table = 0, player = 0, model = 0, index = 0, pointer = 0, mode = 0, place = 0, pivot = 0, when = 0, when_value = 0;
+};
+HeadFollow g_head;
+std::atomic<bool> g_head_on{true};
+float g_head_yaw = 0.0f, g_head_pitch = 0.0f;
+std::uint32_t head_bone() {
+    const std::uint32_t pid = ld32(g_head.player);
+    if (pid > 7u) return 0;
+    const std::uint32_t ch = ld32(g_head.table + 4u * pid);
+    if (ch < 0x100000u || ch >= 0x2000000u) return 0;
+    const std::uint32_t model = ld32(ch + g_head.model);
+    if (model < 0x100000u || model >= 0x2000000u) return 0;
+    std::uint32_t n = ld32(model + 4u);
+    for (std::uint32_t i = 0; i < g_head.index && n >= 0x100000u && n < 0x2000000u; ++i) n = ld32(n + 4u);
+    return n >= 0x100000u && n < 0x2000000u ? n : 0;
+}
+void rotate_rows(std::uint32_t bone, const float axis[3], float angle) {
+    const float s = std::sin(angle), co = std::cos(angle);
+    for (int r = 0; r < 3; ++r) {
+        const std::uint32_t a = bone + 0x10u + 0x10u * r;
+        const float v[3] = {word_float(ld32(a)), word_float(ld32(a + 4)), word_float(ld32(a + 8))};
+        const float d = axis[0] * v[0] + axis[1] * v[1] + axis[2] * v[2];
+        const float x[3] = {axis[1] * v[2] - axis[2] * v[1], axis[2] * v[0] - axis[0] * v[2], axis[0] * v[1] - axis[1] * v[0]};
+        for (int i = 0; i < 3; ++i) st32(a + 4u * i, float_word(v[i] * co + x[i] * s + axis[i] * d * (1.0f - co)));
+    }
+}
+void head_follow_call(Cpu &c) {
+    const std::uint32_t back = c.r[31].w[0];
+    const std::uint32_t bone = c.r[4].w[0];
+    call(c, g_head.fn, 1);
+    c.r[31].sd[0] = static_cast<std::int32_t>(back);
+    if (bone == 0 || bone != head_bone()) return;
+    float want_yaw = 0.0f, want_pitch = 0.0f;
+    const std::uint32_t cam = ld32(g_head.pointer);
+    const bool live = g_head_on.load(std::memory_order_relaxed) && ld32(g_head.when) == g_head.when_value && cam >= 0x100000u &&
+                      cam < 0x2000000u && ld32(cam + g_head.mode) == 0 && ms_since_cinema_bars() > 1000;
+    if (live) {
+        const float cx = word_float(ld32(cam + g_head.pivot)) - word_float(ld32(cam + g_head.place));
+        const float cy = word_float(ld32(cam + g_head.pivot + 4)) - word_float(ld32(cam + g_head.place + 4));
+        const float cz = word_float(ld32(cam + g_head.pivot + 8)) - word_float(ld32(cam + g_head.place + 8));
+        const float hx = -word_float(ld32(bone + 0x30)), hz = -word_float(ld32(bone + 0x38));
+        const float ground = std::sqrt(cx * cx + cz * cz);
+        if (std::isfinite(ground) && ground > 0.05f && hx * hx + hz * hz > 0.01f) {
+            float d = std::atan2(cx, cz) - std::atan2(hx, hz);
+            while (d > 3.14159265f) d -= 6.28318531f;
+            while (d < -3.14159265f) d += 6.28318531f;
+            const float limit = 1.05f;
+            // past 60 degrees the head stays at the limit; past 120 (the camera in front of the hero) it comes back to the middle
+            const float fade = 1.0f - std::clamp((std::fabs(d) - 2.0f) / 0.6f, 0.0f, 1.0f);
+            want_yaw = std::clamp(d, -limit, limit) * fade;
+            // y grows downward in Raw Danger: a camera looking down has the pivot under (greater y than) its place
+            want_pitch = std::clamp(std::atan2(cy, ground) * 0.5f, -0.35f, 0.35f) * fade;
+        }
+    }
+    g_head_yaw += (want_yaw - g_head_yaw) * 0.12f;
+    g_head_pitch += (want_pitch - g_head_pitch) * 0.12f;
+    if (const char *t = std::getenv("PS2_HEAD_TEST")) {   // tests: a fixed turn "yaw,pitch" in radians
+        float y = 0, p = 0;
+        if (std::sscanf(t, "%f,%f", &y, &p) == 2) g_head_yaw = y, g_head_pitch = p;
+    }
+    if (std::fabs(g_head_yaw) < 1e-4f && std::fabs(g_head_pitch) < 1e-4f) return;
+    const float up[3] = {0.0f, 1.0f, 0.0f};
+    rotate_rows(bone, up, g_head_yaw);
+    float right[3] = {word_float(ld32(bone + 0x10)), 0.0f, word_float(ld32(bone + 0x18))};
+    const float rl = std::sqrt(right[0] * right[0] + right[2] * right[2]);
+    if (rl > 0.1f) {
+        right[0] /= rl, right[2] /= rl;
+        rotate_rows(bone, right, g_head_pitch);
+    }
+}
+struct HeadFollowSetup {
+    HeadFollowSetup() {
+        const char *v = std::getenv("PS2_HEAD_FOLLOW");
+        if (!v || !*v) v = "CA,323EA4,323FB0,5EAC80,48F3E4,F0,7,48F4E0,3EC,160,310,48F488=15";
+        unsigned long x[13] = {};
+        if (std::sscanf(v, "%lx,%lx,%lx,%lx,%lx,%lx,%lx,%lx,%lx,%lx,%lx,%lx=%lx", &x[0], &x[1], &x[2], &x[3], &x[4], &x[5], &x[6], &x[7], &x[8],
+                        &x[9], &x[10], &x[11], &x[12]) != 13 || x[0] >= kHostCalls)
+            return;
+        auto u = [&](int i) { return static_cast<std::uint32_t>(x[i]); };
+        g_head = {true, u(0), u(1), u(2), u(3), u(4), u(5), u(6), u(7), u(8), u(9), u(10), u(11), u(12)};
+        register_host_call(g_head.call, &head_follow_call);
+        if (const char *on = std::getenv("PS2_HEAD_FOLLOW_ON"); on && *on == '0') g_head_on = false;
+    }
+};
+HeadFollowSetup g_head_setup;
+}  // namespace
+bool head_follow_available() {
+    return g_head.set && ld32(g_head.at) == (0x0C000000u | (((kHostCallBase + 4u * g_head.call) >> 2) & 0x03FFFFFFu));
+}
+void set_head_follow(bool on) { g_head_on = on; }
 void add_camera_orbit_turn(float radians) {
     float now = g_orbit_turn.load();
     while (!g_orbit_turn.compare_exchange_weak(now, std::clamp(now + radians, -0.6f, 0.6f))) {}

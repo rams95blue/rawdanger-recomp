@@ -164,6 +164,9 @@
   Settings > Game); the camera calls default to Raw Danger's settings, so a build never stops for a missing one.
 - **0038-menu-button-pictures** (rawdanger-recomp v0.9.3): PS2_PROMPT_PICTURES: key caps over the ringed button symbols in the
   menus' own pictures (found by tools/rd_prompts.py), in the game's letters.
+- **0039-head-follows-camera** (rawdanger-recomp v0.9.4): PS2_HEAD_FOLLOW, host call 202 standing in for the call that builds
+  each bone's world matrix (0x323EA4 → 0x323FB0); the player's head (bone 7) turns toward the camera's heading, eased, at most
+  60 degrees, only with the follow camera while playing. Settings > Controls > Head follows camera (keys.ini head_follow, on).
 
 ## Goals of the fork
 

@@ -68,6 +68,11 @@ description=The follow camera also in the places where the game has a fixed one 
 // 0x0017C9B0: jal 0x0017C250 (run the active camera) -> jal 0x0FF00324 (the engine's host call 201, which calls 0x17C250 itself)
 patch=1,EE,0017C9B0,word,0FFC00C9
 
+[Head follows camera]
+description=The hero's head turns toward where the camera looks (rawdanger-recomp v0.9.4). The game keeps each model as a list of bones and builds their world matrices one by one in one function (0x323E40, which calls 0x323FB0 for each bone). This word makes that call a call to the engine, which builds the matrix itself and then, for the player's head only, turns it toward the camera's heading: up to 60 degrees each way and up or down by half the camera's pitch, eased in and out, back to the middle when the camera looks at the hero's face. Only with the follow camera while playing; cutscenes, the first-person view and the fixed cameras keep the animation as it is. Built in (code; RawDangerPC.exe sets PS2_HEAD_FOLLOW); switch it in the game (Settings > Controls > Head follows camera, keys.ini head_follow, on by default).
+// 0x00323EA4: jal 0x00323FB0 (build a bone's world matrix; a0 = the bone, set in the delay slot) -> jal 0x0FF00328 (the engine's host call 202, which calls 0x323FB0 itself)
+patch=1,EE,00323EA4,word,0FFC00CA
+
 [Free camera tilt]
 description=The camera can look much further up and down (rawdanger-recomp v0.8.6). The game aims its follow camera at the player plus a height offset (camera +0x3B8, which the mouse and the right stick change) and stops that aim from going higher than 0.4 above the player, so the camera could hardly look up. This moves that stop to 12, in the four camera modes that have it; the mouse's up / down range is widened with it (RawDangerPC.exe). Switch it in the game (F1 -> Game options) or in RawDangerPC.exe.
 // recomp: live switch 00007F08

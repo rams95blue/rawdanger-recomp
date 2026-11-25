@@ -42,4 +42,19 @@ not the right one. The mouse pushes the left stick there (PS2_MOUSE_LOOK_FIRST="
   10 while playing (scene word 0x48F488 = 21) and with no cutscene bars drawn for a second goes back to mode 0 through 0x17F610.
   Checked: the tutorial's cutscenes keep their shots. Not checked yet: a place with a fixed camera while playing (none was at hand
   in the saved states).
+- Head follows camera (v0.9.4, `[Head follows camera]`, host call 202 at 0x323EA4, `PS2_HEAD_FOLLOW`): see below.
 - Field of view (+0x450), free tilt (the -0.4 stops), direct mouse look (0x7F10): v0.8.x.
+
+## The hero's head
+
+- A model is a list of bones: the character's model at +0xF0 (a header whose +4 is the first bone), each bone 0xF0 bytes: +0 the
+  parent, +4 the next bone, +8 a "built" flag, +0x10..+0x40 the world matrix (rows: the axes, then the place; y points down),
+  +0x50..+0x80 the local matrix, +0x90 the animation's angles, +0xA0 the place, +0xB0 the scale.
+- The animation (0x324ED0, about every third frame) writes the angles; 0x323B64 makes the local matrix; `0x323E40` clears the
+  flags and builds each bone's world matrix in list order with `0x323FB0` (parent first, then parent x local).
+- Both heroes: bone 7 is the head (4 the hips, 5 the spine, 6 the chest, 7 the head with no children; 16 and 23 the arms). Its
+  world axes face -Z when the hero faces -Z.
+- The PC version's call (202 at 0x323EA4) builds the bone as the game does, then turns the player's head about the world's up
+  axis by the difference between the camera's heading (+0x160 to +0x310) and the head's (its -Z axis), clamped to 60 degrees and
+  faded out when the camera is in front of the hero, and about its own side axis by half the camera's pitch (at most 20 degrees),
+  eased by 12 % a build. Only with mode 0 while playing and no cutscene bars.
