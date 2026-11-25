@@ -7,6 +7,7 @@ it and the game's palette. Needs Pillow and the Inter Black font; run it only to
 
 File: b"RDTA", version 1, count; then per letter: the character (1 byte), the size (1 byte: 0 the words, 1 the build number),
 width, height (1 byte each), and the rows (each ceil(width / 8) bytes, the high bit first)."""
+import os
 import struct
 import sys
 
@@ -116,7 +117,18 @@ def psd(title_dat, style, out_path, version="0.8.7"):
         return im
 
     main = words("ENHANCED EDITION", 14 * S, 0.68)
+    num0 = None
     num = words("v" + version, 10 * S, 0.9)
+    # the same widths as the build's letters (tools/title_art.bin), 8 times: the words sit exactly where the game shows them
+    try:
+        sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+        import rd_hybrid
+        art = rd_hybrid.load_title_art(os.path.join(os.path.dirname(os.path.abspath(__file__)), "title_art.bin"))
+        width1 = lambda text, size: sum(len(art[(c, size)][0]) for c in text) + len(text) - 1
+        main = main.resize((width1("ENHANCED EDITION", 0) * S, main.height), Image.LANCZOS)
+        num = num.resize((width1("v" + version, 1) * S, num.height), Image.LANCZOS)
+    except Exception as e:
+        print("widths left as drawn:", e)
     gap = 6 * S
     right = (618 - X0) * S
     base = ((441 if us else 360) - Y0) * S
@@ -139,23 +151,59 @@ def psd(title_dat, style, out_path, version="0.8.7"):
         im.putalpha(m.point(lambda v: v * alpha // 255))
         return im
 
+    # the colours the build uses: the logo's own yellows (US), white and grey (Japanese)
+    yellows = []
+    for y in range(363, 421):
+        for x in range(368, 622):
+            r, g, b, a = cols[d[pix + y * w + x]]
+            if a >= 0x70 and r > 200 and g > 190 and b < 90: yellows.append((r, g, b))
+
+    def grain(size):
+        # the build's fill: one of the logo's yellows per game pixel, scattered the same way, each game pixel 8 x 8 here
+        small = Image.new("RGB", (size[0] // S + 1, size[1] // S + 1))
+        sp = small.load()
+        k = 0
+        for yy in range(small.height):
+            for xx in range(small.width):
+                sp[xx, yy] = yellows[(k * 7919) % len(yellows)] if yellows else (255, 236, 24)
+                k += 1
+        return small.resize((small.width * S, small.height * S), Image.NEAREST).crop((0, 0) + size)
+
+    def right_bottom_edge(m, width):
+        # the build's inner edge: the letters' right and bottom sides only, a game pixel wide (a light from the top left)
+        right = ImageChops.offset(m, -width, 0)
+        down = ImageChops.offset(m, 0, -width)
+        return ImageChops.subtract(m, ImageChops.multiply(right, down))
+
     layers = []
     for part, m in (("Build number (drawn by the build: placement only)", nmask), ("Words", mask)):
-        rim_w, edge_w = (16, 6) if us else (8, 4)
-        rim = m.filter(ImageFilter.GaussianBlur(rim_w * 0.6)).point(lambda v: 255 if v > 12 else v * 20)   # round, not square
-        inner = ImageChops.subtract(m, m.filter(ImageFilter.MinFilter(2 * edge_w + 1)))
+        rim_w = 2 * S if us else S          # the build's rim: 2 game pixels (US), 1 (Japanese)
+        rim = m.filter(ImageFilter.GaussianBlur(rim_w * 0.55)).point(lambda v: 255 if v > 10 else v * 25)   # round, not square
+        inner = right_bottom_edge(m, S)
         if us:
-            # the logo's grain: its yellow letters, made big and laid over the words
-            grain = guide.crop((70 * S, 35 * S, 320 * S, 88 * S)).resize(m.size, Image.LANCZOS).convert("RGB")
-            fill = Image.new("RGBA", m.size, (255, 230, 0, 0))
-            fill.paste(Image.blend(Image.new("RGB", m.size, (255, 236, 24)), grain, 0.3), (0, 0))
+            fill = grain(m.size).convert("RGBA")
             fill.putalpha(m)
             group = [layer(part + ": red rim", solid(rim, (236, 0, 0))), layer(part + ": yellow fill", fill),
-                     layer(part + ": dark edge inside", solid(inner, (96, 82, 0)))]
+                     layer(part + ": dark edge (right and bottom)", solid(inner, (96, 82, 0)))]
         else:
             group = [layer(part + ": soft dark edge", solid(rim, (24, 24, 32), 100)), layer(part + ": white", solid(m, (255, 255, 255))),
-                     layer(part + ": grey edge inside", solid(inner, (200, 204, 214)))]
-        layers.append(nested_layers.Group(name=part, visible=part == "Words", layers=list(reversed(group))))
+                     layer(part + ": grey edge (right and bottom)", solid(inner, (200, 204, 214)))]
+        layers.append(nested_layers.Group(name=part, visible=True, layers=list(reversed(group))))
+    # what the build makes of it in the game (640 x 448 game pixels, so 8 x 8 blocks here): a reference
+    try:
+        sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+        import rd_hybrid
+        stamped = rd_hybrid.title_words(d, version, os.path.join(os.path.dirname(os.path.abspath(__file__)), "title_art.bin"))
+        game = Image.new("RGBA", (CW, CH))
+        gpx = game.load()
+        for y in range(CH):
+            for x in range(CW):
+                r, g, b, a = cols[stamped[pix + (Y0 + y) * w + X0 + x]]
+                gpx[x, y] = (r, g, b, min(255, a * 2))
+        layers.append(layer("In the game: the build's result at 640 x 448, enlarged (reference; hide before you export)",
+                            game.resize((CW * S, CH * S), Image.NEAREST), visible=False))
+    except Exception as e:
+        print("no in-game reference layer:", e)
     layers.append(layer("Guide: the title picture (hide it before you export)", guide))
     from pytoshop import enums
     out = nested_layers.nested_layers_to_psd(layers, color_mode=enums.ColorMode.rgb, size=(CW * S, CH * S), compression=enums.Compression.zip)
