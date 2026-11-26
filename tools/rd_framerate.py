@@ -54,11 +54,13 @@ def scale(vu, ve, flt, fps):
     v = a * 3.0 ** n
     return fw(v) if flt else int(round(v))
 
-def code_words(ub, uw, eb, ew, fps):
+def code_words(ub, uw, eb, ew, fps, similar=False):
     words, notes = {}, []
     rt, rs = (lambda w: (w >> 16) & 31), (lambda w: (w >> 21) & 31)
     for (a, b), (c, d) in zip(funcs(uw), funcs(ew)):
         if b - a != d - c: continue
+        # (overlays: when the two files' functions do not line up, a pair of the same length may still be two different functions)
+        if similar and sum(mask(uw[a + k]) == mask(ew[c + k]) for k in range(b - a)) < 0.9 * (b - a): continue
         lu, le = {}, {}
         for k in range(b - a):
             x, y = uw[a + k], ew[c + k]
@@ -120,6 +122,36 @@ def data_words(ub, uw, eb, ew, fps, start=0x380000, W=1024):
                     words[ua] = scale(a, b, True, fps); notes.append((ua, "data %g -> %g" % (fl(a), fl(words[ua]))))
         i += W
     return words, notes
+
+def overlay_words(usd, eud, fps):
+    """One code overlay (MWo3, OVERLAY\\DISC\\*.BIN): {offset in the file: new word} and notes. The European overlays are the US
+    ones built for 30 against the European program (their calls and pointers into it moved: those are left alone, the law below
+    only takes words whose change is a frame rate one). Data: the floats in the overlay's data part, when it has the same size."""
+    if usd[:4] != b"MWo3" or eud[:4] != b"MWo3":
+        return {}, []
+    _, _, load, text, data, _, _, _ = struct.unpack_from("<8I", usd, 0)
+    _, _, eload, etext, edata, _, _, _ = struct.unpack_from("<8I", eud, 0)
+    uw = list(struct.unpack("<%dI" % (len(usd) // 4), usd[:len(usd) // 4 * 4]))
+    ew = list(struct.unpack("<%dI" % (len(eud) // 4), eud[:len(eud) // 4 * 4]))
+    base, ebase = load + 0x40, eload + 0x40
+    cw, cn = code_words(base, uw[0x10:0x10 + text // 4], ebase, ew[0x10:0x10 + etext // 4], fps, similar=True)
+    words, notes = {a - load: w for a, w in cw.items()}, [(a - load, n) for a, n in cn]
+    ud, ed = uw[0x10 + text // 4:], ew[0x10 + etext // 4:]
+    if len(ud) == len(ed):
+        for k, (x, y) in enumerate(zip(ud, ed)):
+            if x != y and isfloat(x) and isfloat(y) and fpsish(fl(y) / fl(x)):
+                off = 0x40 + text + 4 * k
+                words[off] = scale(x, y, True, fps)
+                notes.append((off, "data %g -> %g" % (fl(x), fl(words[off]))))
+    return words, notes
+
+
+def apply_words(data, words):
+    out = bytearray(data)
+    for off, w in words.items():
+        struct.pack_into("<I", out, off, w)
+    return bytes(out)
+
 
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])

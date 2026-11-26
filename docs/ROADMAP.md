@@ -133,7 +133,8 @@ ROOT.FAT); if it does, they are candidates for the Enhanced Edition.
 | v0.9.9 changes | ✅ | **Frame rate: the European program compared** (docs/FRAMERATE.md, `rd.py framerate`): about 1150 constants that change with the frame rate found; the US program with them steps 30 times a second at the right speed (a 2 s walk: 3.60 m, as at 20). 60 extrapolated, not right yet (2.85 m). Tables in patches/framerate (not offered in the launcher yet). **Builds leave no temporary files**: the build's TEMP / TMP go to a folder of their own under %TEMP%, removed when it ends (and ones left by a cut-off build at the next start) |
 | v0.10.0 changes | ✅ | **60 steps a second walks right** with the EE overclocked 2x (engine patch 0044, PS2_EE_OVERCLOCK; the step no longer fitted in a vblank); the 60 table snaps each change to its law. **Coat and skirt sway** and a **weight shift** standing still for the livelier hero. **The European release compared** (docs/VERSION_DIFFERENCES.md): a newspaper text the US lacks, an English "Survived" stamp, BT for TP, 505 Games credits, one longer voice line |
 | v0.10.1 changes | ✅ | **The European release's corrections in the Enhanced Edition** (it now needs the EU disc too; tools/rd_eu.py, docs/VERSION_DIFFERENCES.md): the character select's **"Survived" stamp** in English, the **Capitol Newspaper** document (the US entry showed Geo's guidelines in its place), "collect several key items" and two `[[` escapes in the documents, seven dialogue typos and two lines too long for their box. The EU tutorial's voice line is not used (a line from another part of the tutorial). **Ambient occlusion in the tutorial** (engine patch 0045): its filter is a glow made from the picture, not the depth filter the AO waited for |
-| **Pending (v0.10.1)** | ⏳ | See the list below |
+| v0.10.2 changes | ✅ | **Game speed 20 / 30 / 60 for the Enhanced Edition** (experimental, docs/FRAMERATE.md): the code overlays' 218 frame-rate constants from the European ones, written into the disc (rd_hybrid.py --steps), with the program's (patches/framerate); 60 with the EE overclocked. The tutorial's start checked at 30 (same timing as at 20). The head turn and the wet look ease by time (engine patch 0046) |
+| **Pending (v0.10.2)** | ⏳ | See the list below |
 | Still open after v0.7.4 | ✅ | All three done: direct mouse look (v0.7.9), the debug menus' text (v0.7.8), saves without the memory card (v0.7.8) |
 | Keyboard prompts | ✅ | v0.7.1: key caps with the player's keys in the game's own font (see *PC keys in the game's texts*) |
 | In-game menu for Raw Danger | ✅ | Engine patch 0005: Resume, Quick save/load, Game options (F3), Graphics page (look, resolution, text filter, full screen, widescreen, pause in the background), Achievements (F4), Key card, Change keys, **Quit to desktop**, hazard-tape look with the game's name. Next: options inside the game's own Options screen (see below) |
@@ -150,7 +151,7 @@ Code patches go into `patches\pnach\SLUS-21501_2905C5C6.pnach` as named sections
 compiled in at build time (the native engine ignores runtime writes to code). Each one is verified on a headless build
 of the same engine: boot or a save state, frames captured every N frames, compared with the unpatched build.
 
-## Pending (as of v0.10.1)
+## Pending (as of v0.10.2)
 
 Asked for and not done yet, roughly by size:
 
@@ -169,9 +170,10 @@ Asked for and not done yet, roughly by size:
 13. Anti-aliasing: SMAA works but changes little (FXAA added in v0.8.3).
 14. **More regional toggles**: the Japanese character models and the Columbia items (docs/VERSION_DIFFERENCES.md: they need the Japan-only textures on the disc first).
 15. **Slow scene loads and a black screen in the tutorial** (reported with v0.8.6; not seen here with the US or the Enhanced disc,
-    English voices, the window and the launcher's settings): an F9 report taken during it would show where it waits. v0.10.1:
-    seen here once, loading the tutorial (MAP01-99-00) from the developers' map select: the play stays black while the game
-    draws the whole scene each frame; the pause menu shows it. Not yet looked into.
+    English voices, the window and the launcher's settings): an F9 report taken during it would show where it waits. v0.10.2:
+    the black play and the endless loading screen seen here in v0.10.1 were the test's fault (save states made with the Enhanced
+    disc, run with the US one: the hero's sound bank is read past the end of the US ROOT.DAT, and the game asks again for ever).
+    With the right disc the tutorial loads at once and plays.
 16. **The title words at a higher resolution in the game** (the title picture is 640 x 448; a sharper copy needs a texture
     override of it).
 17. ~~The hero's head follows the camera~~: done in v0.9.4 (docs/CAMERA.md, "The hero's head").
@@ -189,8 +191,8 @@ Asked for and not done yet, roughly by size:
     3. *New clips*: the game's animation format decoded and new motion (from a source you can use) retargeted to its 48-bone
        skeleton. Days of work, in steps.
 21b. **Uncapped frame rate** (moved up, next to the animation): docs/FRAMERATE.md. v0.9.9: 30 works after a fresh map load
-    (the European constants); next: 60 (the constants that do not follow the law), the overlays, cutscenes and menus at 30/60,
-    then an option in the launcher. Found: the step waits G+0x24C vblanks
+    (the European constants); v0.10.0: 60 with the EE overclocked; v0.10.2: the overlays, and an option in the launcher (the
+    Enhanced Edition, experimental). Next: every menu and the later cutscenes checked at 30 and 60. Found: the step waits G+0x24C vblanks
     (3 on the US disc; G = *(gp-0x3E70)); 2 or 1 makes the game step 30 or 60 times a second, but it is a fixed-step game
     (everything 1.5 or 3 times as fast: measured). Two ways: the frame-rate constants changed with it (the European program,
     compiled for 30, compared with the US one would list them all), or in-between pictures drawn with the camera and the bones

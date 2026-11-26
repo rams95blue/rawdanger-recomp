@@ -522,6 +522,9 @@ def main(argv=None):
                     "(tools/title_art.bin); none: no words")
     ap.add_argument("--eu", default="", help="the European disc image (SLES-54587): the English \"Survived\" stamp, the documents' "
                     "texts and the dialogue typos its release corrected (tools/rd_eu.py); the texts in the program go in <out>.eu.pnach")
+    ap.add_argument("--steps", type=int, default=20, choices=(20, 30, 60), help="game steps a second (with --eu): the code overlays' "
+                    "frame-rate constants from the European ones (tools/rd_framerate.py); the program's go in with "
+                    "patches/framerate/SLUS-21501_<steps>steps.pnach, and 60 needs the EE overclocked (docs/FRAMERATE.md)")
     ap.add_argument("--jp-textures", default="", help="texture groups (faces, signs) that start switched on in the game; both "
                     "groups are always on the disc")
     a = ap.parse_args(argv)
@@ -595,6 +598,8 @@ def main(argv=None):
     #   [the US image up to STR.DAT] [Japanese voice area = STR.DAT] [STR.FAT] [ROOT.FAT, ROOT.DAT, ...] [English voice area]
     swaps = plan_textures(us, jp)
     eu_files, eu_writes, eu_notes = {}, {}, []
+    if a.steps != 20 and not a.eu:
+        sys.exit("--steps needs the European disc (--eu): the frame-rate constants come from its program")
     if a.eu:
         import rd_eu
         eu = Iso(a.eu)
@@ -603,6 +608,19 @@ def main(argv=None):
         _, us_elf = rd_eu.program(us)
         _, eu_elf = rd_eu.program(eu)
         eu_writes, eu_notes = rd_eu.elf_fixes(us_elf, eu_elf)
+        if a.steps != 20:
+            import rd_framerate
+            ui_, ei_ = rd_eu.root_index(us), rd_eu.root_index(eu)
+            changed = total = 0
+            for name in sorted(ui_[0]):
+                if not name.startswith("OVERLAY\\DISC\\") or name not in ei_[0]:
+                    continue
+                usd = rd_eu.root_file(us, ui_, name)
+                words, _ = rd_framerate.overlay_words(usd, rd_eu.root_file(eu, ei_, name), a.steps)
+                if words:
+                    eu_files[name] = rd_framerate.apply_words(eu_files.get(name, usd), words)
+                    changed, total = changed + 1, total + len(words)
+            notes.append(f"{a.steps} steps a second: {total} frame-rate constants in {changed} code overlays")
         print("from the European disc:")
         for n in notes + eu_notes:
             print("  " + n)
@@ -739,7 +757,7 @@ def main(argv=None):
         tex = "".join((f"sounds_jp_slots = {g['us_start']} {g['jp_start']} {g['sectors']} {g['count']}\n" if g["name"] == "sounds" else
                        f"textures_{g['name']} = {g['us_start']} {g['jp_start']} {g['sectors']} {g['count']}\n") for g in (swaps["groups"] if swaps else []))
         f.write(f"version = 4\nmedia = 2\ntitle_words = {a.version or '-'}\ntextures_start_on = {a.jp_textures}\n{tex}voices_jp_start = {jp_start}\nvoices_en_start = {en_start}\nvoices_sectors = {area // SECTOR}\n"
-                f"voices_converted = {len(convert)}\n" + ("eu = 1\n" if a.eu else ""))
+                f"voices_converted = {len(convert)}\n" + ("eu = 1\n" if a.eu else "") + f"steps = {a.steps if a.eu else 20}\n")
     print(f"voice areas: Japanese at sector {jp_start} (STR.DAT), English at {en_start}, {area // SECTOR} sectors each")
     print(f"hybrid disc: {a.out}  ({total * SECTOR / 1e9:.2f} GB)")
 

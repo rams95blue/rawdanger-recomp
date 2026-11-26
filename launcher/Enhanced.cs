@@ -24,7 +24,17 @@ namespace RawDangerLauncher
         // Japanese with the English copies switched with the voices: a disc without them is made again.
         // v0.8.1 adds the Japanese logo and opening film (textures_logos, textures_movies): a disc without them is made again.
         // v0.10.1 adds the European corrections (eu = 1, and hybrid.iso.eu.pnach next to it): a disc without them is made again.
-        public static bool CurrentDisc(Settings s) { return Layout(s).Contains("version = 4") && HasTextures(s) && Layout(s).Contains("sounds_jp_slots") && Layout(s).Contains("textures_movies") && Layout(s).Contains("media = 2") && Layout(s).Contains("eu = 1") && File.Exists(EuPnach(s)); }
+        public static bool CurrentDisc(Settings s) { return Layout(s).Contains("version = 4") && HasTextures(s) && Layout(s).Contains("sounds_jp_slots") && Layout(s).Contains("textures_movies") && Layout(s).Contains("media = 2") && Layout(s).Contains("eu = 1") && File.Exists(EuPnach(s)) && BuiltSteps(s) == s.Steps; }
+        // v0.10.2: the game steps a second the disc was made for (its code overlays' frame-rate constants, tools\rd_framerate.py)
+        public static string BuiltSteps(Settings s)
+        {
+            foreach (string line in Layout(s).Split('\n'))
+                if (line.Trim().StartsWith("steps = ")) return line.Trim().Substring(8).Trim();
+            return "20";
+        }
+        // the program's frame-rate constants for 30 or 60 (patches\framerate, next to patches\pnach), and their section
+        public static string StepsPnach(string pnach, string steps) { return Path.Combine(Path.Combine(Path.GetDirectoryName(Path.GetDirectoryName(pnach)), "framerate"), "SLUS-21501_" + steps + "steps.pnach"); }
+        public static string StepsSection(string steps) { return steps == "60" ? "60 steps a second (experimental; needs PS2_EE_OVERCLOCK=2)" : "30 steps a second (experimental)"; }
         // the program's texts from the European release (made by tools\rd_eu.py with the disc), a patch file of its own
         public static string EuPnach(Settings s) { return Path.Combine(Games.Folder(s, Name), "hybrid.iso.eu.pnach"); }
         public const string EuSection = "EU text fixes";

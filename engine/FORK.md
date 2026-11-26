@@ -179,6 +179,8 @@
   degrees in a bone's local turn goes half the way each step; the spine and chest get breathing standing still, a hunch when
   wet, shivering when cold and a lean into turns, turned in the world after they are built (the head and arms follow).
   Settings > Controls > Livelier hero (keys.ini anim_layers, on); Settings > Debug: the layers x4.
+- **0046-rd-ease-by-time** (rawdanger-recomp v0.10.2): the hero's head turn and the wet look ease by time (the measured time
+  between two of the hero's steps), so they keep their pace at 30 or 60 game steps a second.
 - **0045-rd-ao-without-depth-filter** (rawdanger-recomp v0.10.1): the ambient occlusion also where the game has no depth
   filter (the tutorial: its filter is a glow made from the picture). With no depth filter for 60 frames, the AO runs when the
   finished full-width 3D picture is first read into another buffer (the 3D done, the HUD not drawn yet), once per frame.

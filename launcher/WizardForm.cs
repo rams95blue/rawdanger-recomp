@@ -381,6 +381,7 @@ namespace RawDangerLauncher
             modernInfo = MakeLabel("", 28, 266, 520, 30, new Font(Lang.UiFont, 8.5f), Dim);
             modernPane.Controls.Add(modernInfo);
             SpeedPicker(modernPane, 28, 300);
+            StepsPicker(modernPane, 28, 368);
             MakeButton(modernPane, Lang.L("Build tools...", "ビルドツール..."), 708, 306, 160, 30, false, delegate { using (BuildToolsDialog d = new BuildToolsDialog(settings)) d.ShowDialog(this); FillModern(); });
 
             // LEGACY
@@ -453,13 +454,45 @@ namespace RawDangerLauncher
         }
 
         // Build speed: three buttons (light, balanced, full) and what the choice does; every copy of it on the pages stays in step.
+        // v0.10.2: the Enhanced Edition's game steps a second. The game was made for 20; the European release's program and overlays,
+        // compiled for 30, give every constant that holds the frame rate (docs/FRAMERATE.md). Built in: a change makes the disc and the
+        // program again.
+        void StepsPicker(Panel parent, int x, int y)
+        {
+            parent.Controls.Add(MakeLabel(Lang.L("Game speed", "ゲームの更新"), x, y + 6, 110, 22, new Font(Lang.UiFont, 9.5f, FontStyle.Bold), Text1));
+            string[] value = { "20", "30", "60" };
+            string[] names = { Lang.L("20 (original)", "20（オリジナル）"), Lang.L("30", "30"), Lang.L("60", "60") };
+            Button[] b = new Button[3];
+            Label note = MakeLabel("", x + 494, y + 2, 346, 34, new Font(Lang.UiFont, 8.5f), Dim);
+            parent.Controls.Add(note);
+            Action view = delegate
+            {
+                for (int i = 0; i < 3; i++) Pick(b[i], settings.Steps == value[i]);
+                note.Text = settings.Steps == "20"
+                    ? Lang.L("steps a second, as on the PS2. 30 and 60 are experimental.", "回／秒（PS2と同じ）。30と60は試験的です。")
+                    : Lang.L("steps a second: experimental (menus and cutscenes not all checked); " + (settings.Steps == "60" ? "needs a fast PC. " : "") + "a change builds again.",
+                             "回／秒：試験的（メニューとムービーは未確認あり）" + (settings.Steps == "60" ? "、高速なPCが必要。" : "。") + "変更すると再ビルドします。");
+            };
+            for (int i = 0; i < 3; i++)
+            {
+                string v = value[i];
+                b[i] = MakeButton(parent, names[i], x + 120 + i * 124, y, 118, 30, false, delegate
+                {
+                    settings.Steps = v; settings.Save();
+                    view();
+                    if (modernPane != null && modernPane.Visible) FillModern();
+                });
+            }
+            view();
+        }
+
         void SpeedPicker(Panel parent, int x, int y)
         {
             parent.Controls.Add(MakeLabel(Lang.L("Build speed", "ビルド速度"), x, y + 6, 110, 22, new Font(Lang.UiFont, 9.5f, FontStyle.Bold), Text1));
             Button[] b = new Button[3];
             string[] names = { Lang.L("Light", "軽め"), Lang.L("Balanced", "標準"), Lang.L("Full", "最大") };
             int[] value = { 2, 1, 0 };
-            Label note = MakeLabel("", x, y + 38, 840, 40, new Font(Lang.UiFont, 8.5f), Dim);
+            Label note = MakeLabel("", x, y + 36, 840, 32, new Font(Lang.UiFont, 8.5f), Dim);
             parent.Controls.Add(note);
             Action view = delegate
             {
@@ -1069,6 +1102,12 @@ namespace RawDangerLauncher
                 // the program's texts from the European release: a patch file the disc maker writes next to the disc (tools\rd_eu.py)
                 port.Append(" --pnach ").Append(Ps(Posix(Enhanced.EuPnach(settings)))).Append(" --pnach-section ").Append(Ps(Enhanced.EuSection));
             }
+            if (Enhanced.Is(d) && Enhanced.European(discs) != null && settings.Steps != "20" && d.PnachPath != "")
+            {
+                // v0.10.2: 30 or 60 steps a second: the program's frame-rate constants (the overlays' are written into the disc by rd_hybrid.py --steps)
+                port.Append(" --pnach ").Append(Ps(Posix(Enhanced.StepsPnach(Games.Resolve(settings, d.PnachPath), settings.Steps))))
+                    .Append(" --pnach-section ").Append(Ps(Enhanced.StepsSection(settings.Steps)));
+            }
             if (job.Faster) port.Append(" --no-explore");
             if ((!job.Faster || !Enhanced.CurrentDisc(settings)) && Enhanced.Is(d) && job.Image != d.ImagePath)
             {
@@ -1076,7 +1115,7 @@ namespace RawDangerLauncher
                 DiscInfo jp = Enhanced.Japanese(discs), eu = Enhanced.European(discs);
                 s.AppendLine("Write-Output '== launcher: making the Enhanced Edition disc (US disc + Japanese voices + the European corrections)'");
                 s.AppendLine("& python -I " + Ps(Path.Combine(Path.Combine(Settings.ExeDir, "tools"), "rd_hybrid.py")) + " --us " + Ps(d.ImagePath) + " --jp " + Ps(jp.ImagePath)
-                             + (eu != null ? " --eu " + Ps(eu.ImagePath) : "")
+                             + (eu != null ? " --eu " + Ps(eu.ImagePath) + (settings.Steps != "20" ? " --steps " + settings.Steps : "") : "")
                              + " --out " + Ps(job.Image) + " --version " + Ps(Program.Version) + " 2>&1 | ForEach-Object { \"$_\" }");
                 s.AppendLine("if ($LASTEXITCODE) { exit $LASTEXITCODE }");
                 // the Japanese pictures inside maps and models, as texture overrides (used while the Japanese faces are on)

@@ -67,3 +67,25 @@ change to its law first (x1.5^n with n = +-1 or +-2, or x1.25^n for the few tune
 
 Still to do before it is an option: the overlays' counts, cutscenes, menus, and the PC version's own per-step features.
 
+## v0.10.2: the overlays, and an option for the Enhanced Edition
+
+- **The code overlays** (map scripts, menus, the title; `OVERLAY\DISC\*.BIN`): compared with the European ones the same way
+  (tools/rd_framerate.py `overlay_words`, functions paired only when their instructions match, the calls and pointers into the
+  program, which moved, left alone): **218 constants in 28 overlays** (the script waits such as 40 -> 60, 120 -> 180 vblank
+  counts, the item menu's 102.4 -> 68.27 per step, the title's 0.05 -> 0.0333). None in their data. The overlays are translated
+  from the disc, so the Enhanced Edition writes them into its own disc (`rd_hybrid.py --eu ... --steps 30|60`; the layout
+  file says `steps = N`).
+- **Checked at 30**: the tutorial from its menu (the right disc: a save state made with the Enhanced disc reads its sound banks
+  past the end of the US disc's ROOT.DAT and waits for ever) to the first words of the guide: the loading, the walk-in
+  cutscene and the first dialogue box come at the same moments as at 20 (within the 50-vblank samples, the 30 version a
+  sample earlier from a faster load).
+- **The PC version's per-step features**: the orbit camera turns by the game's own per-step stick amount (scaled with the rest);
+  the livelier hero's layers already use the time between steps; the head turn and the wet look eased a fixed share a step,
+  now the same pace in time (engine patch 0046).
+- **The option**: RawDangerPC.exe, MODERN, **Game speed: 20 (original) / 30 / 60**, experimental. A change makes the disc and
+  the program again (the disc's overlays and the program's constants, patches/framerate). 60 runs the emulated EE at twice
+  its clock (PS2_EE_OVERCLOCK=2, set by the launcher when the game was built for 60).
+
+Not checked yet: every menu at 30 and 60 (the item menu, options, the map), the cutscenes after the tutorial, 60 in the
+overlays (the law extrapolated, as for the program).
+

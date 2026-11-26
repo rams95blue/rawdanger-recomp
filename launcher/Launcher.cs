@@ -28,7 +28,7 @@ namespace RawDangerLauncher
 {
     public static class Program
     {
-        public const string Version = "0.10.1";
+        public const string Version = "0.10.2";
         public const string AppName = "Raw Danger PC";
         public static bool Restart;
 
@@ -184,6 +184,7 @@ namespace RawDangerLauncher
         public string EngineCheck = "0";   // check ps2-native-recomp for changes that can help, at start (once a day); off by default since
                                            // v0.7.4: the fork in engine\ is maintained for this game on its own (1 = check again)
         public string EngineSeen = "";     // the upstream change the player hid the notice at ("Hide until new ones")
+        public string Steps = "20";        // the Enhanced Edition's game steps a second: 20 (the original), 30 or 60 (v0.10.2, experimental)
         public string TexturesAsked = "0";  // the Enhanced Edition's "make the disc again for the Japanese textures" question was shown
         public string Window = "";         // where the window was last ("x,y"), so it opens there again (also after a language change)
         public Dictionary<string, string> Choices = new Dictionary<string, string>();   // game name -> ticked sections, | separated
@@ -216,6 +217,7 @@ namespace RawDangerLauncher
                     else if (key == "EngineSeen") s.EngineSeen = value;
                     else if (key == "AchievementsUnofficial") s.Unofficial = value;
                     else if (key == "EnhancedTexturesAsked") s.TexturesAsked = value;
+                    else if (key == "EnhancedSteps") s.Steps = value == "30" || value == "60" ? value : "20";
                     else if (key.StartsWith("Sections.")) s.Choices[key.Substring(9)] = value;
                 }
             }
@@ -322,6 +324,7 @@ namespace RawDangerLauncher
             sb.AppendLine("EngineSeen=" + EngineSeen);
             sb.AppendLine("AchievementsUnofficial=" + Unofficial);
             sb.AppendLine("EnhancedTexturesAsked=" + TexturesAsked);
+            sb.AppendLine("EnhancedSteps=" + Steps);
             foreach (KeyValuePair<string, string> kv in Choices) sb.AppendLine("Sections." + kv.Key + "=" + kv.Value);
             try { System.IO.File.WriteAllText(File, sb.ToString(), new UTF8Encoding(false)); } catch (Exception) { }
         }
@@ -575,6 +578,8 @@ namespace RawDangerLauncher
                     psi.EnvironmentVariables["PS2_CAMERA_ORBIT"] = "48F4E0,35C,3B8,354,C8,177270";   // v0.9.0: the orbit camera (pnach [Orbit camera]): the camera block's pointer, its height (the two distances after it), look-at offset and base height, host call 200, called at 0x177270
                     psi.EnvironmentVariables["PS2_HEAD_FOLLOW"] = "CA,323EA4,323FB0,5EAC80,48F3E4,F0,7,48F4E0,3EC,160,310,48F488=15";   // v0.9.4: the hero's head looks where the camera looks (pnach [Head follows camera]; keys.ini head_follow, on): host call 202 at 0x323EA4 builds each bone's world matrix (0x323FB0) and turns the player's head (bone 7 of the model at character +0xF0) toward the active camera's heading (+0x160 to +0x310) while the follow camera (mode 0 at +0x3EC) runs in play (scene 21)
                     psi.EnvironmentVariables["PS2_HERO_WET"] = "48F730,5C38,24,14,8,1C,30,48F3E4,64,5FD690,48F4E0,160";   // v0.9.5: the wet look and the Debug tab's dry / soak: the thing pool (gp-0x4740), the player's worn things' wetness (+0x30, 0-100), the world-to-screen matrix 0x5FD690 and the camera's place
+                    if (name == Enhanced.Name && Enhanced.BuiltSteps(s) == "60")
+                        psi.EnvironmentVariables["PS2_EE_OVERCLOCK"] = "2";   // v0.10.2: at 60 steps a second a step's work does not fit one vblank of the emulated EE at its own clock (docs/FRAMERATE.md)
                     psi.EnvironmentVariables["PS2_DEBUG_STEPS"] = "490000,24C";   // v0.9.8: Settings > Debug > game steps a second (a test): the graphics block *(gp-0x3E70) +0x24C, vblanks a step (3), docs/FRAMERATE.md
                     psi.EnvironmentVariables["PS2_CAMERA_PITCH"] = "@5FD7D0,14,18,2.5,6.5,0.5,10";   // the camera's up / down range, wider
                     psi.EnvironmentVariables["PS2_CAMERA_ZOOM"] = "@5FD7D0,450,448";   // field of view (keys.ini field_of_view): the camera's zoom factor

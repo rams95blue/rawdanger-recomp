@@ -1402,6 +1402,18 @@ std::atomic<bool> g_wet_show{[] { const char *v = std::getenv("PS2_WET_SHOW"); r
 float g_wet_shown = 0.0f;                   // eased
 // the hero's limbs: bone pairs (from, to: the list's order, 0 the model's first bone) and the radius in metres
 struct Limb { int from, to; float radius; };
+// The time between two of the hero's steps (the head's bone built once a step), for the amounts tuned at 20 steps a second: the
+// game steps 30 or 60 times a second with the frame-rate constants (rawdanger-recomp docs/FRAMERATE.md, v0.10.2).
+float g_step_dt = 1.0f / 20.0f;
+std::uint64_t g_step_frame = 0;
+void note_step() {
+    const std::uint64_t now = frame_count();
+    if (g_step_frame != 0 && now > g_step_frame && now - g_step_frame < 30)
+        g_step_dt += (std::clamp(static_cast<float>(now - g_step_frame) / 60.0f, 1.0f / 60.0f, 0.25f) - g_step_dt) * 0.25f;
+    g_step_frame = now;
+}
+// a share of the way made each step at 20 steps a second, as the share for the current step's length (the same pace in time)
+float at_step_rate(float share20) { return 1.0f - std::pow(1.0f - share20, g_step_dt * 20.0f); }
 constexpr Limb kLimbs[] = {{4, 6, 0.19f}, {6, 7, 0.09f}, {7, -1, 0.14f}, {16, 18, 0.075f}, {18, 20, 0.06f}, {23, 25, 0.075f}, {25, 27, 0.06f},
                            {8, 9, 0.09f},  {9, 11, 0.075f}, {12, 13, 0.09f}, {13, 15, 0.075f}, {4, -2, 0.24f}};
 void update_wet_look(std::uint32_t head) {
@@ -1414,7 +1426,7 @@ void update_wet_look(std::uint32_t head) {
     if (!std::isfinite(wet)) wet = 0.0f;
     if (const float forced = g_wet_force.load(std::memory_order_relaxed); forced >= 0.0f) wet = forced;
     if (!g_wet_look_on.load(std::memory_order_relaxed)) wet = 0.0f;
-    g_wet_shown += (std::clamp(wet, 0.0f, 1.0f) - g_wet_shown) * 0.05f;
+    g_wet_shown += (std::clamp(wet, 0.0f, 1.0f) - g_wet_shown) * at_step_rate(0.05f);
     const bool show = g_wet_show.load(std::memory_order_relaxed);
     if (g_wet_shown < 0.01f && !show) {
         set_wet_look(0.0f, nullptr, 0);
@@ -1701,6 +1713,7 @@ void head_follow_call(Cpu &c) {
     if (lively && idx == 4) anim_step();
     if (lively && (idx == 5 || idx == 6 || (idx >= 30 && idx < 48 && (idx - 30) % 3 == 0))) anim_layers(idx, bone);
     if (bone == 0 || idx < 0 || static_cast<std::uint32_t>(idx) != g_head.index) return;
+    note_step();
     update_wet_look(bone);
     float want_yaw = 0.0f, want_pitch = 0.0f;
     const std::uint32_t cam = ld32(g_head.pointer);
@@ -1724,8 +1737,10 @@ void head_follow_call(Cpu &c) {
             want_pitch = std::clamp(std::atan2(cy, ground) * 0.5f, -0.35f, 0.35f) * fade;
         }
     }
-    g_head_yaw += (want_yaw - g_head_yaw) * 0.12f;
-    g_head_pitch += (want_pitch - g_head_pitch) * 0.12f;
+    // 12 % of the way a step at 20 steps a second; the same pace in time at 30 or 60 (the European constants, docs/FRAMERATE.md)
+    const float ease = at_step_rate(0.12f);
+    g_head_yaw += (want_yaw - g_head_yaw) * ease;
+    g_head_pitch += (want_pitch - g_head_pitch) * ease;
     if (const char *t = std::getenv("PS2_HEAD_TEST")) {   // tests: a fixed turn "yaw,pitch" in radians
         float y = 0, p = 0;
         if (std::sscanf(t, "%f,%f", &y, &p) == 2) g_head_yaw = y, g_head_pitch = p;
