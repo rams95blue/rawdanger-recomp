@@ -5,7 +5,7 @@ by `RawDangerPC.exe`. US, JP and both JP demos build and play. The old ps2recomp
 `ROADMAP_ps2recomp.md` for its research (scene table, overlays, memory card, FMV notes).
 
 Everything new goes into **Raw Danger! Enhanced Edition** (`games\RawDanger-Enhanced`), built from the US disc once all
-four discs are present, because several items below take their data from the JP discs. The plain US/JP builds stay as
+five discs are present (US, EU, JP and the two JP demos), because several items below take their data from them. The plain US/JP builds stay as
 close to the console as possible.
 
 Status: ✅ done and verified · 🔧 in progress · 🔬 researched, not built · ⬜ not started
@@ -132,7 +132,8 @@ ROOT.FAT); if it does, they are candidates for the Enhanced Edition.
 | v0.9.8 changes | ✅ | **The uncapped frame rate, first findings** (docs/FRAMERATE.md): the word that paces the game (3 vblanks a step) and proof that it is a fixed-step game (at 30 or 60 steps everything runs 1.5 or 3 times as fast). Settings > Debug > Game steps a second forces 20, 30 or 60, as a test. Engine patch 0043 |
 | v0.9.9 changes | ✅ | **Frame rate: the European program compared** (docs/FRAMERATE.md, `rd.py framerate`): about 1150 constants that change with the frame rate found; the US program with them steps 30 times a second at the right speed (a 2 s walk: 3.60 m, as at 20). 60 extrapolated, not right yet (2.85 m). Tables in patches/framerate (not offered in the launcher yet). **Builds leave no temporary files**: the build's TEMP / TMP go to a folder of their own under %TEMP%, removed when it ends (and ones left by a cut-off build at the next start) |
 | v0.10.0 changes | ✅ | **60 steps a second walks right** with the EE overclocked 2x (engine patch 0044, PS2_EE_OVERCLOCK; the step no longer fitted in a vblank); the 60 table snaps each change to its law. **Coat and skirt sway** and a **weight shift** standing still for the livelier hero. **The European release compared** (docs/VERSION_DIFFERENCES.md): a newspaper text the US lacks, an English "Survived" stamp, BT for TP, 505 Games credits, one longer voice line |
-| **Pending (v0.10.0)** | ⏳ | See the list below |
+| v0.10.1 changes | ✅ | **The European release's corrections in the Enhanced Edition** (it now needs the EU disc too; tools/rd_eu.py, docs/VERSION_DIFFERENCES.md): the character select's **"Survived" stamp** in English, the **Capitol Newspaper** document (the US entry showed Geo's guidelines in its place), "collect several key items" and two `[[` escapes in the documents, seven dialogue typos and two lines too long for their box. The EU tutorial's voice line is not used (a line from another part of the tutorial). **Ambient occlusion in the tutorial** (engine patch 0045): its filter is a glow made from the picture, not the depth filter the AO waited for |
+| **Pending (v0.10.1)** | ⏳ | See the list below |
 | Still open after v0.7.4 | ✅ | All three done: direct mouse look (v0.7.9), the debug menus' text (v0.7.8), saves without the memory card (v0.7.8) |
 | Keyboard prompts | ✅ | v0.7.1: key caps with the player's keys in the game's own font (see *PC keys in the game's texts*) |
 | In-game menu for Raw Danger | ✅ | Engine patch 0005: Resume, Quick save/load, Game options (F3), Graphics page (look, resolution, text filter, full screen, widescreen, pause in the background), Achievements (F4), Key card, Change keys, **Quit to desktop**, hazard-tape look with the game's name. Next: options inside the game's own Options screen (see below) |
@@ -149,7 +150,7 @@ Code patches go into `patches\pnach\SLUS-21501_2905C5C6.pnach` as named sections
 compiled in at build time (the native engine ignores runtime writes to code). Each one is verified on a headless build
 of the same engine: boot or a save state, frames captured every N frames, compared with the unpatched build.
 
-## Pending (as of v0.10.0)
+## Pending (as of v0.10.1)
 
 Asked for and not done yet, roughly by size:
 
@@ -168,7 +169,9 @@ Asked for and not done yet, roughly by size:
 13. Anti-aliasing: SMAA works but changes little (FXAA added in v0.8.3).
 14. **More regional toggles**: the Japanese character models and the Columbia items (docs/VERSION_DIFFERENCES.md: they need the Japan-only textures on the disc first).
 15. **Slow scene loads and a black screen in the tutorial** (reported with v0.8.6; not seen here with the US or the Enhanced disc,
-    English voices, the window and the launcher's settings): an F9 report taken during it would show where it waits.
+    English voices, the window and the launcher's settings): an F9 report taken during it would show where it waits. v0.10.1:
+    seen here once, loading the tutorial (MAP01-99-00) from the developers' map select: the play stays black while the game
+    draws the whole scene each frame; the pause menu shows it. Not yet looked into.
 16. **The title words at a higher resolution in the game** (the title picture is 640 x 448; a sharper copy needs a texture
     override of it).
 17. ~~The hero's head follows the camera~~: done in v0.9.4 (docs/CAMERA.md, "The hero's head").
@@ -195,7 +198,9 @@ Asked for and not done yet, roughly by size:
 22a. **Reported with v0.9.9** (F9 reports awaited): the orbit camera cannot look up (v0.10.0 work in progress: during play the
     camera is made in 0x17DC80, not through the cutscenes' route; raising the point it looks at after its step did not change the
     picture, so the matrices come from another word), AO odd in some maps and missing in others, anti-aliasing (SMAA) seems not to
-    work, a crash after loading a map from the debug select.
+    work, a crash after loading a map from the debug select. v0.10.1: the AO now runs in the tutorial (it had none: patch 0045);
+    "odd in some maps" may be its dark halo behind a character against a far wall (strong AO, radius 80), to be checked with
+    the reports.
 22. **The wet look, finer**: the shoes and a raised hand can fall outside the capsules; a highlight that follows the light; wet
     ground and walls in the rain.
 

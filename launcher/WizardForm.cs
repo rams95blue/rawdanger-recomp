@@ -358,15 +358,15 @@ namespace RawDangerLauncher
                 + "   - the US or the original Japanese textures, logo and opening film (the US release by default)\n"
                 + "   - widescreen, higher resolution, anti-aliasing, the PS2's colour filter on the GPU, ambient occlusion, rain on the lens\n"
                 + "   - mouse and keyboard, a wider camera, achievements, fast loading, the debug menus\n"
-                + "Built from four discs: your US and Japanese game discs and the two Japanese demos. They are only read.",
+                + "Built from five discs: your US, European and Japanese game discs and the two Japanese demos. They are only read.",
                 "このプロジェクトのすべての機能を入れたPC版。すべてゲーム内（F1）で切り替えられます：\n"
                 + "   - 英語と日本語オリジナル（48 kHz）の両方の音声（叫び声や呼び声も）\n"
                 + "   - 北米版または日本版のテクスチャ・ロゴ・オープニング映像（初期設定は北米版）\n"
                 + "   - ワイド画面、高解像度、アンチエイリアス、GPUによるPS2の色フィルター、アンビエントオクルージョン、レンズの雨\n"
                 + "   - マウスとキーボード、広いカメラ、実績、高速ロード、デバッグメニュー\n"
-                + "北米版と日本版のゲームディスク、日本の体験版2枚の計4枚から作ります。ディスクは読み込むだけです。"),
+                + "北米版・欧州版・日本版のゲームディスクと日本の体験版2枚の計5枚から作ります。ディスクは読み込むだけです。"),
                 28, 48, 840, 118, new Font(Lang.UiFont, 9.5f), Text1));
-            modernDiscs = MakeLabel("", 28, 172, 520, 88, new Font(Lang.UiFont, 9.5f), Text1);
+            modernDiscs = MakeLabel("", 28, 170, 520, 94, new Font(Lang.UiFont, 9.5f), Text1);
             modernPane.Controls.Add(modernDiscs);
             modernFind = MakeButton(modernPane, Lang.L("Find the missing discs...", "足りないディスクを探す..."), 568, 176, 300, 34, false, delegate { LocateMissing(); });
             modernBuild = MakeButton(modernPane, Lang.L("BUILD THE ENHANCED EDITION", "強化版をビルド"), 568, 218, 300, 48, true, delegate
@@ -378,7 +378,7 @@ namespace RawDangerLauncher
             modernBuild.Font = Lang.JP ? new Font(Lang.UiFont, 11f, FontStyle.Bold) : new Font(Display, 12.5f);
             modernTime = MakeLabel("", 568, 270, 300, 34, new Font(Lang.UiFont, 8.5f), Dim);
             modernPane.Controls.Add(modernTime);
-            modernInfo = MakeLabel("", 28, 262, 520, 30, new Font(Lang.UiFont, 8.5f), Dim);
+            modernInfo = MakeLabel("", 28, 266, 520, 30, new Font(Lang.UiFont, 8.5f), Dim);
             modernPane.Controls.Add(modernInfo);
             SpeedPicker(modernPane, 28, 300);
             MakeButton(modernPane, Lang.L("Build tools...", "ビルドツール..."), 708, 306, 160, 30, false, delegate { using (BuildToolsDialog d = new BuildToolsDialog(settings)) d.ShowDialog(this); FillModern(); });
@@ -422,12 +422,13 @@ namespace RawDangerLauncher
             if (modern) FillModern();
         }
 
-        // The four discs the Enhanced Edition is made from, found or not, and the build button.
+        // The five discs the Enhanced Edition is made from, found or not, and the build button.
         void FillModern()
         {
             if (modernDiscs == null) return;
             string[][] want = {
                 new string[] { "RawDanger-US", Lang.L("Raw Danger! (USA), SLUS-21501", "Raw Danger!（北米版）SLUS-21501") },
+                new string[] { "RawDanger-EU", Lang.L("Raw Danger! (Europe), SLES-54587", "Raw Danger!（欧州版）SLES-54587") },
                 new string[] { "ZZT2-JP", Lang.L("Zettai Zetsumei Toshi 2 (Japan), SLPS-25606", "絶体絶命都市2（日本版）SLPS-25606") },
                 new string[] { "ZZT2-DemoA", Lang.L("Zettai Zetsumei Toshi 2 demo Type-A", "絶体絶命都市2 体験版 Type-A") },
                 new string[] { "ZZT2-DemoB", Lang.L("Zettai Zetsumei Toshi 2 demo Type-B", "絶体絶命都市2 体験版 Type-B") } };
@@ -440,7 +441,7 @@ namespace RawDangerLauncher
                 sb.AppendLine((here ? "\u2714  " : "\u2716  ") + w[1] + (here ? "" : Lang.L("   (missing)", "   （ありません）")));
             }
             modernDiscs.Text = sb.ToString();
-            modernDiscs.ForeColor = found == 4 ? Good : Text1;
+            modernDiscs.ForeColor = found == want.Length ? Good : Text1;
             DiscInfo plus = discs.Find(Enhanced.Is);
             bool ready = plus != null && plus.Error == "";
             modernBuild.Enabled = ready && current == null;
@@ -448,7 +449,7 @@ namespace RawDangerLauncher
             modernBuild.Text = ready && Built(plus) ? Lang.L("REBUILD THE ENHANCED EDITION", "強化版を再ビルド") : Lang.L("BUILD THE ENHANCED EDITION", "強化版をビルド");
             modernTime.Text = (ready ? BuildTime.ForList(settings, new List<DiscInfo> { plus }) + "\n" : "") + BuildTools.Note(settings);
             modernInfo.Text = ready ? (Built(plus) ? Lang.L("Built. Rebuilding keeps your saves and settings.", "ビルド済み。再ビルドしてもセーブと設定は残ります。") : "")
-                                    : Lang.L(found + " of 4 discs found. Without all four, the LEGACY tab can still build each disc on its own.", "4枚中" + found + "枚が見つかりました。そろわない場合も「レガシー」で1枚ずつビルドできます。");
+                                    : Lang.L(found + " of " + want.Length + " discs found. Without all of them, the LEGACY tab can still build each disc on its own.", want.Length + "枚中" + found + "枚が見つかりました。そろわない場合も「レガシー」で1枚ずつビルドできます。");
         }
 
         // Build speed: three buttons (light, balanced, full) and what the choice does; every copy of it on the pages stays in step.
@@ -615,7 +616,7 @@ namespace RawDangerLauncher
             foreach (string extra in settings.ExtraImages()) if (File.Exists(extra) && !images.Contains(extra)) images.Add(extra);
             images.Sort(StringComparer.OrdinalIgnoreCase);
             foreach (string image in images) AddDisc(image);
-            // The Enhanced Edition needs all four discs: when one is still missing, look for it near this program too (its folder and
+            // The Enhanced Edition needs all five discs: when one is still missing, look for it near this program too (its folder and
             // the folder above, four levels down: GAME US, GAME JP\DEMO ...), and remember the folders where discs were found.
             if (Enhanced.Missing(discs).Count > 0)
             {
@@ -683,7 +684,7 @@ namespace RawDangerLauncher
             foreach (DiscInfo d in discs)
             {
                 if (Enhanced.Is(d)) continue;   // on the MODERN tab
-                string line = d.Title + "   -   " + (Enhanced.Is(d) ? (d.Error != "" ? d.Error : Lang.L("from all four discs", "4枚すべてのディスクから") + (Built(d) ? Lang.L(", built", "、ビルド済み") : ""))
+                string line = d.Title + "   -   " + (Enhanced.Is(d) ? (d.Error != "" ? d.Error : Lang.L("from all five discs", "5枚すべてのディスクから") + (Built(d) ? Lang.L(", built", "、ビルド済み") : ""))
                     : d.Modified ? Lang.L("NOT COMPATIBLE: modified disc (undub?)", "非対応：改造ディスク（音声差し替え版？）")
                     : d.Error != "" ? Lang.L("cannot be read", "読み込めません") : d.Region + ", " + d.Serial + (Built(d) ? Lang.L(", built", "、ビルド済み") : ""));
                 discList.Items.Add(new DiscItem(d, line), false);
@@ -725,7 +726,7 @@ namespace RawDangerLauncher
 
         bool locating;
 
-        // Asks for each disc the Enhanced Edition still misses, then offers it again (ticked when all four are there).
+        // Asks for each disc the Enhanced Edition still misses, then offers it again (ticked when all five are there).
         void LocateMissing()
         {
             locating = true;
@@ -1063,13 +1064,19 @@ namespace RawDangerLauncher
                 port.Append(" --pnach ").Append(Ps(Posix(Games.Resolve(settings, pnach))));
                 foreach (string sec in sections) port.Append(" --pnach-section ").Append(Ps(sec));
             }
+            if (Enhanced.Is(d) && Enhanced.European(discs) != null)
+            {
+                // the program's texts from the European release: a patch file the disc maker writes next to the disc (tools\rd_eu.py)
+                port.Append(" --pnach ").Append(Ps(Posix(Enhanced.EuPnach(settings)))).Append(" --pnach-section ").Append(Ps(Enhanced.EuSection));
+            }
             if (job.Faster) port.Append(" --no-explore");
             if ((!job.Faster || !Enhanced.CurrentDisc(settings)) && Enhanced.Is(d) && job.Image != d.ImagePath)
             {
                 // the Enhanced Edition's disc: the US disc with the Japanese voices, made from the two images (tools\rd_hybrid.py)
-                DiscInfo jp = Enhanced.Japanese(discs);
-                s.AppendLine("Write-Output '== launcher: making the Enhanced Edition disc (US disc + Japanese voices)'");
+                DiscInfo jp = Enhanced.Japanese(discs), eu = Enhanced.European(discs);
+                s.AppendLine("Write-Output '== launcher: making the Enhanced Edition disc (US disc + Japanese voices + the European corrections)'");
                 s.AppendLine("& python -I " + Ps(Path.Combine(Path.Combine(Settings.ExeDir, "tools"), "rd_hybrid.py")) + " --us " + Ps(d.ImagePath) + " --jp " + Ps(jp.ImagePath)
+                             + (eu != null ? " --eu " + Ps(eu.ImagePath) : "")
                              + " --out " + Ps(job.Image) + " --version " + Ps(Program.Version) + " 2>&1 | ForEach-Object { \"$_\" }");
                 s.AppendLine("if ($LASTEXITCODE) { exit $LASTEXITCODE }");
                 // the Japanese pictures inside maps and models, as texture overrides (used while the Japanese faces are on)

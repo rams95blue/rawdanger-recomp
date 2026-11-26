@@ -1157,30 +1157,10 @@ void decide(Walk &w) {
 }
 
 // false: a draw of the walk, left out
-bool step(const State &s, std::uint64_t attr) {
-    const Context &c = s.ctx[(attr >> 9) & 1u];
-    const std::uint32_t fbp = static_cast<std::uint32_t>(c.frame & 0x1FFu) * 32u, fbw = static_cast<std::uint32_t>(c.frame >> 16) & 0x3Fu;
-    const std::uint32_t fpsm = static_cast<std::uint32_t>(c.frame >> 24) & 0x3Fu, fbmsk = static_cast<std::uint32_t>(c.frame >> 32);
-    const std::uint32_t tbp = static_cast<std::uint32_t>(c.tex0) & 0x3FFFu, tbw = static_cast<std::uint32_t>(c.tex0 >> 14) & 0x3Fu;
-    const std::uint32_t tpsm = static_cast<std::uint32_t>(c.tex0 >> 20) & 0x3Fu, cbp = static_cast<std::uint32_t>(c.tex0 >> 37) & 0x3FFFu;
-    const std::uint32_t fix = static_cast<std::uint32_t>(c.alpha >> 32) & 0xFFu, abcd = static_cast<std::uint32_t>(c.alpha) & 0xFFu, dmode = (abcd >> 6) & 3u;
-    const bool textured = (attr & 0x10u) != 0, sprite = (attr & 7u) == 6;
-    Walk &w = g_walk;
-    if (!w.active) {
-        if (fbw > 1) {   // remember the width of each buffer drawn into
-            int i = 0;
-            while (i < std::min(g_last_n, 8) && g_last_bp[i] != fbp) ++i;
-            if (i == std::min(g_last_n, 8)) i = g_last_n++ % 8;
-            g_last_bp[i] = fbp, g_last_bw[i] = fbw;
-            if (fpsm == 0x00) g_scene_bp = fbp, g_scene_bw = fbw, g_scene_xyoffset = c.xyoffset;
-            return true;
-        }
-        const std::uint32_t zbp = static_cast<std::uint32_t>(c.zbuf & 0x1FFu) * 32u;
-        if (!(sprite && textured && fbw == 1 && fpsm == 0x0A && tpsm == 0x0A && tbw == 1 && tbp == zbp)) return true;
-        w = Walk{};   // the walk starts: the first page of the depth copied as 16-bit into a 64-wide buffer
-        w.active = true, w.zbp = zbp, w.zpsm = 0x30u | ((static_cast<std::uint32_t>(c.zbuf >> 24)) & 0xFu), w.buf = fbp, w.pages = 1, w.copies = 1;
+// ambient occlusion (and the wet look) on the 3D picture: before the game's colour filter tints it, or, in the places that have no
+// filter (the tutorial), when the finished 3D picture is first read (v0.10.1, below). Only with the GPU.
+void run_ao(std::uint32_t zbp, std::uint32_t zpsm) {
 #ifdef PS2_GPU
-        // ambient occlusion on the 3D picture before the filter tints it (only with the GPU)
         float wet = 0.0f;
         std::vector<float> caps;
         {
@@ -1195,7 +1175,7 @@ bool step(const State &s, std::uint64_t attr) {
         const bool wet_on = (wet > 0.01f || show) && caps.size() >= 7;
         if ((ao > 0 || wet_on || view > 0) && gpu_on() && g_scene_bp && g_scene_bw >= 8 && g_scene_bw <= 16) {
             // the AO view shows the strong AO even with AO off
-            std::uint32_t p[64] = {g_scene_bp, g_scene_bw, g_scene_bw * 64u, 448u, zbp, w.zpsm, ao >= 2 || view == 1 ? 245u : ao > 0 ? 170u : 0u, 80u};   // v0.8.7: radius 80 (38 hardly showed)
+            std::uint32_t p[64] = {g_scene_bp, g_scene_bw, g_scene_bw * 64u, 448u, zbp, zpsm, ao >= 2 || view == 1 ? 245u : ao > 0 ? 170u : 0u, 80u};   // v0.8.7: radius 80 (38 hardly showed)
             p[63] = static_cast<std::uint32_t>(view == 3 ? 0 : view);
             if (wet_on) {
                 // the capsules in the picture's pixels, a quarter pixel a step, +4096 pixels so a part off the left or the top fits
@@ -1215,6 +1195,60 @@ bool step(const State &s, std::uint64_t attr) {
             gpu::game_ao(p);
         }
 #endif
+}
+// v0.10.1: the frames without the depth filter (the tutorial: its filter is a glow made from the picture, so the walk above never
+// starts and the AO never ran there). The 3D is drawn into the picture with the depth test; the first textured sprite that
+// reads that picture into another buffer starts the post-processing (the glow, a copy): the 3D is finished, the HUD not drawn
+// yet, so the AO goes there, once per frame. Only when no depth filter walk was seen for 60 such frames (in the maps with the
+// filter the walk's own place is used, before the filter reads the depth).
+struct NoFilter { int zdraws = 0; int walk_seen = 60; std::uint32_t zbp = 0, zpsm = 0x30, fbp = ~0u, fbw = 0; std::uint64_t xyoffset = 0; };
+NoFilter g_nofilter;
+void note_depth_draw(const Context &c, std::uint32_t fbp, std::uint32_t fbw) {   // a draw with the depth test into a 32-bit picture wider than a page
+    NoFilter &n = g_nofilter;
+    const std::uint64_t test = c.test;
+    if (!((test >> 16) & 1u) || ((test >> 17) & 3u) == 1u) return;   // no depth test, or "always" (a clear)
+    if (fbp != n.fbp) n.fbp = fbp, n.zdraws = 0;
+    n.fbw = fbw, n.xyoffset = c.xyoffset;
+    ++n.zdraws;
+    n.zbp = static_cast<std::uint32_t>(c.zbuf & 0x1FFu) * 32u, n.zpsm = 0x30u | (static_cast<std::uint32_t>(c.zbuf >> 24) & 0xFu);
+}
+void note_picture_read(std::uint32_t fbp, std::uint32_t tbp) {   // a textured sprite: does it read the finished 3D picture?
+    NoFilter &n = g_nofilter;
+    if (tbp != n.fbp || fbp == n.fbp || n.zdraws < 100 || n.fbw < 10) return;   // (a narrower 3D picture: a picture in the picture)
+    n.zdraws = 0;   // once per frame: the next frame's 3D counts again
+    if (n.walk_seen > 0) { --n.walk_seen; return; }
+    g_scene_bp = n.fbp, g_scene_bw = n.fbw, g_scene_xyoffset = n.xyoffset;   // the 3D picture (not the last buffer drawn into)
+    run_ao(n.zbp, n.zpsm);
+}
+bool step(const State &s, std::uint64_t attr) {
+    const Context &c = s.ctx[(attr >> 9) & 1u];
+    const std::uint32_t fbp = static_cast<std::uint32_t>(c.frame & 0x1FFu) * 32u, fbw = static_cast<std::uint32_t>(c.frame >> 16) & 0x3Fu;
+    const std::uint32_t fpsm = static_cast<std::uint32_t>(c.frame >> 24) & 0x3Fu, fbmsk = static_cast<std::uint32_t>(c.frame >> 32);
+    const std::uint32_t tbp = static_cast<std::uint32_t>(c.tex0) & 0x3FFFu, tbw = static_cast<std::uint32_t>(c.tex0 >> 14) & 0x3Fu;
+    const std::uint32_t tpsm = static_cast<std::uint32_t>(c.tex0 >> 20) & 0x3Fu, cbp = static_cast<std::uint32_t>(c.tex0 >> 37) & 0x3FFFu;
+    const std::uint32_t fix = static_cast<std::uint32_t>(c.alpha >> 32) & 0xFFu, abcd = static_cast<std::uint32_t>(c.alpha) & 0xFFu, dmode = (abcd >> 6) & 3u;
+    const bool textured = (attr & 0x10u) != 0, sprite = (attr & 7u) == 6;
+    Walk &w = g_walk;
+    if (!w.active) {
+        if (fbw > 1) {   // remember the width of each buffer drawn into
+            int i = 0;
+            while (i < std::min(g_last_n, 8) && g_last_bp[i] != fbp) ++i;
+            if (i == std::min(g_last_n, 8)) i = g_last_n++ % 8;
+            g_last_bp[i] = fbp, g_last_bw[i] = fbw;
+            if (sprite && textured) note_picture_read(fbp, tbp);
+            if (fpsm == 0x00) {
+                g_scene_bp = fbp, g_scene_bw = fbw, g_scene_xyoffset = c.xyoffset;
+                note_depth_draw(c, fbp, fbw);
+            }
+            return true;
+        }
+        if (sprite && textured) note_picture_read(fbp, tbp);
+        const std::uint32_t zbp = static_cast<std::uint32_t>(c.zbuf & 0x1FFu) * 32u;
+        if (!(sprite && textured && fbw == 1 && fpsm == 0x0A && tpsm == 0x0A && tbw == 1 && tbp == zbp)) return true;
+        w = Walk{};   // the walk starts: the first page of the depth copied as 16-bit into a 64-wide buffer
+        w.active = true, w.zbp = zbp, w.zpsm = 0x30u | ((static_cast<std::uint32_t>(c.zbuf >> 24)) & 0xFu), w.buf = fbp, w.pages = 1, w.copies = 1;
+        run_ao(zbp, w.zpsm);
+        g_nofilter.walk_seen = 60, g_nofilter.zdraws = 0;
         return true;
     }
     if (fbw != 1) {   // the walk is over

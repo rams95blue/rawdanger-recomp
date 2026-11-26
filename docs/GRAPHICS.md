@@ -100,6 +100,13 @@ Only that difference darkens, so flat surfaces stay clean, and points much neare
 which keeps the dark halos of a plain screen-space AO away. The GPU renderer only, and it needs the PS2 post-processing filter
 on (it runs where the filter starts: with the filter off there is no point where the 3D picture is done and the HUD not yet drawn).
 
+v0.10.1 (engine patch 0045): the tutorial had no AO at all. Its filter is not the depth-based one (a glow made from the picture:
+the 3D picture is copied into a 24-bit buffer 320 wide, then worked on a page at a time), so the place the AO waited for never
+came. Now, when no depth filter has been seen for 60 frames, the AO runs when the finished 3D picture (the full-width buffer
+drawn with the depth test) is first read by a textured sprite into another buffer: the 3D is done, the HUD not drawn yet. Once
+a frame; a narrower 3D picture (a picture in the picture) is left alone. Checked in the tutorial's opening (the Relief Center):
+Settings > Debug > Picture shown: AO alone shows it; the maps with the depth filter are unchanged (it never fires there).
+
 v0.8.7: stronger, as it hardly showed (in the banquet hall, 0.3 % of the picture changed): it looks 80 pixels out at the nearest
 depth (was 38, up to 40 pixels), counts creases from 0.4 % (was 0.6 %), with a gain of 3 (was 1.4); light darkens up to 66 %,
 strong up to 96 %. Now feet stand on the floor and the tables' edges sit on it.

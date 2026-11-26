@@ -56,7 +56,7 @@ The pictures are not shipped with the launcher: it reads them where they are on 
 
 ## Enhanced Edition (the fifth game)
 
-Offered once all four discs are found (US, JP, JP demo Type-A, JP demo Type-B). It is built from the US disc into its own
+Offered once all five discs are found (US, EU, JP, JP demo Type-A, JP demo Type-B). It is built from the US disc into its own
 folder (`games\RawDanger-Enhanced`) with the fast-loading fix, widescreen 16:9 and 2x internal resolution as the default
 (F1 in the game changes it). The roadmap's next features, taken from the JP discs (Japanese voices, JP-region textures),
 will be added to this edition.

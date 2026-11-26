@@ -179,6 +179,9 @@
   degrees in a bone's local turn goes half the way each step; the spine and chest get breathing standing still, a hunch when
   wet, shivering when cold and a lean into turns, turned in the world after they are built (the head and arms follow).
   Settings > Controls > Livelier hero (keys.ini anim_layers, on); Settings > Debug: the layers x4.
+- **0045-rd-ao-without-depth-filter** (rawdanger-recomp v0.10.1): the ambient occlusion also where the game has no depth
+  filter (the tutorial: its filter is a glow made from the picture). With no depth filter for 60 frames, the AO runs when the
+  finished full-width 3D picture is first read into another buffer (the 3D done, the HUD not drawn yet), once per frame.
 - **0044-overclock-sway** (rawdanger-recomp v0.10.0): PS2_EE_OVERCLOCK=K (1-8): K charged cycles make one cycle of the clock
   that paces the vblanks, the timers and the IOP (PCSX2's EE cycle rate); Raw Danger at 60 steps a second needs 2. The livelier
   hero gets springs on the six hanging chains (coat tails, the skirt) and a slow weight shift standing still.

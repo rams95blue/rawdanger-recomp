@@ -1,6 +1,7 @@
 // Raw Danger PC - the fifth game: Raw Danger! Enhanced Edition. Built from the US disc with every enhancement from the
-// roadmap that works today, and offered only when all four discs (US, JP, JP demo Type-A, JP demo Type-B) are found, because
-// the roadmap's next enhancements (JP voices, JP-region textures, the demos' extras) are taken from those discs.
+// roadmap that works today, and offered only when all five discs (US, EU, JP, JP demo Type-A, JP demo Type-B) are found,
+// because its enhancements are taken from those discs (JP voices and textures, the European release's corrections: the
+// "Survived" stamp, the documents' texts and the dialogue typos, tools\rd_eu.py).
 using System;
 using System.Collections.Generic;
 using System.IO;
@@ -22,7 +23,11 @@ namespace RawDangerLauncher
         // v0.7.5 adds the sound banks with voices in them (the heroes' shouts, wake-up and recorder lines, four scenes' banks), in
         // Japanese with the English copies switched with the voices: a disc without them is made again.
         // v0.8.1 adds the Japanese logo and opening film (textures_logos, textures_movies): a disc without them is made again.
-        public static bool CurrentDisc(Settings s) { return Layout(s).Contains("version = 4") && HasTextures(s) && Layout(s).Contains("sounds_jp_slots") && Layout(s).Contains("textures_movies") && Layout(s).Contains("media = 2"); }
+        // v0.10.1 adds the European corrections (eu = 1, and hybrid.iso.eu.pnach next to it): a disc without them is made again.
+        public static bool CurrentDisc(Settings s) { return Layout(s).Contains("version = 4") && HasTextures(s) && Layout(s).Contains("sounds_jp_slots") && Layout(s).Contains("textures_movies") && Layout(s).Contains("media = 2") && Layout(s).Contains("eu = 1") && File.Exists(EuPnach(s)); }
+        // the program's texts from the European release (made by tools\rd_eu.py with the disc), a patch file of its own
+        public static string EuPnach(Settings s) { return Path.Combine(Games.Folder(s, Name), "hybrid.iso.eu.pnach"); }
+        public const string EuSection = "EU text fixes";
         public static bool WorkingDisc(Settings s) { return Layout(s).Contains("version = 4"); }
         public static bool HasTextures(Settings s) { return Layout(s).Contains("textures_faces"); }
 
@@ -40,12 +45,14 @@ namespace RawDangerLauncher
         }
 
         public static DiscInfo Japanese(List<DiscInfo> discs) { return Find(discs, "ZZT2-JP"); }
+        public static DiscInfo European(List<DiscInfo> discs) { return Find(discs, "RawDanger-EU"); }
 
         // What is still missing, in the words the file dialog shows.
         public static List<string> Missing(List<DiscInfo> discs)
         {
             List<string> list = new List<string>();
             if (Find(discs, "RawDanger-US") == null) list.Add(Lang.L("Raw Danger! (USA) - SLUS-21501", "Raw Danger!（北米版）SLUS-21501"));
+            if (Find(discs, "RawDanger-EU") == null) list.Add(Lang.L("Raw Danger! (Europe) - SLES-54587", "Raw Danger!（欧州版）SLES-54587"));
             if (Find(discs, "ZZT2-JP") == null) list.Add(Lang.L("Zettai Zetsumei Toshi 2 (Japan) - SLPS-25606", "絶体絶命都市2（日本版）SLPS-25606"));
             if (Find(discs, "ZZT2-DemoA") == null) list.Add(Lang.L("Zettai Zetsumei Toshi 2 demo Type-A (.cue)", "絶体絶命都市2 体験版 Type-A（.cue）"));
             if (Find(discs, "ZZT2-DemoB") == null) list.Add(Lang.L("Zettai Zetsumei Toshi 2 demo Type-B (.cue)", "絶体絶命都市2 体験版 Type-B（.cue）"));
@@ -54,13 +61,14 @@ namespace RawDangerLauncher
 
         public static DiscInfo Make(List<DiscInfo> discs, Settings settings)
         {
-            DiscInfo us = Find(discs, "RawDanger-US"), jp = Find(discs, "ZZT2-JP"), a = Find(discs, "ZZT2-DemoA"), b = Find(discs, "ZZT2-DemoB");
+            DiscInfo us = Find(discs, "RawDanger-US"), eu = Find(discs, "RawDanger-EU"), jp = Find(discs, "ZZT2-JP"), a = Find(discs, "ZZT2-DemoA"), b = Find(discs, "ZZT2-DemoB");
             DiscInfo plus = new DiscInfo();
             plus.GameName = Name;
-            plus.Region = Lang.L("US + JP", "北米 + 日本");
+            plus.Region = Lang.L("US + EU + JP", "北米 + 欧州 + 日本");
             plus.Title = Lang.L("Raw Danger! Enhanced Edition", "Raw Danger! 強化版");
             List<string> missing = new List<string>();
             if (us == null) missing.Add(Lang.L("Raw Danger! (USA)", "Raw Danger!（北米版）"));
+            if (eu == null) missing.Add(Lang.L("Raw Danger! (Europe)", "Raw Danger!（欧州版）"));
             if (jp == null) missing.Add(Lang.L("Zettai Zetsumei Toshi 2 (Japan)", "絶体絶命都市2（日本版）"));
             if (a == null) missing.Add(Lang.L("demo Type-A", "体験版 Type-A"));
             if (b == null) missing.Add(Lang.L("demo Type-B", "体験版 Type-B"));
@@ -69,15 +77,15 @@ namespace RawDangerLauncher
                 plus.ImagePath = us.ImagePath; plus.DataPath = us.DataPath; plus.BootProgram = us.BootProgram; plus.Serial = us.Serial;
                 plus.Crc = us.Crc; plus.PnachPath = us.PnachPath; plus.Sections.AddRange(us.Sections);
             }
-            if (missing.Count > 0) plus.Error = Lang.L("needs all four discs; missing: ", "4枚すべてのディスクが必要です。不足: ") + string.Join(", ", missing.ToArray());
+            if (missing.Count > 0) plus.Error = Lang.L("needs all five discs; missing: ", "5枚すべてのディスクが必要です。不足: ") + string.Join(", ", missing.ToArray());
             return plus;
         }
 
         public static string Describe(DiscInfo d)
         {
             StringBuilder sb = new StringBuilder();
-            sb.AppendLine(Lang.L("Built from a new disc made from your US and JP images: the US game (English text) with both voice tracks, Japanese (original 48 kHz recordings) and English, switched in the game (F1 -> Game options). The heroes' shouts and calls (the sound banks with voices in them) are Japanese too, and switch with the voices. The 137 JP-only lines are on the disc too, but the US script does not ask for them. Also from the JP disc: the 151 textures the US release redrew, in both versions, switched in the game (F1 -> Game options): the characters' original faces, hair and clothes colours, and the writing in the world in Japanese. Also: fast-loading fix, widescreen 16:9, no intro logos, offline achievements, internal resolution and modern filters (F1 -> Graphics and sound).",
-                                 "北米版と日本版のイメージから新しいディスクを作ってビルドします：英語テキストの北米版に日本語と英語の両方の音声を収録し、ゲーム内（F1 →「Game options」）で切り替えられます。日本版のみの台詞（主人公の名前を呼ぶ声）もディスクに入れますが、北米版のスクリプトはまだ再生しません。日本版ディスクからは、北米版で描き直された151枚のテクスチャも両方収録し、ゲーム内（F1 →「Game options」）で切り替えられます：キャラクター本来の顔・髪・服の色、街の文字（日本語）。さらに高速ロード修正、ワイド画面 16:9、起動ロゴのスキップ、オフライン実績、内部解像度と最新のフィルター（F1 →「Graphics and sound」）。"));
+            sb.AppendLine(Lang.L("Built from a new disc made from your US, EU and JP images: the US game (English text, with the European release's corrections: the \"Survived\" stamp, the Capitol Newspaper document, the dialogue typos) with both voice tracks, Japanese (original 48 kHz recordings) and English, switched in the game (F1 -> Game options). The heroes' shouts and calls (the sound banks with voices in them) are Japanese too, and switch with the voices. The 137 JP-only lines are on the disc too, but the US script does not ask for them. Also from the JP disc: the 151 textures the US release redrew, in both versions, switched in the game (F1 -> Game options): the characters' original faces, hair and clothes colours, and the writing in the world in Japanese. Also: fast-loading fix, widescreen 16:9, no intro logos, offline achievements, internal resolution and modern filters (F1 -> Graphics and sound).",
+                                 "北米版・欧州版・日本版のイメージから新しいディスクを作ってビルドします：英語テキストの北米版（欧州版での修正入り：「Survived」の印、新聞の資料、台詞の誤字）に日本語と英語の両方の音声を収録し、ゲーム内（F1 →「Game options」）で切り替えられます。日本版のみの台詞（主人公の名前を呼ぶ声）もディスクに入れますが、北米版のスクリプトはまだ再生しません。日本版ディスクからは、北米版で描き直された151枚のテクスチャも両方収録し、ゲーム内（F1 →「Game options」）で切り替えられます：キャラクター本来の顔・髪・服の色、街の文字（日本語）。さらに高速ロード修正、ワイド画面 16:9、起動ロゴのスキップ、オフライン実績、内部解像度と最新のフィルター（F1 →「Graphics and sound」）。"));
             if (d.Error != "") sb.Append(d.Error);
             return sb.ToString();
         }

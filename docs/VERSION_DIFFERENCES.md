@@ -88,23 +88,48 @@ All 6,000-odd files of ROOT.DAT compared, voices and textures left out (both alr
 | Overlays (`OVERLAY\DISC\*.BIN`) | 79 of 79 | Program code | No: code of each release's own program |
 | Movies | 2 | The opening film and 1-1-5 | Done: "Japanese opening film" (v0.8.1) |
 
-## The European release (SLES-54587, v0.10.0)
+## The European release (SLES-54587, v0.10.0, corrected in v0.10.1)
 
 Compared file by file with the US disc (the European one: "Raw Danger (Europe)", SYSTEM.CNF VER 1.02, VMODE PAL):
 
 - **The program** (SLES_545.87): the same 6207 functions in the same order; compiled for 30 steps a second instead of 20 (about
-  1150 constants, docs/FRAMERATE.md), PAL video (runs at 25 on a PAL TV). English only: the same 1610 English text lines, plus:
-  - **a newspaper text the US program does not have**: "Capitol Newspaper, December 24, 2010 AM Edition: New Record Hits Del
-    Ray: Record rain for December / Signs of a Flu Outbreak? Don't get caught, get a flu shot" (between the employee list and
-    Geo's guidelines in the documents' texts);
-  - one sentence corrected ("collect several key items" for "collected several key items").
-- **Pictures**: the stamp that reads 生還 (Japanese: "survived") on the US disc reads **"Survived"** in English (BOOT.DAT);
-  the item menus' and the character select's "TP" label reads "BT" (IMENU, CHARSEL); the title's line "Published by 505 Games";
-  the ending's credits list 505 Games' localization team and staff in place of Agetec's (M1_09_00, M2_08_00_I01, M6_01_00).
-- **One voice line** is longer: VOICE\MES_01_99_00_073_EVE.VOI, 4.2 s in place of 2.3 s.
-- **The same**: the IOP modules, 4693 of the 4694 streamed files (voices, music, movies), 5694 of the 5791 data files (the
-  others: the 79 code overlays, built for 30 too, and the pictures above).
+  1150 constants, docs/FRAMERATE.md), PAL video (runs at 25 on a PAL TV). English only. Its texts differ in three documents
+  (the documents' table, one entry every 0x20 bytes, text pointers from 0x3CC754 in the US program, 0x3CC6D4 in the EU one):
+  - **document 1, the Capitol Newspaper of December 24, 2010** ("New Record Hits Del Ray: Record rain for December" / "Signs of
+    a Flu Outbreak?"). The US entry is there, in the same place, but its text pointer points to *Geo's guidelines* (the
+    text of document 3 too), so in the US game that newspaper shows Geo's guidelines a second time; its own text is not in the
+    US program at all;
+  - the investigation report: "collect several key items" (US: "collected"), and "[[Investigation Report]";
+  - the report card: "[[Review]". `[[` is how the texts write a plain `[` (one `[` starts a code such as `[PIL,2]`).
+- **Dialogue** (in the code overlays, `OVERLAY\DISC\*.BIN`, built for 30 too): typos corrected: "chief" (US "chef"),
+  "your mother's memento" ("you"), "gone through" ("though"), "I haven't seen him" ("seen for"), "What are you going to do with
+  it?" ("What are going"); the game result screen's "Would you like to save the data?" (US "Do you wish to delete saved
+  data?"); two lines made to fit their box ("Her name\nis Kelly Austin", "out of this place" without "dangerous").
+- **Pictures**: the character select's stamp on a hero you got through the game reads **"Survived"** in place of 生還
+  (CHARSEL.DAT, picture 40; 8-bit in the EU file, 4-bit in the US one); the "TP" label reads "BT" (BOOT.DAT picture 27, the
+  item menus IMENU_PL01-06 and IMR_1-6); the title's line "Published by 505 Games"; the ending's credits list 505 Games'
+  localization team and staff in place of Agetec's (M1_09_00, M2_08_00_I01, M6_01_00). (v0.10.0 put the stamp in BOOT.DAT by
+  mistake: BOOT.DAT's one difference is the TP/BT label.)
+- **The tutorial**: one hint differs. Where the US tutorial says "Tilt the left analog stick to Walk", the European one says
+  "If you lose your footing while walking, you can still hang from a structure", and its voice line
+  (VOICE\MES_01_99_00_073_EVE.VOI, 4.2 s in place of 2.3 s) is that other hint: a line from another part of the tutorial put
+  in the wrong place. **Not used.**
+- **The same**: the IOP modules, 4693 of the 4694 streamed files (voices, music, movies), 5694 of the 5791 data files.
 
-Worth taking into the Enhanced Edition when the European disc is there: the "Survived" stamp, the newspaper text (if the game
-can show it in the US build), the corrected sentence and the longer voice line.
+### What the Enhanced Edition takes from it (v0.10.1)
 
+The Enhanced Edition needs the European disc (five discs: US, EU, JP and the two JP demos). When it makes its disc,
+`tools/rd_eu.py` (called by `rd_hybrid.py --eu`) reads your EU image and takes the following (`rd.py eu US.iso EU.iso`
+lists them without making a disc):
+
+| What | How |
+|---|---|
+| The "Survived" stamp | CHARSEL.DAT picture 40 drawn in the US picture's own format (16 colours: the EU stamp is 129 shades of one red, brought down to 16; the US file keeps its size) |
+| The newspaper (document 1) | Its text from the EU program, in the 8 KB below the program (0xFE000: user memory the game never touches, zero in all 18 save states checked), the US entry's pointer set to it |
+| The two documents' corrections | In place (they fit where the US texts are) |
+| The dialogue typos and the two lines that did not fit | Written over the US words in the overlays (each fits in the room the US line has; "What're you going to do with it?" for the M4_02_00 line, the EU words being 2 letters too long) |
+
+The program's texts go in as a patch file the disc maker writes next to the disc (`hybrid.iso.eu.pnach`, section
+`[EU text fixes]`; written into the program before it is translated and again every frame, so a save state made earlier
+gets them too). Nothing from the EU disc is in this project. Not taken: the TP/BT label, the 505 Games credits and title line,
+the tutorial hint and its voice line, the 30-steps program.

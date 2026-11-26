@@ -28,7 +28,7 @@ namespace RawDangerLauncher
 {
     public static class Program
     {
-        public const string Version = "0.10.0";
+        public const string Version = "0.10.1";
         public const string AppName = "Raw Danger PC";
         public static bool Restart;
 
@@ -340,6 +340,7 @@ namespace RawDangerLauncher
             else if (file.IndexOf("Type-B", StringComparison.OrdinalIgnoreCase) >= 0) tag = "B";
             if (d.Serial == "SLUS-21501") { d.Region = "US"; d.Title = Lang.L("Raw Danger! (USA)", "Raw Danger!（北米版）"); d.GameName = "RawDanger-US"; }
             else if (d.Serial == "SLPS-25606" && !demo) { d.Region = "JP"; d.Title = Lang.L("Zettai Zetsumei Toshi 2 (Japan)", "絶体絶命都市2 -凍てついた記憶たち-（日本版）"); d.GameName = "ZZT2-JP"; }
+            else if (d.Serial == "SLES-54587") { d.Region = "EU"; d.Title = Lang.L("Raw Danger! (Europe)", "Raw Danger!（欧州版）"); d.GameName = "RawDanger-EU"; }
             else if (d.Serial.StartsWith("SLE")) { d.Region = "EU"; d.Title = file; d.GameName = "RawDanger-EU"; }
             else
             {

@@ -4,7 +4,7 @@
 
 <p align="center">
   <a href="https://github.com/rams95blue/rawdanger-recomp/releases"><img alt="release" src="https://img.shields.io/github/v/release/rams95blue/rawdanger-recomp?style=flat-square&color=f2c14e&labelColor=0b1324&label=release"></a>
-  <img alt="version" src="https://img.shields.io/badge/build-v0.10.0-96c4ff?style=flat-square&labelColor=0b1324">
+  <img alt="version" src="https://img.shields.io/badge/build-v0.10.1-96c4ff?style=flat-square&labelColor=0b1324">
   <img alt="platform" src="https://img.shields.io/badge/platform-Windows%2010%2F11%20x64-96c4ff?style=flat-square&labelColor=0b1324">
   <img alt="engine" src="https://img.shields.io/badge/engine-ps2--native--recomp%20fork-96c4ff?style=flat-square&labelColor=0b1324">
   <img alt="game data" src="https://img.shields.io/badge/game%20data-not%20included-e05a4f?style=flat-square&labelColor=0b1324">
@@ -29,7 +29,7 @@
 
 | | |
 |---|---|
-| **Enhanced Edition** | Built from your four discs: the US game with the Japanese voices, faces, signs, logo and opening film, each switchable while you play. Its title reads ENHANCED EDITION with the build number. |
+| **Enhanced Edition** | Built from your five discs: the US game with the European release's corrections (the "Survived" stamp, a missing newspaper document, dialogue typos) and the Japanese voices, faces, signs, logo and opening film, each switchable while you play. Its title reads ENHANCED EDITION with the build number. |
 | **Any resolution, any screen** | Internal resolution 1x to 8x, widescreen, full screen, FSR 1, SMAA, sharpening, field of view 80 to 150 %. |
 | **The PS2 look, kept or cleaned** | The game's own glow, tint and haze in one cheap GPU pass; ambient occlusion; a hero who looks wet when soaked; rain on the lens that follows the weather; cutscene bars from 100 % to none. |
 | **A modern camera** | Mouse look in the follow and first-person views, an orbit camera that circles the hero, free tilt, a hero who turns the head where you look and breathes, shivers and leans, and an option to keep your camera where the game has a fixed one. |
@@ -41,7 +41,7 @@
 ## Quick start
 
 1. **Download** the latest release and unzip it anywhere.
-2. **Run `RawDangerPC.exe`**, point it at your disc images and press **Build**: LEGACY converts one disc as it is; MODERN builds the Enhanced Edition once it has found all four (US, Japanese and the two Japanese demos). The first build fetches the nine free build tools from their official pages (about 330 MB) and takes a few minutes.
+2. **Run `RawDangerPC.exe`**, point it at your disc images and press **Build**: LEGACY converts one disc as it is; MODERN builds the Enhanced Edition once it has found all five (US, European, Japanese and the two Japanese demos). The first build fetches the nine free build tools from their official pages (about 330 MB) and takes a few minutes.
 3. **Play.** F1 opens the PC menu in the game, F3 the game's switches, F10 shows your keys.
 
 You need: Windows 10 or 11 (64-bit), a GPU with Vulkan or DirectX 12, and your own copies of the discs (Raw Danger! USA SLUS-21501; for the Enhanced Edition also Zettai Zetsumei Toshi 2, SLPS-25606, and its two demos).
@@ -63,13 +63,13 @@ both Japanese demos, made from your own discs with our fork of
 ## Play (Windows)
 
 Run **RawDangerPC.exe**. It has two tabs. **MODERN** (first, recommended) builds the **Enhanced Edition**: everything this
-project adds, from your four discs. **LEGACY** converts one disc as it is, with a few options. Choose the **build speed**
+project adds, from your five discs. **LEGACY** converts one disc as it is, with a few options. Choose the **build speed**
 (Light keeps the PC quick for other work, Balanced, Full is the fastest), build, then press Play or make a desktop shortcut.
 The first build downloads the nine build tools from their official pages once (about 330 MB); already have them? **Build
 tools...** lists them with their links and where they are found (docs/BUILD_TOOLS.md).
 
 - **Games**: US, JP, JP demo Type-A, JP demo Type-B, and the **Enhanced Edition** (built from the US disc, with the
-  Japanese voices from the JP disc; offered once all four discs are found). It starts as the US release (English voices, US
+  Japanese voices from the JP disc; offered once all five discs are found). It starts as the US release (English voices, US
   pictures, logo and film); its title screen reads ENHANCED EDITION with the build number by the logo, in the US logo's yellow
   or the Japanese logo's white. To redraw those words: `python tools/rd_title_art_source.py psd <TITLE.DAT> us|jp out.psd`
   makes a layered PSD at 8 times the size; after editing it, `python tools/rd_title_art_source.py png edited.psd

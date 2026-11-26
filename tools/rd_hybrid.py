@@ -3,6 +3,7 @@
 rd_hybrid.py - the Enhanced Edition's disc: the US disc with the Japanese voices, made from your two disc images.
 
   rd_hybrid.py --us "Raw Danger (USA).iso" --jp "Zettai Zetsumei Toshi 2 (Japan).iso" --out hybrid.iso [--mute-us-only]
+              [--eu "Raw Danger (Europe).iso"]
 
 The disc holds both voice sets in the same layout (see the comment in main()); hybrid.iso.layout says where.
 
@@ -42,6 +43,8 @@ import os
 import shutil
 import struct
 import sys
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))   # tools/rd_eu.py (python -I leaves the script's folder out)
 
 SECTOR = 2048
 FAT_HDR = 0x100
@@ -517,6 +520,8 @@ def main(argv=None):
     ap.add_argument("--no-convert", action="store_true", help=argparse.SUPPRESS)   # the default since v4
     ap.add_argument("--version", default="", help="the build number written under the title screen's logo with ENHANCED EDITION "
                     "(tools/title_art.bin); none: no words")
+    ap.add_argument("--eu", default="", help="the European disc image (SLES-54587): the English \"Survived\" stamp, the documents' "
+                    "texts and the dialogue typos its release corrected (tools/rd_eu.py); the texts in the program go in <out>.eu.pnach")
     ap.add_argument("--jp-textures", default="", help="texture groups (faces, signs) that start switched on in the game; both "
                     "groups are always on the disc")
     a = ap.parse_args(argv)
@@ -589,6 +594,24 @@ def main(argv=None):
     # last. The English area is only read through the engine's remap (recomp.ini [Voices] remap_off), which works anywhere.
     #   [the US image up to STR.DAT] [Japanese voice area = STR.DAT] [STR.FAT] [ROOT.FAT, ROOT.DAT, ...] [English voice area]
     swaps = plan_textures(us, jp)
+    eu_files, eu_writes, eu_notes = {}, {}, []
+    if a.eu:
+        import rd_eu
+        eu = Iso(a.eu)
+        rd_eu.check_eu(eu)
+        eu_files, notes = rd_eu.root_fixes(us, eu, with_tims)
+        _, us_elf = rd_eu.program(us)
+        _, eu_elf = rd_eu.program(eu)
+        eu_writes, eu_notes = rd_eu.elf_fixes(us_elf, eu_elf)
+        print("from the European disc:")
+        for n in notes + eu_notes:
+            print("  " + n)
+        for group in (swaps["groups"] if swaps else []):
+            if group["name"] == "sounds":
+                continue
+            for n_item, (name, off, slot, usd, jpd) in enumerate(group["items"]):
+                if name in eu_files:   # a file with two versions (BOOT.DAT: the logos): the change goes in the US copy
+                    group["items"][n_item] = (name, off, slot, eu_files.pop(name), jpd)
     after = sorted((f for f in us.files() if f[1] > us_dat_ext and f[0].upper() not in ("/STR/STR.DAT", "/STR/STR.FAT")), key=lambda f: f[1])
     tmp = a.out + ".part"
     print(f"writing {a.out} ...", flush=True)
@@ -642,6 +665,8 @@ def main(argv=None):
                 moved.append((at, new, size))
                 print(f"  {path}: sector {ext} -> {new} ({swaps['count']} Japanese textures and sound banks)", flush=True)
                 continue
+            if path.upper() == "/ROOT.DAT":
+                root_new = new
             us.f.seek(ext * SECTOR)
             left = size
             while left:
@@ -688,6 +713,14 @@ def main(argv=None):
         for path, start, size in (("/STR/STR.DAT", jp_start, area), ("/STR/STR.FAT", fat_start, len(fat))):
             _, _, at = o2.find(path)
             moved.append((at, start, size))
+        if eu_files:
+            # the European corrections to files with one version (the overlays' dialogue): written over the US file, same size
+            import rd_eu
+            index = rd_eu.root_index(us)[0]
+            for name, data in eu_files.items():
+                off, size = index[name]
+                assert len(data) == size
+                out.seek(root_new * SECTOR + off); out.write(data)
         for at, start, size in moved:
             out.seek(at + 2); out.write(both_endian32(start))
             out.seek(at + 10); out.write(both_endian32(size))
@@ -697,12 +730,16 @@ def main(argv=None):
             if d[0] in (1, 2):
                 out.seek(lba * SECTOR + 80); out.write(both_endian32(total))
     os.replace(tmp, a.out)
+    if a.eu:
+        import rd_eu
+        _, us_elf = rd_eu.program(us)
+        print(f"{rd_eu.write_pnach(a.out + '.eu.pnach', eu_writes, eu_notes, us_elf)} words of the program's texts in {a.out}.eu.pnach")
     # where the two areas are, for the launcher's recomp.ini (the in-game voice switch)
     with open(a.out + ".layout", "w", encoding="ascii") as f:
         tex = "".join((f"sounds_jp_slots = {g['us_start']} {g['jp_start']} {g['sectors']} {g['count']}\n" if g["name"] == "sounds" else
                        f"textures_{g['name']} = {g['us_start']} {g['jp_start']} {g['sectors']} {g['count']}\n") for g in (swaps["groups"] if swaps else []))
         f.write(f"version = 4\nmedia = 2\ntitle_words = {a.version or '-'}\ntextures_start_on = {a.jp_textures}\n{tex}voices_jp_start = {jp_start}\nvoices_en_start = {en_start}\nvoices_sectors = {area // SECTOR}\n"
-                f"voices_converted = {len(convert)}\n")
+                f"voices_converted = {len(convert)}\n" + ("eu = 1\n" if a.eu else ""))
     print(f"voice areas: Japanese at sector {jp_start} (STR.DAT), English at {en_start}, {area // SECTOR} sectors each")
     print(f"hybrid disc: {a.out}  ({total * SECTOR / 1e9:.2f} GB)")
 
