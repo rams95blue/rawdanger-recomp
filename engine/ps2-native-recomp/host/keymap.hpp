@@ -45,7 +45,7 @@ struct Config {
     int ambient_occlusion = 1; // rawdanger-recomp: 0 off, 1 light, 2 strong (the game's depth, before its colour filter)
     int popup_size = 1;        // rawdanger-recomp: pop-ups (achievements, notes, the keys on screen): 0 small, 1 normal, 2 large, 3 huge
     int keys_on_screen = 0;    // rawdanger-recomp: the list of the player's keys stays on the screen while playing (F10)
-    int pause_unfocused = 1;   // rawdanger-recomp: the quick menu opens (the game waits) when the window goes to the background
+    int pause_unfocused = 0;   // rawdanger-recomp: the quick menu opens (the game waits) when the window goes to the background (v0.10.3: off by default)
     int master_volume = 100;
     int menu_skin = -1;        // rawdanger-recomp: the F1 menu's look: 0 hazard (yellow on black), 1 Japanese (blue on white, the
                                // launcher's Japanese skin); -1 = from the game's language (PS2_LANGUAGE / PS2_MENU_SKIN)

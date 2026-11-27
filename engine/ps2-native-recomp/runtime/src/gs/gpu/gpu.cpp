@@ -4926,7 +4926,7 @@ void game_ao(const std::uint32_t *p) {
     std::array<std::uint32_t, kParamStride / 4> record{};
     for (std::size_t i = 0; i < record.size(); ++i) record[i] = p[i];
     g_param_records.push_back(record);
-    dispatch_linear(kGameAo, static_cast<std::uint32_t>(w * h) * g_scale * g_scale, static_cast<std::uint32_t>(g_param_records.size() - 1));
+    dispatch_linear(kGameAo, static_cast<std::uint32_t>(w * h), static_cast<std::uint32_t>(g_param_records.size() - 1));   // v0.10.3: one run a game pixel (each does its samples)
 }
 
 void load_clut(std::uint64_t tex0, std::uint64_t texclut) {

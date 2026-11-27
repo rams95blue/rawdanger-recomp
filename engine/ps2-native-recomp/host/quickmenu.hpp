@@ -149,6 +149,10 @@ public:
     // rawdanger-recomp: one line of the game's own Options list drawn again with other words (x, y, w, h: where its words are, in
     // window pixels; `selected`: the game's cursor is on it, so the lighter fill of a chosen line)
     static void draw_native_label(int x, int y, int w, int h, bool selected, const std::string &text, Picture &out);
+    // rawdanger-recomp v0.10.3: the PC rows' spinner values over the game's Options list, in the game's font, dark on the glow the
+    // game draws under them (each: its centre and top in window pixels, and the height of the game's line in window pixels)
+    struct NativeValue { int cx, y, h; std::string text; };
+    static void draw_native_values(const std::vector<NativeValue> &values, Picture &out);
     void close() { open_ = false; }
     void move(int delta);                      // up (-1) and down (+1), round at the ends
     Command choose();                          // Enter, Cross, a click: what the highlighted entry does (Quit asks once: the first time it only arms itself)

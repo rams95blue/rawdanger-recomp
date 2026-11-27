@@ -1770,53 +1770,62 @@ fn ao_depth(x: i32, y: i32, w: u32, h: u32, k: u32) -> f32 {
 
 @compute @workgroup_size(64)
 fn game_ao(@builtin(global_invocation_id) gid: vec3<u32>) {
+    // v0.10.3: one run per game pixel, not per sample. The AO is measured at the game's own resolution anyway (its neighbours are
+    // game pixels): it is worked out once from the pixel's first sample and laid on all of them (9 times less work at 3x, 16 at
+    // 4x: the pass cost as much as the whole frame at high internal resolutions). Each sample still keeps its own sky test and
+    // wet look.
     let i = gid.x + gid.y * 64u * 1024u;
     let n = SCALE * SCALE;
     let w = prm(2u);
     let h = prm(3u);
-    if (i >= w * h * n) {
+    if (i >= w * h) {
         return;
     }
-    let k = i % n;
-    let x = (i / n) % w;
-    let y = (i / n) / w;
-    let z0 = f32(read_sample(prm(5u), prm(4u), prm(1u), x, y, k));
+    let x = i % w;
+    let y = i / w;
     let view = prm(63u);   // v0.9.6 debug views (Settings > Debug): 1 the AO alone, 2 the depth
-    if (view == 2u) {
-        // the distance in metres (131072 / z, docs/GRAPHICS.md) as grey: 1 m white, 60 m and the sky black
-        let metres = select(1000.0, 131072.0 / max(z0, 1.0), z0 >= 64.0);
-        let g = u32(clamp(1.0 - log2(max(metres, 1.0)) / log2(60.0), 0.0, 1.0) * 255.0);
-        store(locate(0u, prm(0u), prm(1u), x, y), k, g | (g << 8u) | (g << 16u) | 0x80000000u);
-        return;
-    }
-    if (z0 < 64.0) {
-        if (view == 1u) {
-            store(locate(0u, prm(0u), prm(1u), x, y), k, 0x80FFFFFFu);
-        }
-        return;   // nothing drawn (sky, cleared)
-    }
-    let ao = select(1.0, ao_factor(x, y, w, h, k, z0), prm(6u) > 0u);
-    if (view == 1u) {
-        let g = u32(clamp(ao, 0.0, 1.0) * 255.0);
-        store(locate(0u, prm(0u), prm(1u), x, y), k, g | (g << 8u) | (g << 16u) | 0x80000000u);
-        return;
-    }
-    let wet = wet_mask(x, y, k, z0);
-    if (ao >= 1.0 && wet <= 0.0) {
-        return;
-    }
     let fl = locate(0u, prm(0u), prm(1u), x, y);
-    let c = load_at(fl, k);
-    var col = vec3<f32>(f32(c & 255u), f32((c >> 8u) & 255u), f32((c >> 16u) & 255u)) * ao;
-    if (wet > 0.0 && (prm(8u) & 0x8000u) != 0u) {
-        col = mix(col, vec3<f32>(40.0, 120.0, 255.0), wet * 0.6);   // debug: the capsules shown plainly
-    } else if (wet > 0.0) {
-        // v0.9.5: wet cloth and hair: water fills the fibres, less light scatters back (darker) and what does is richer in colour
-        let luma = dot(col, vec3<f32>(0.299, 0.587, 0.114));
-        col = mix(col, (vec3<f32>(luma) + (col - vec3<f32>(luma)) * 1.25) * 0.62, wet);
+    let first = f32(read_sample(prm(5u), prm(4u), prm(1u), x, y, 0u));
+    var ao = 1.0;
+    if (first >= 64.0 && prm(6u) > 0u && view != 2u) {
+        ao = ao_factor(x, y, w, h, 0u, first);
     }
-    let o = vec3<u32>(clamp(col, vec3<f32>(0.0), vec3<f32>(255.0)));
-    store(fl, k, o.x | (o.y << 8u) | (o.z << 16u) | (c & 0xFF000000u));
+    for (var k = 0u; k < n; k = k + 1u) {
+        let z0 = f32(read_sample(prm(5u), prm(4u), prm(1u), x, y, k));
+        if (view == 2u) {
+            // the distance in metres (131072 / z, docs/GRAPHICS.md) as grey: 1 m white, 60 m and the sky black
+            let metres = select(1000.0, 131072.0 / max(z0, 1.0), z0 >= 64.0);
+            let g = u32(clamp(1.0 - log2(max(metres, 1.0)) / log2(60.0), 0.0, 1.0) * 255.0);
+            store(fl, k, g | (g << 8u) | (g << 16u) | 0x80000000u);
+            continue;
+        }
+        if (z0 < 64.0) {
+            if (view == 1u) {
+                store(fl, k, 0x80FFFFFFu);
+            }
+            continue;   // nothing drawn (sky, cleared)
+        }
+        if (view == 1u) {
+            let g = u32(clamp(ao, 0.0, 1.0) * 255.0);
+            store(fl, k, g | (g << 8u) | (g << 16u) | 0x80000000u);
+            continue;
+        }
+        let wet = wet_mask(x, y, k, z0);
+        if (ao >= 1.0 && wet <= 0.0) {
+            continue;
+        }
+        let c = load_at(fl, k);
+        var col = vec3<f32>(f32(c & 255u), f32((c >> 8u) & 255u), f32((c >> 16u) & 255u)) * ao;
+        if (wet > 0.0 && (prm(8u) & 0x8000u) != 0u) {
+            col = mix(col, vec3<f32>(40.0, 120.0, 255.0), wet * 0.6);   // debug: the capsules shown plainly
+        } else if (wet > 0.0) {
+            // v0.9.5: wet cloth and hair: water fills the fibres, less light scatters back (darker) and what does is richer in colour
+            let luma = dot(col, vec3<f32>(0.299, 0.587, 0.114));
+            col = mix(col, (vec3<f32>(luma) + (col - vec3<f32>(luma)) * 1.25) * 0.62, wet);
+        }
+        let o = vec3<u32>(clamp(col, vec3<f32>(0.0), vec3<f32>(255.0)));
+        store(fl, k, o.x | (o.y << 8u) | (o.z << 16u) | (c & 0xFF000000u));
+    }
 }
 
 // rawdanger-recomp (v0.9.5): how much of the wet look a pixel gets: inside one of the hero's capsules (prm 9 on, 4 words each:
@@ -1881,9 +1890,11 @@ fn ao_factor(x: u32, y: u32, w: u32, h: u32, k: u32, z0: f32) -> f32 {
         }
         let crease = ((zp + zm) * 0.5 - z0) / z0 * dist;          // metres (a flat surface: 0, the depth is flat on screen)
         let ahead = dist - 131072.0 / max(zp, zm);                 // metres the nearest of the two is in front
-        occluded = occluded + smoothstep(0.02, 0.2, crease) * (1.0 - smoothstep(0.3, 1.0, ahead));
+        // v0.10.3: only what is close in front darkens (a person half a metre from a wall left a black halo on it: 0.3 to 1 m before)
+        occluded = occluded + smoothstep(0.02, 0.2, crease) * (1.0 - smoothstep(0.12, 0.4, ahead));
         counted = counted + 1.0;
     }
     occluded = select(0.0, occluded / counted, counted > 0.0);
-    return 1.0 - 0.75 * f32(prm(6u)) / 256.0 * keep * clamp(occluded * 2.0, 0.0, 1.0);
+    // v0.10.3: gentler (0.75 and twice the share before): now after the PS2 filter, which no longer steepens it
+    return 1.0 - 0.55 * f32(prm(6u)) / 256.0 * keep * smoothstep(0.0, 1.0, clamp(occluded * 1.6, 0.0, 1.0));
 }

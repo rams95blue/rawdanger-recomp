@@ -1144,6 +1144,24 @@ void Menu::draw_native_label(int x, int y, int w, int h, bool selected, const st
     if (g_font.ok) game_text(out, 0, std::max(0, (out.height - static_cast<int>(19 * game_font_k(s))) / 2 + static_cast<int>(game_font_k(s))), s, text, rgba(236, 242, 250, 255));
 }
 
+void Menu::draw_native_values(const std::vector<NativeValue> &values, Picture &out) {
+    if (values.empty() || !g_font.ok) { out.width = out.height = 1; out.rgba.assign(1, 0); return; }
+    int x0 = 1 << 30, y0 = 1 << 30, x1 = 0, y1 = 0;
+    struct Placed { int x, y, s; const std::string *text; };
+    std::vector<Placed> placed;
+    for (const NativeValue &v : values) {
+        const int s = std::max(1, static_cast<int>(std::lround(v.h * 0.55 / 7.0)));
+        const int tw = game_text_width(s, v.text);
+        const int x = v.cx - tw / 2, y = v.y + std::max(0, (v.h - static_cast<int>(19 * game_font_k(s))) / 2 + static_cast<int>(game_font_k(s)));
+        placed.push_back({x, y, s, &v.text});
+        x0 = std::min(x0, x), y0 = std::min(y0, v.y), x1 = std::max(x1, x + tw + 2), y1 = std::max(y1, v.y + v.h);
+    }
+    out.x = std::max(0, x0), out.y = std::max(0, y0);
+    out.width = std::max(1, x1 - out.x), out.height = std::max(1, y1 - out.y);
+    out.rgba.assign(static_cast<std::size_t>(out.width) * out.height, 0);
+    for (const Placed &p : placed) game_text(out, p.x - out.x, p.y - out.y, p.s, *p.text, rgba(22, 40, 58, 255));   // the game's dark words on a glow
+}
+
 // rawdanger-recomp: over the game's Options screen, at the bottom left: which button opens the PC settings, in the game's look
 void Menu::draw_native_hint(int window_width, int window_height, const std::string &text, Picture &out) {
     const int was = g_skin;

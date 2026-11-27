@@ -1,0 +1,538 @@
+From 0535c06f644cd9282b14661a4821321b4c347a63 Mon Sep 17 00:00:00 2001
+From: rawdanger-recomp <rawdanger-recomp@users.noreply.github.com>
+Date: Fri, 27 Nov 2026 01:10:14 +0000
+Subject: [PATCH] Raw Danger: AO after the filter and cheaper, option values
+ shown, bars in transitions, steps stats
+
+- The AO runs when the game's colour filter ends, not when it starts: under
+  the filter's steep brightness curve it came out two or three times as dark,
+  black halos round people near walls. Only occluders within about 0.4 m count
+  (was 1 m), strength 0.55 (was 0.75). The pass runs once per game pixel and
+  lays the result on all its samples (9x less work at 3x resolution).
+- The PC rows' spinner values in the game's Options list are drawn by the
+  window in the game's font: the game draws a row's sprites from its word
+  sheet only, so the words on the background picture never showed.
+- The cutscene bars are recognised while they slide in and out (thin, fading):
+  'Cutscene bars: OFF' left them in every transition.
+- Settings > Debug > Stats: the game steps a second as measured and the
+  vblanks a step, also written to the log; PS2_STEPS_LOG prints them every 5 s.
+  The Debug steps test puts back the build's own pace (30 / 60 builds).
+- Pause in background is off by default.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01QNLFPekqhcU2dj7B3Utmea
+---
+ host/keymap.hpp                |  2 +-
+ host/quickmenu.cpp             | 18 +++++++
+ host/quickmenu.hpp             |  4 ++
+ host/window.cpp                | 99 ++++++++++++++++++++++++++++------
+ runtime/include/ps2/system.hpp |  2 +
+ runtime/src/gs/gpu/gpu.cpp     |  2 +-
+ runtime/src/gs/gpu/gs.wgsl     | 89 ++++++++++++++++--------------
+ runtime/src/gs/gs.cpp          | 23 ++++++--
+ runtime/src/system.cpp         | 15 ++++++
+ 9 files changed, 193 insertions(+), 61 deletions(-)
+
+diff --git a/host/keymap.hpp b/host/keymap.hpp
+index 22492e7..b31a161 100644
+--- a/host/keymap.hpp
++++ b/host/keymap.hpp
+@@ -45,7 +45,7 @@ struct Config {
+     int ambient_occlusion = 1; // rawdanger-recomp: 0 off, 1 light, 2 strong (the game's depth, before its colour filter)
+     int popup_size = 1;        // rawdanger-recomp: pop-ups (achievements, notes, the keys on screen): 0 small, 1 normal, 2 large, 3 huge
+     int keys_on_screen = 0;    // rawdanger-recomp: the list of the player's keys stays on the screen while playing (F10)
+-    int pause_unfocused = 1;   // rawdanger-recomp: the quick menu opens (the game waits) when the window goes to the background
++    int pause_unfocused = 0;   // rawdanger-recomp: the quick menu opens (the game waits) when the window goes to the background (v0.10.3: off by default)
+     int master_volume = 100;
+     int menu_skin = -1;        // rawdanger-recomp: the F1 menu's look: 0 hazard (yellow on black), 1 Japanese (blue on white, the
+                                // launcher's Japanese skin); -1 = from the game's language (PS2_LANGUAGE / PS2_MENU_SKIN)
+diff --git a/host/quickmenu.cpp b/host/quickmenu.cpp
+index fbf53c2..dda5bf5 100644
+--- a/host/quickmenu.cpp
++++ b/host/quickmenu.cpp
+@@ -1144,6 +1144,24 @@ void Menu::draw_native_label(int x, int y, int w, int h, bool selected, const st
+     if (g_font.ok) game_text(out, 0, std::max(0, (out.height - static_cast<int>(19 * game_font_k(s))) / 2 + static_cast<int>(game_font_k(s))), s, text, rgba(236, 242, 250, 255));
+ }
+ 
++void Menu::draw_native_values(const std::vector<NativeValue> &values, Picture &out) {
++    if (values.empty() || !g_font.ok) { out.width = out.height = 1; out.rgba.assign(1, 0); return; }
++    int x0 = 1 << 30, y0 = 1 << 30, x1 = 0, y1 = 0;
++    struct Placed { int x, y, s; const std::string *text; };
++    std::vector<Placed> placed;
++    for (const NativeValue &v : values) {
++        const int s = std::max(1, static_cast<int>(std::lround(v.h * 0.55 / 7.0)));
++        const int tw = game_text_width(s, v.text);
++        const int x = v.cx - tw / 2, y = v.y + std::max(0, (v.h - static_cast<int>(19 * game_font_k(s))) / 2 + static_cast<int>(game_font_k(s)));
++        placed.push_back({x, y, s, &v.text});
++        x0 = std::min(x0, x), y0 = std::min(y0, v.y), x1 = std::max(x1, x + tw + 2), y1 = std::max(y1, v.y + v.h);
++    }
++    out.x = std::max(0, x0), out.y = std::max(0, y0);
++    out.width = std::max(1, x1 - out.x), out.height = std::max(1, y1 - out.y);
++    out.rgba.assign(static_cast<std::size_t>(out.width) * out.height, 0);
++    for (const Placed &p : placed) game_text(out, p.x - out.x, p.y - out.y, p.s, *p.text, rgba(22, 40, 58, 255));   // the game's dark words on a glow
++}
++
+ // rawdanger-recomp: over the game's Options screen, at the bottom left: which button opens the PC settings, in the game's look
+ void Menu::draw_native_hint(int window_width, int window_height, const std::string &text, Picture &out) {
+     const int was = g_skin;
+diff --git a/host/quickmenu.hpp b/host/quickmenu.hpp
+index 410b128..cb253d9 100644
+--- a/host/quickmenu.hpp
++++ b/host/quickmenu.hpp
+@@ -149,6 +149,10 @@ public:
+     // rawdanger-recomp: one line of the game's own Options list drawn again with other words (x, y, w, h: where its words are, in
+     // window pixels; `selected`: the game's cursor is on it, so the lighter fill of a chosen line)
+     static void draw_native_label(int x, int y, int w, int h, bool selected, const std::string &text, Picture &out);
++    // rawdanger-recomp v0.10.3: the PC rows' spinner values over the game's Options list, in the game's font, dark on the glow the
++    // game draws under them (each: its centre and top in window pixels, and the height of the game's line in window pixels)
++    struct NativeValue { int cx, y, h; std::string text; };
++    static void draw_native_values(const std::vector<NativeValue> &values, Picture &out);
+     void close() { open_ = false; }
+     void move(int delta);                      // up (-1) and down (+1), round at the ends
+     Command choose();                          // Enter, Cross, a click: what the highlighted entry does (Quit asks once: the first time it only arms itself)
+diff --git a/host/window.cpp b/host/window.cpp
+index bd067ee..089aa97 100644
+--- a/host/window.cpp
++++ b/host/window.cpp
+@@ -1499,9 +1499,16 @@ void window_pixels(int &w, int &h) {
+ // rawdanger-recomp: the keys list stays up while playing (keys.ini keys_on_screen, F10)
+ bool keys_on_screen_now() { return g_keys.keys_on_screen != 0; }
+ 
++// v0.10.3: the PC rows' spinner values over the game's Options list (filled in namespace nopt below, read for the overlay)
++namespace nopt {
++struct ValueText { int x, y; std::string text; };
++extern std::vector<ValueText> g_value_text;
++}  // namespace nopt
++
+ void menu_paint(bool show_again) {
+     if (show_again) g_menu_redraw = true;
+-    g_overlay_on = g_menu.is_open() || !g_note_text.empty() || g_native_hint || keys_on_screen_now() || g_stats_on || g_debug_menu_on.load(std::memory_order_relaxed);
++    g_overlay_on = g_menu.is_open() || !g_note_text.empty() || g_native_hint || keys_on_screen_now() || g_stats_on || g_debug_menu_on.load(std::memory_order_relaxed) ||
++                   !nopt::g_value_text.empty();
+     if (!g_overlay_on) {
+ #ifdef PS2_GPU
+         if (g_gpu_present) ps2::gs::gpu::set_overlay(nullptr, 0, 0, 0, 0);
+@@ -1641,7 +1648,7 @@ void menu_paint(bool show_again) {
+                     debug_row(kHeadTestRow, "Head follows camera: a fixed turn", t == 0.0f ? "<  off  >" : "<  " + std::to_string(static_cast<int>(std::lround(t * 57.29578f))) + " deg  >");
+                 }
+                 if (debug_steps().set)
+-                    debug_row(kStepsRow, "Game steps a second (a test: everything faster)", g_force_vblanks == 0 ? "<  the game's  >" : "<  " + std::to_string(60 / g_force_vblanks) + "  >");
++                    debug_row(kStepsRow, "Game steps a second (a test: forces the pace, the game's timings stay)", g_force_vblanks == 0 ? "<  the build's  >" : "<  " + std::to_string(60 / g_force_vblanks) + "  >");
+                 if (debug_scenes().set) {
+                     if (debug_scenes().debug) debug_row(kDebugRow, "Developers' debug menu (on the disc; Shift+F7)", "open");
+                     if (debug_scenes().mapsel) debug_row(kMapSelRow, "Developers' map select (on the disc; F7)", "open");
+@@ -1653,6 +1660,15 @@ void menu_paint(bool show_again) {
+                 v.recomp_note = v.recomp_rows.empty() ? "No test switches in this game" : "Test switches, kept in every build for reports";
+         }
+         g_menu.draw(w, h, v, g_menu_picture);
++    } else if (g_note_text.empty() && !nopt::g_value_text.empty()) {
++        // v0.10.3: the PC rows' spinner values, where the game's list puts them (the game's picture in the window: its shape fitted)
++        const float aspect = ps2::g_options.widescreen ? 16.0f / 9.0f : 4.0f / 3.0f;
++        const float vw = std::min(static_cast<float>(w), h * aspect), vh = vw / aspect;
++        const float ox = (w - vw) * 0.5f, oy = (h - vh) * 0.5f, kx = vw / 640.0f, ky = vh / 448.0f;
++        std::vector<quickmenu::Menu::NativeValue> values;
++        for (const nopt::ValueText &v : nopt::g_value_text)
++            values.push_back({static_cast<int>(ox + v.x * kx), static_cast<int>(oy + v.y * ky), static_cast<int>(24 * ky), v.text});
++        quickmenu::Menu::draw_native_values(values, g_menu_picture);
+     } else if (g_note_text.empty() && g_native_hint && g_native_label) {
+         // the label of the game's line, where the game draws its words (the game's picture in the window: its shape fitted)
+         const float aspect = ps2::g_options.widescreen ? 16.0f / 9.0f : 4.0f / 3.0f;
+@@ -1870,16 +1886,17 @@ void load_art() {
+ }
+ bool has_art(const std::string &name) { return g_art.count(name) != 0; }
+ 
++// v0.10.3: looked up each time, not once a run (the title's and the pause menu's Options can load their pictures under other
++// numbers). The spinners' values are no longer drawn from the background picture (the game draws a row's sprites from its word
++// sheet only): the window draws them (g_value_text).
+ std::uint32_t texture_of(char tex) {
+-    static std::uint32_t sheet = 0, back = 0;
+-    if (!sheet) {
+-        sheet = ps2::ld32(kSprites) & 0xFFFFu;   // sprite 0, "Vibration", is on the label sheet
+-        for (std::uint32_t i = 0; i < 0x3C; ++i) {   // the 640 x 448 background
+-            const std::uint32_t w0 = ps2::ld32(kSprites + 16u * i);
+-            if ((w0 >> 16) == 640u && ps2::ld32(kSprites + 16u * i + 4) == 448u && (w0 & 0xFFFFu) != 0xFFFFu) back = w0 & 0xFFFFu;
+-        }
++    const std::uint32_t sheet = ps2::ld32(kSprites) & 0xFFFFu;   // sprite 0, "Vibration", is on the label sheet
++    if (tex != 'B') return sheet;
++    for (std::uint32_t i = 0; i < 0x3C; ++i) {   // the 640 x 448 background
++        const std::uint32_t w0 = ps2::ld32(kSprites + 16u * i);
++        if ((w0 >> 16) == 640u && ps2::ld32(kSprites + 16u * i + 4) == 448u && (w0 & 0xFFFFu) != 0xFFFFu) return w0 & 0xFFFFu;
+     }
+-    return tex == 'B' ? back : sheet;
++    return sheet;
+ }
+ 
+ // a sprite of our own: its entry in memory the game does not use, reached through the RAM's mirror at 32 MB (the game adds
+@@ -1899,7 +1916,10 @@ std::uint32_t sprite_for(const std::string &name, int &w) {
+     const auto art = g_art.find(name);
+     if (art == g_art.end()) { w = 0; return kNone; }
+     w = art->second.w;
+-    if (const auto it = g_sprite_of.find(name); it != g_sprite_of.end()) return it->second;
++    if (const auto it = g_sprite_of.find(name); it != g_sprite_of.end()) {
++        write_sprite(kSprites + 16u * it->second - 0x02000000u, art->second);   // (v0.10.3: its picture's number again: it can change)
++        return it->second;
++    }
+     const std::uint32_t at = new_sprite();
+     if (!at) return kNone;
+     write_sprite(at, art->second);
+@@ -1916,7 +1936,10 @@ Art glow_art() {
+ std::uint32_t glow_for(int w) {
+     if (w <= 81) return kGlow;
+     const std::string name = "G:" + std::to_string(w);
+-    if (const auto it = g_sprite_of.find(name); it != g_sprite_of.end()) return it->second;
++    if (const auto it = g_sprite_of.find(name); it != g_sprite_of.end()) {
++        write_sprite(kSprites + 16u * it->second - 0x02000000u, glow_art(), w);
++        return it->second;
++    }
+     const std::uint32_t at = new_sprite();
+     if (!at) return kGlow;
+     write_sprite(at, glow_art(), w);
+@@ -2000,6 +2023,7 @@ Record our_record(int i, int y) {
+             g_dyn[i][0] = a ? sprite_index(a) : kNone;
+             g_dyn[i][1] = b ? sprite_index(b) : kNone;
+         }
++        g_value_text.push_back({kSpinX, y - 1, row.text()});
+         if (g_dyn[i][0] != kNone && g_dyn[i][1] != kNone) {
+             const std::uint32_t text_at = kSprites + 16u * g_dyn[i][0] - 0x02000000u, glow_at = kSprites + 16u * g_dyn[i][1] - 0x02000000u;
+             if (art != g_art.end()) write_sprite(text_at, art->second);
+@@ -2033,7 +2057,13 @@ Record our_record(int i, int y) {
+ 
+ int visible() { return std::min(kVisible, static_cast<int>(g_list.size())); }
+ 
++// v0.10.3: the spinners' values, drawn by the engine over the list (game coordinates: centre x, top y). The game draws a row's
++// sprites from its word sheet only (texture 0x7469, full), so the value words put on the background picture's spare part were
++// never drawn: the values were blank. The window draws them in the game's font, on the glow the game draws.
++std::vector<ValueText> g_value_text;
++
+ void build_window() {
++    g_value_text.clear();
+     for (int s = 0; s < visible(); ++s) {
+         const int item = g_list[static_cast<std::size_t>(g_offset + s)];
+         const int y = kTop + kSpacing * s;
+@@ -2083,7 +2113,18 @@ void make_list() {
+ }
+ 
+ // each frame of the window: on the Options screen, point its list at the rows on screen, scroll them with the cursor
++void frame_body();
++// v0.10.3: the window's overlay is painted again when the spinner values it shows change (or go)
+ void frame() {
++    std::string before;
++    for (const ValueText &v : g_value_text) before += std::to_string(v.x) + "," + std::to_string(v.y) + "," + v.text + ";";
++    frame_body();
++    std::string after;
++    for (const ValueText &v : g_value_text) after += std::to_string(v.x) + "," + std::to_string(v.y) + "," + v.text + ";";
++    if (after != before) menu_paint();
++}
++
++void frame_body() {
+     setup();
+     if (!g_on || g_rows.empty()) return;
+     for (std::size_t i = 0; i < g_rows.size(); ++i) {   // the values the game set: applied here, on the window's thread
+@@ -2092,11 +2133,11 @@ void frame() {
+         if (g_rows[i].spinner()) { if (p != 1) g_rows[i].step(p > 1 ? 1 : -1); }
+         else if (g_rows[i].set) g_rows[i].set(p);
+     }
+-    if (ps2::ld32(0x48F488u) != 16u) { g_list_at = 0; return; }   // the game's Options screen (scene SETTING)
++    if (ps2::ld32(0x48F488u) != 16u) { g_list_at = 0; g_value_text.clear(); return; }   // the game's Options screen (scene SETTING)
+     {   // the Options overlay (US) is in
+         static const char kHelp[] = "Adjust Screen Position";
+         for (std::uint32_t k = 0; k < sizeof kHelp - 1; ++k)
+-            if (ps2::ld8(0x73D6D0u + k) != static_cast<std::uint8_t>(kHelp[k])) { g_list_at = 0; return; }
++            if (ps2::ld8(0x73D6D0u + k) != static_cast<std::uint8_t>(kHelp[k])) { g_list_at = 0; g_value_text.clear(); return; }
+     }
+     const std::uint32_t work = ps2::ld32(kWorkPtr);
+     if (work < 0x100000u || work >= 0x2000000u - 0x1000u) return;
+@@ -2119,6 +2160,7 @@ void frame() {
+             std::fprintf(stderr, "[options] the Options list has the PC rows (%d rows, %d at a time)\n", total, shown);
+             return;
+         }
++        g_value_text.clear();
+         return;
+     }
+     int cursor = static_cast<int>(ps2::ld32(g_list_at + 8));
+@@ -2685,15 +2727,20 @@ void menu_command(quickmenu::Command c, int step) {
+         if (row < g_recomp_row_section.size() && g_recomp_row_section[row] == kStepsRow) {
+             // the game's, 20, 30, 60 (vblanks a step 3, 2, 1)
+             static const int kOrder[] = {0, 3, 2, 1};
++            static std::uint32_t own = 0;   // v0.10.3: the build's own vblanks a step (3, or 2 / 1 in the 30 / 60 builds), put back after the test
++            if (g_force_vblanks == 0 && debug_steps().set) {
++                const std::uint32_t g = ps2::ld32(debug_steps().pointer);
++                if (g >= 0x100000u && g < 0x2000000u) own = ps2::ld32(g + debug_steps().offset);
++            }
+             int k = 0;
+             while (k < 4 && kOrder[k] != g_force_vblanks) ++k;
+             k = ((k == 4 ? 0 : k) + (step < 0 ? 3 : 1)) % 4;
+             g_force_vblanks = kOrder[k];
+             if (g_force_vblanks == 0 && debug_steps().set) {
+                 const std::uint32_t g = ps2::ld32(debug_steps().pointer);
+-                if (g >= 0x100000u && g < 0x2000000u) ps2::st32(g + debug_steps().offset, 3u);   // the US disc's
++                if (g >= 0x100000u && g < 0x2000000u) ps2::st32(g + debug_steps().offset, own >= 1u && own <= 3u ? own : 3u);   // the build's own
+             }
+-            g_recomp_note = g_force_vblanks == 0 ? "Game steps: the game's own (20 a second)"
++            g_recomp_note = g_force_vblanks == 0 ? "Game steps: the build's own (the launcher's Frame rate)"
+                                                  : "Game steps: " + std::to_string(60 / g_force_vblanks) + " a second: a fixed-step game, everything runs faster (a test)";
+             break;
+         }
+@@ -3548,6 +3595,26 @@ void show_speed() {
+         if (const float wet = ps2::hero_wetness(); wet >= 0.0f) g_stats_rows.push_back({"Clothes wet", std::to_string(static_cast<int>(wet * 100.0f + 0.5f)) + " %"});
+         static const char *const kViews[] = {"the game's", "AO alone", "depth", "capsules"};
+         g_stats_rows.push_back({"Picture", kViews[std::clamp(ps2::debug_view(), 0, 3)]});
++        // v0.10.3: the game's steps a second as measured (the hero's, once a step) and the vblanks a step the game waits for
++        // (20 steps: 3, 30: 2, 60: 1). Also written to the log while the stats show, for reports on the frame-rate builds.
++        {
++            static std::uint64_t steps_before = 0;
++            const std::uint64_t steps = ps2::hero_steps();
++            const double rate = steps_before && steps >= steps_before ? static_cast<double>(steps - steps_before) / seconds : 0.0;
++            steps_before = steps;
++            std::uint32_t wait = 0;
++            if (debug_steps().set) {
++                const std::uint32_t g = ps2::ld32(debug_steps().pointer);
++                if (g >= 0x100000u && g < 0x2000000u) wait = ps2::ld32(g + debug_steps().offset);
++            }
++            char st[96];
++            if (wait > 0 && wait < 10) std::snprintf(st, sizeof st, "%.1f a second (%u vblank%s a step = %u)", rate, wait, wait == 1 ? "" : "s", 60u / wait);
++            else std::snprintf(st, sizeof st, "%.1f a second", rate);
++            g_stats_rows.push_back({"Game steps", st});
++            std::fprintf(stderr, "[steps] frame %llu: %.1f fps, game steps %.1f a second, vblanks a step %u%s, CPU %s\n",
++                         static_cast<unsigned long long>(ps2::frame_count()), static_cast<double>(frames) / seconds, rate, wait,
++                         g_force_vblanks > 0 ? " (forced: Settings > Debug)" : "", b);
++        }
+         g_stats_rows.push_back({"Frame", std::to_string(ps2::frame_count())});
+         menu_paint(true);
+     }
+diff --git a/runtime/include/ps2/system.hpp b/runtime/include/ps2/system.hpp
+index ef85290..a45e87d 100644
+--- a/runtime/include/ps2/system.hpp
++++ b/runtime/include/ps2/system.hpp
+@@ -149,6 +149,8 @@ float head_test();
+ // rawdanger-recomp (v0.9.5): how wet the hero's worn clothes are (0 ... 1, the wettest; -1 no hero), set them (debug), and the wet
+ // look (PS2_HERO_WET, system.cpp; keys.ini wet_look, on) with its debug switches: a forced wetness (-1 the game's), the capsules shown
+ float hero_wetness();
++// v0.10.3: how many steps the game has taken (counted when the hero's head bone is built, once a step; 0 without head follow)
++std::uint64_t hero_steps();
+ bool set_hero_wetness(float amount);
+ void set_wet_look_on(bool on);
+ void set_wet_force(float amount);
+diff --git a/runtime/src/gs/gpu/gpu.cpp b/runtime/src/gs/gpu/gpu.cpp
+index 1c70b12..ca32762 100644
+--- a/runtime/src/gs/gpu/gpu.cpp
++++ b/runtime/src/gs/gpu/gpu.cpp
+@@ -4926,7 +4926,7 @@ void game_ao(const std::uint32_t *p) {
+     std::array<std::uint32_t, kParamStride / 4> record{};
+     for (std::size_t i = 0; i < record.size(); ++i) record[i] = p[i];
+     g_param_records.push_back(record);
+-    dispatch_linear(kGameAo, static_cast<std::uint32_t>(w * h) * g_scale * g_scale, static_cast<std::uint32_t>(g_param_records.size() - 1));
++    dispatch_linear(kGameAo, static_cast<std::uint32_t>(w * h), static_cast<std::uint32_t>(g_param_records.size() - 1));   // v0.10.3: one run a game pixel (each does its samples)
+ }
+ 
+ void load_clut(std::uint64_t tex0, std::uint64_t texclut) {
+diff --git a/runtime/src/gs/gpu/gs.wgsl b/runtime/src/gs/gpu/gs.wgsl
+index 9435065..4aa17b0 100644
+--- a/runtime/src/gs/gpu/gs.wgsl
++++ b/runtime/src/gs/gpu/gs.wgsl
+@@ -1770,53 +1770,62 @@ fn ao_depth(x: i32, y: i32, w: u32, h: u32, k: u32) -> f32 {
+ 
+ @compute @workgroup_size(64)
+ fn game_ao(@builtin(global_invocation_id) gid: vec3<u32>) {
++    // v0.10.3: one run per game pixel, not per sample. The AO is measured at the game's own resolution anyway (its neighbours are
++    // game pixels): it is worked out once from the pixel's first sample and laid on all of them (9 times less work at 3x, 16 at
++    // 4x: the pass cost as much as the whole frame at high internal resolutions). Each sample still keeps its own sky test and
++    // wet look.
+     let i = gid.x + gid.y * 64u * 1024u;
+     let n = SCALE * SCALE;
+     let w = prm(2u);
+     let h = prm(3u);
+-    if (i >= w * h * n) {
++    if (i >= w * h) {
+         return;
+     }
+-    let k = i % n;
+-    let x = (i / n) % w;
+-    let y = (i / n) / w;
+-    let z0 = f32(read_sample(prm(5u), prm(4u), prm(1u), x, y, k));
++    let x = i % w;
++    let y = i / w;
+     let view = prm(63u);   // v0.9.6 debug views (Settings > Debug): 1 the AO alone, 2 the depth
+-    if (view == 2u) {
+-        // the distance in metres (131072 / z, docs/GRAPHICS.md) as grey: 1 m white, 60 m and the sky black
+-        let metres = select(1000.0, 131072.0 / max(z0, 1.0), z0 >= 64.0);
+-        let g = u32(clamp(1.0 - log2(max(metres, 1.0)) / log2(60.0), 0.0, 1.0) * 255.0);
+-        store(locate(0u, prm(0u), prm(1u), x, y), k, g | (g << 8u) | (g << 16u) | 0x80000000u);
+-        return;
+-    }
+-    if (z0 < 64.0) {
++    let fl = locate(0u, prm(0u), prm(1u), x, y);
++    let first = f32(read_sample(prm(5u), prm(4u), prm(1u), x, y, 0u));
++    var ao = 1.0;
++    if (first >= 64.0 && prm(6u) > 0u && view != 2u) {
++        ao = ao_factor(x, y, w, h, 0u, first);
++    }
++    for (var k = 0u; k < n; k = k + 1u) {
++        let z0 = f32(read_sample(prm(5u), prm(4u), prm(1u), x, y, k));
++        if (view == 2u) {
++            // the distance in metres (131072 / z, docs/GRAPHICS.md) as grey: 1 m white, 60 m and the sky black
++            let metres = select(1000.0, 131072.0 / max(z0, 1.0), z0 >= 64.0);
++            let g = u32(clamp(1.0 - log2(max(metres, 1.0)) / log2(60.0), 0.0, 1.0) * 255.0);
++            store(fl, k, g | (g << 8u) | (g << 16u) | 0x80000000u);
++            continue;
++        }
++        if (z0 < 64.0) {
++            if (view == 1u) {
++                store(fl, k, 0x80FFFFFFu);
++            }
++            continue;   // nothing drawn (sky, cleared)
++        }
+         if (view == 1u) {
+-            store(locate(0u, prm(0u), prm(1u), x, y), k, 0x80FFFFFFu);
++            let g = u32(clamp(ao, 0.0, 1.0) * 255.0);
++            store(fl, k, g | (g << 8u) | (g << 16u) | 0x80000000u);
++            continue;
+         }
+-        return;   // nothing drawn (sky, cleared)
+-    }
+-    let ao = select(1.0, ao_factor(x, y, w, h, k, z0), prm(6u) > 0u);
+-    if (view == 1u) {
+-        let g = u32(clamp(ao, 0.0, 1.0) * 255.0);
+-        store(locate(0u, prm(0u), prm(1u), x, y), k, g | (g << 8u) | (g << 16u) | 0x80000000u);
+-        return;
+-    }
+-    let wet = wet_mask(x, y, k, z0);
+-    if (ao >= 1.0 && wet <= 0.0) {
+-        return;
+-    }
+-    let fl = locate(0u, prm(0u), prm(1u), x, y);
+-    let c = load_at(fl, k);
+-    var col = vec3<f32>(f32(c & 255u), f32((c >> 8u) & 255u), f32((c >> 16u) & 255u)) * ao;
+-    if (wet > 0.0 && (prm(8u) & 0x8000u) != 0u) {
+-        col = mix(col, vec3<f32>(40.0, 120.0, 255.0), wet * 0.6);   // debug: the capsules shown plainly
+-    } else if (wet > 0.0) {
+-        // v0.9.5: wet cloth and hair: water fills the fibres, less light scatters back (darker) and what does is richer in colour
+-        let luma = dot(col, vec3<f32>(0.299, 0.587, 0.114));
+-        col = mix(col, (vec3<f32>(luma) + (col - vec3<f32>(luma)) * 1.25) * 0.62, wet);
++        let wet = wet_mask(x, y, k, z0);
++        if (ao >= 1.0 && wet <= 0.0) {
++            continue;
++        }
++        let c = load_at(fl, k);
++        var col = vec3<f32>(f32(c & 255u), f32((c >> 8u) & 255u), f32((c >> 16u) & 255u)) * ao;
++        if (wet > 0.0 && (prm(8u) & 0x8000u) != 0u) {
++            col = mix(col, vec3<f32>(40.0, 120.0, 255.0), wet * 0.6);   // debug: the capsules shown plainly
++        } else if (wet > 0.0) {
++            // v0.9.5: wet cloth and hair: water fills the fibres, less light scatters back (darker) and what does is richer in colour
++            let luma = dot(col, vec3<f32>(0.299, 0.587, 0.114));
++            col = mix(col, (vec3<f32>(luma) + (col - vec3<f32>(luma)) * 1.25) * 0.62, wet);
++        }
++        let o = vec3<u32>(clamp(col, vec3<f32>(0.0), vec3<f32>(255.0)));
++        store(fl, k, o.x | (o.y << 8u) | (o.z << 16u) | (c & 0xFF000000u));
+     }
+-    let o = vec3<u32>(clamp(col, vec3<f32>(0.0), vec3<f32>(255.0)));
+-    store(fl, k, o.x | (o.y << 8u) | (o.z << 16u) | (c & 0xFF000000u));
+ }
+ 
+ // rawdanger-recomp (v0.9.5): how much of the wet look a pixel gets: inside one of the hero's capsules (prm 9 on, 4 words each:
+@@ -1881,9 +1890,11 @@ fn ao_factor(x: u32, y: u32, w: u32, h: u32, k: u32, z0: f32) -> f32 {
+         }
+         let crease = ((zp + zm) * 0.5 - z0) / z0 * dist;          // metres (a flat surface: 0, the depth is flat on screen)
+         let ahead = dist - 131072.0 / max(zp, zm);                 // metres the nearest of the two is in front
+-        occluded = occluded + smoothstep(0.02, 0.2, crease) * (1.0 - smoothstep(0.3, 1.0, ahead));
++        // v0.10.3: only what is close in front darkens (a person half a metre from a wall left a black halo on it: 0.3 to 1 m before)
++        occluded = occluded + smoothstep(0.02, 0.2, crease) * (1.0 - smoothstep(0.12, 0.4, ahead));
+         counted = counted + 1.0;
+     }
+     occluded = select(0.0, occluded / counted, counted > 0.0);
+-    return 1.0 - 0.75 * f32(prm(6u)) / 256.0 * keep * clamp(occluded * 2.0, 0.0, 1.0);
++    // v0.10.3: gentler (0.75 and twice the share before): now after the PS2 filter, which no longer steepens it
++    return 1.0 - 0.55 * f32(prm(6u)) / 256.0 * keep * smoothstep(0.0, 1.0, clamp(occluded * 1.6, 0.0, 1.0));
+ }
+diff --git a/runtime/src/gs/gs.cpp b/runtime/src/gs/gs.cpp
+index 3ec7f1b..3dbeb9f 100644
+--- a/runtime/src/gs/gs.cpp
++++ b/runtime/src/gs/gs.cpp
+@@ -768,13 +768,15 @@ std::atomic<int> g_bar_opacity{[] { const char *v = std::getenv("PS2_BAR_OPACITY
+     if (attr & 0x10u) return 0;   // textured
+     const Vertex &a = s.queue[0], &b = s.queue[1];
+     if (b.r | b.g | b.b) return 0;
+-    if (b.a < 0x80) return 0;
++    // v0.10.3: the bars as they slide in and out between play and a cutscene count too (thin, or fading in with alpha under 0x80):
++    // only the finished bars were found, so "Cutscene bars: OFF" still showed them in every transition
++    if (b.a < 0x10) return 0;
+     const Context &c = s.ctx[(attr >> 9) & 1u];
+     const int ofx = static_cast<int>(c.xyoffset & 0xFFFFu), ofy = static_cast<int>((c.xyoffset >> 32) & 0xFFFFu);
+     const int x0 = (static_cast<int>(std::min(a.x, b.x)) - ofx) >> 4, x1 = (static_cast<int>(std::max(a.x, b.x)) - ofx) >> 4;
+     const int y0 = (static_cast<int>(std::min(a.y, b.y)) - ofy) >> 4, y1 = (static_cast<int>(std::max(a.y, b.y)) - ofy) >> 4;
+     if (x0 > 0 || x1 < 512) return 0;
+-    const bool bar = (y0 <= 0 && y1 >= 16 && y1 <= 120) || (y1 >= 400 && y0 >= 300 && y0 <= 432);
++    const bool bar = (y0 <= 0 && y1 >= 1 && y1 <= 120) || (y1 >= 400 && y0 >= 300 && y0 <= 447);
+     if (!bar) return 0;
+     return (attr & 0x40u) ? 1 : 2;
+ }
+@@ -1097,7 +1099,21 @@ std::uint32_t apply(const Walk &w, std::uint32_t c, std::uint32_t z, const std::
+     return static_cast<std::uint32_t>(ch[0]) | static_cast<std::uint32_t>(ch[1]) << 8 | static_cast<std::uint32_t>(ch[2]) << 16 | static_cast<std::uint32_t>(a) << 24;
+ }
+ 
++void run_ao(std::uint32_t zbp, std::uint32_t zpsm);
++void finish_pass();
++// v0.10.3: the AO goes after the colour filter, not before it. The filter's brightness curve is steep in the dark (the haze and
++// contrast of each map's preset): AO laid under it came out two or three times as dark as set, black halos round people against
++// a wall. After it, the AO darkens the finished colours by what it is set to. Still before the HUD (the walk's end is the first
++// draw after it).
+ void finish() {
++    Walk &w = g_walk;
++    if (!w.active) return;
++    const std::uint32_t zbp = w.zbp, zpsm = w.zpsm;
++    finish_pass();
++    run_ao(zbp, zpsm);
++}
++
++void finish_pass() {
+     Walk &w = g_walk;
+     if (!w.active) return;
+     w.active = false;
+@@ -1247,8 +1263,7 @@ bool step(const State &s, std::uint64_t attr) {
+         if (!(sprite && textured && fbw == 1 && fpsm == 0x0A && tpsm == 0x0A && tbw == 1 && tbp == zbp)) return true;
+         w = Walk{};   // the walk starts: the first page of the depth copied as 16-bit into a 64-wide buffer
+         w.active = true, w.zbp = zbp, w.zpsm = 0x30u | ((static_cast<std::uint32_t>(c.zbuf >> 24)) & 0xFu), w.buf = fbp, w.pages = 1, w.copies = 1;
+-        run_ao(zbp, w.zpsm);
+-        g_nofilter.walk_seen = 60, g_nofilter.zdraws = 0;
++        g_nofilter.walk_seen = 60, g_nofilter.zdraws = 0;   // (the AO: when the walk ends, finish())
+         return true;
+     }
+     if (fbw != 1) {   // the walk is over
+diff --git a/runtime/src/system.cpp b/runtime/src/system.cpp
+index 50e4cf2..0bb0b25 100644
+--- a/runtime/src/system.cpp
++++ b/runtime/src/system.cpp
+@@ -1406,8 +1406,21 @@ struct Limb { int from, to; float radius; };
+ // game steps 30 or 60 times a second with the frame-rate constants (rawdanger-recomp docs/FRAMERATE.md, v0.10.2).
+ float g_step_dt = 1.0f / 20.0f;
+ std::uint64_t g_step_frame = 0;
++std::atomic<std::uint64_t> g_steps{0};   // v0.10.3: the hero's steps so far (Settings > Debug > Stats: game steps a second)
+ void note_step() {
++    g_steps.fetch_add(1, std::memory_order_relaxed);
+     const std::uint64_t now = frame_count();
++    static const bool log = std::getenv("PS2_STEPS_LOG") != nullptr;   // v0.10.3: the steps counted every 5 s of vblanks (tests, reports)
++    static std::uint64_t log_from = 0, log_steps = 0;
++    if (log) {
++        if (!log_from) log_from = now, log_steps = g_steps.load();
++        else if (now >= log_from + 300) {
++            std::fprintf(stderr, "[steps] vblanks %llu-%llu: %llu steps (%.1f a second)\n", static_cast<unsigned long long>(log_from),
++                         static_cast<unsigned long long>(now), static_cast<unsigned long long>(g_steps.load() - log_steps),
++                         static_cast<double>(g_steps.load() - log_steps) * 60.0 / static_cast<double>(now - log_from));
++            log_from = now, log_steps = g_steps.load();
++        }
++    }
+     if (g_step_frame != 0 && now > g_step_frame && now - g_step_frame < 30)
+         g_step_dt += (std::clamp(static_cast<float>(now - g_step_frame) / 60.0f, 1.0f / 60.0f, 0.25f) - g_step_dt) * 0.25f;
+     g_step_frame = now;
+@@ -1772,6 +1785,8 @@ struct HeadFollowSetup {
+ };
+ HeadFollowSetup g_head_setup;
+ }  // namespace
++std::uint64_t hero_steps() { return g_steps.load(std::memory_order_relaxed); }
++
+ float hero_wetness() {
+     const HeroWet &h = hero_wet_setup();
+     float wet = -1.0f;
+-- 
+2.43.0
+

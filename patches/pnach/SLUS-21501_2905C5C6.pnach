@@ -47,6 +47,21 @@ patch=1,EE,0023196C,word,24040009
 patch=1,EE,E0010001,extended,00007F00
 patch=1,EE,0023196C,word,24040006
 
+[Skip opening movie]
+description=The game goes straight from the logos (or, with Skip intro logos, from the memory-card check) to the title screen, without the opening movie. Switch it in the game (F1 -> Recomp options) or in RawDangerPC.exe.
+// recomp: live switch 00007F08 default off
+// v0.10.3. The opening movie's scene (OPMOVIE, 9) starts at 0x24B060: it starts the movie (jal 0x213050 at 0x24B07C) and sets
+// its per-frame step to 0x24B020, which waits for the movie's end (or Start) and then runs 0x24AFF0 (-> TITLE, 11). While
+// the variable at 0x7F08 is 0: no movie started, and the step is 0x24AFF0 itself, so the next step goes to the title.
+// 0x0024B07C: jal 0x213050 -> nop
+// 0x0024B08C: addiu a0,a0,-0x4FE0 (0x24B020) -> addiu a0,a0,-0x5010 (0x24AFF0)
+patch=1,EE,E0020000,extended,00007F08
+patch=1,EE,0024B07C,word,00000000
+patch=1,EE,0024B08C,word,2484AFF0
+patch=1,EE,E0020001,extended,00007F08
+patch=1,EE,0024B07C,word,0C084C14
+patch=1,EE,0024B08C,word,2484B020
+
 [Direct mouse look]
 description=The mouse turns the camera itself, as far as it moved and as fast, with no top speed (rawdanger-recomp v0.7.9). The game turns its follow camera by f22 radians a step, worked out from the right stick (0x176FDC: mul.s f22 = -stick * degrees per step [camera+0x2C] in radians), then turns the camera's place around the player by it (sin, cos at 0x177154). These three words add a float the engine leaves at 0x7F10 (free EE kernel memory, 0 unless the mouse moved) to f22 and clear it, so each mouse turn is used exactly once; the stick still turns as before. Built in (code).
 // 0x00176FD0: nop -> lwc1 $f2, 0x7F10($zero)   (f2 is free after the div.s at 0x176FCC; fabs at 0x2C4308 keeps it)

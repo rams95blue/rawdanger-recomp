@@ -107,6 +107,13 @@ drawn with the depth test) is first read by a textured sprite into another buffe
 a frame; a narrower 3D picture (a picture in the picture) is left alone. Checked in the tutorial's opening (the Relief Center):
 Settings > Debug > Picture shown: AO alone shows it; the maps with the depth filter are unchanged (it never fires there).
 
+v0.10.3 (reported: "too strong and spilled, clashes with the PS2 post-processing, slows the game"; engine patch 0047): the AO ran
+where the filter *starts*, so the filter's colour curve (each map's haze and contrast, steep in the dark) was applied on top of
+it and made it two or three times as dark: black halos round people a little in front of a wall. It now runs where the filter
+ends, still before the HUD. Only what is within about 0.4 m in front darkens (was 1 m), and it is gentler (0.55, was 0.75). The
+pass worked out the AO for every sample of the internal resolution, though it measures at the game's own resolution: it does it
+once per game pixel now and lays it on all the samples (9 times less work at 3x, 16 at 4x).
+
 v0.8.7: stronger, as it hardly showed (in the banquet hall, 0.3 % of the picture changed): it looks 80 pixels out at the nearest
 depth (was 38, up to 40 pixels), counts creases from 0.4 % (was 0.6 %), with a gain of 3 (was 1.4); light darkens up to 66 %,
 strong up to 96 %. Now feet stand on the floor and the tables' edges sit on it.

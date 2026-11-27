@@ -149,6 +149,8 @@ float head_test();
 // rawdanger-recomp (v0.9.5): how wet the hero's worn clothes are (0 ... 1, the wettest; -1 no hero), set them (debug), and the wet
 // look (PS2_HERO_WET, system.cpp; keys.ini wet_look, on) with its debug switches: a forced wetness (-1 the game's), the capsules shown
 float hero_wetness();
+// v0.10.3: how many steps the game has taken (counted when the hero's head bone is built, once a step; 0 without head follow)
+std::uint64_t hero_steps();
 bool set_hero_wetness(float amount);
 void set_wet_look_on(bool on);
 void set_wet_force(float amount);

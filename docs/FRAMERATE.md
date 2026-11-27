@@ -89,3 +89,19 @@ Still to do before it is an option: the overlays' counts, cutscenes, menus, and 
 Not checked yet: every menu at 30 and 60 (the item menu, options, the map), the cutscenes after the tutorial, 60 in the
 overlays (the law extrapolated, as for the program).
 
+## v0.10.3: named as frames a second; what 60 does
+
+- The launcher's option is **Frame rate: 20 FPS (PS2) / 30 FPS / 60 FPS**: the PS2 game moves and draws its world 20 times a
+  second (one step, one picture, every 3 vblanks); at 30 and 60 it does both 30 or 60 times a second, at the same pace. ("Game
+  speed" read as how fast the game runs.)
+- **Measured**: Settings > Debug > Stats shows "Game steps": the steps counted a second (once a step, as the hero's head bone is
+  built) and the vblanks the game waits for a step (3, 2, 1); the same goes to the log every second while the stats show, and
+  `PS2_STEPS_LOG=1` prints it every 5 s. In the tutorial at 60: 60.0 steps a second, every second.
+- **What still runs fast at 60**: the tutorial's walk-in cutscene takes 300 vblanks at 60 against 400 at 20 and at 30 (the
+  same disc and start, 50-vblank samples): a third quicker. The walk speed (3.60 m) and the loading are right. So some
+  per-step count the European release has at 30 is extrapolated wrongly to 60 or is not among the words compared (functions
+  whose length changed in the European program are skipped). 30 is the one to use.
+- The 60 build's picture rate: it needs the emulated EE at twice its clock (PS2_EE_OVERCLOCK=2, set by the launcher), and the
+  host CPU running it at 1.9 cores in a busy room (reported: 40-58 FPS). A frame rate above 60 (the picture drawn more often
+  than the game steps) would need the pictures in between made up; not planned.
+

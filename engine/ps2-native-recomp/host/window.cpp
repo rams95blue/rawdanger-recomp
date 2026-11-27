@@ -1499,9 +1499,16 @@ void window_pixels(int &w, int &h) {
 // rawdanger-recomp: the keys list stays up while playing (keys.ini keys_on_screen, F10)
 bool keys_on_screen_now() { return g_keys.keys_on_screen != 0; }
 
+// v0.10.3: the PC rows' spinner values over the game's Options list (filled in namespace nopt below, read for the overlay)
+namespace nopt {
+struct ValueText { int x, y; std::string text; };
+extern std::vector<ValueText> g_value_text;
+}  // namespace nopt
+
 void menu_paint(bool show_again) {
     if (show_again) g_menu_redraw = true;
-    g_overlay_on = g_menu.is_open() || !g_note_text.empty() || g_native_hint || keys_on_screen_now() || g_stats_on || g_debug_menu_on.load(std::memory_order_relaxed);
+    g_overlay_on = g_menu.is_open() || !g_note_text.empty() || g_native_hint || keys_on_screen_now() || g_stats_on || g_debug_menu_on.load(std::memory_order_relaxed) ||
+                   !nopt::g_value_text.empty();
     if (!g_overlay_on) {
 #ifdef PS2_GPU
         if (g_gpu_present) ps2::gs::gpu::set_overlay(nullptr, 0, 0, 0, 0);
@@ -1641,7 +1648,7 @@ void menu_paint(bool show_again) {
                     debug_row(kHeadTestRow, "Head follows camera: a fixed turn", t == 0.0f ? "<  off  >" : "<  " + std::to_string(static_cast<int>(std::lround(t * 57.29578f))) + " deg  >");
                 }
                 if (debug_steps().set)
-                    debug_row(kStepsRow, "Game steps a second (a test: everything faster)", g_force_vblanks == 0 ? "<  the game's  >" : "<  " + std::to_string(60 / g_force_vblanks) + "  >");
+                    debug_row(kStepsRow, "Game steps a second (a test: forces the pace, the game's timings stay)", g_force_vblanks == 0 ? "<  the build's  >" : "<  " + std::to_string(60 / g_force_vblanks) + "  >");
                 if (debug_scenes().set) {
                     if (debug_scenes().debug) debug_row(kDebugRow, "Developers' debug menu (on the disc; Shift+F7)", "open");
                     if (debug_scenes().mapsel) debug_row(kMapSelRow, "Developers' map select (on the disc; F7)", "open");
@@ -1653,6 +1660,15 @@ void menu_paint(bool show_again) {
                 v.recomp_note = v.recomp_rows.empty() ? "No test switches in this game" : "Test switches, kept in every build for reports";
         }
         g_menu.draw(w, h, v, g_menu_picture);
+    } else if (g_note_text.empty() && !nopt::g_value_text.empty()) {
+        // v0.10.3: the PC rows' spinner values, where the game's list puts them (the game's picture in the window: its shape fitted)
+        const float aspect = ps2::g_options.widescreen ? 16.0f / 9.0f : 4.0f / 3.0f;
+        const float vw = std::min(static_cast<float>(w), h * aspect), vh = vw / aspect;
+        const float ox = (w - vw) * 0.5f, oy = (h - vh) * 0.5f, kx = vw / 640.0f, ky = vh / 448.0f;
+        std::vector<quickmenu::Menu::NativeValue> values;
+        for (const nopt::ValueText &v : nopt::g_value_text)
+            values.push_back({static_cast<int>(ox + v.x * kx), static_cast<int>(oy + v.y * ky), static_cast<int>(24 * ky), v.text});
+        quickmenu::Menu::draw_native_values(values, g_menu_picture);
     } else if (g_note_text.empty() && g_native_hint && g_native_label) {
         // the label of the game's line, where the game draws its words (the game's picture in the window: its shape fitted)
         const float aspect = ps2::g_options.widescreen ? 16.0f / 9.0f : 4.0f / 3.0f;
@@ -1870,16 +1886,17 @@ void load_art() {
 }
 bool has_art(const std::string &name) { return g_art.count(name) != 0; }
 
+// v0.10.3: looked up each time, not once a run (the title's and the pause menu's Options can load their pictures under other
+// numbers). The spinners' values are no longer drawn from the background picture (the game draws a row's sprites from its word
+// sheet only): the window draws them (g_value_text).
 std::uint32_t texture_of(char tex) {
-    static std::uint32_t sheet = 0, back = 0;
-    if (!sheet) {
-        sheet = ps2::ld32(kSprites) & 0xFFFFu;   // sprite 0, "Vibration", is on the label sheet
-        for (std::uint32_t i = 0; i < 0x3C; ++i) {   // the 640 x 448 background
-            const std::uint32_t w0 = ps2::ld32(kSprites + 16u * i);
-            if ((w0 >> 16) == 640u && ps2::ld32(kSprites + 16u * i + 4) == 448u && (w0 & 0xFFFFu) != 0xFFFFu) back = w0 & 0xFFFFu;
-        }
+    const std::uint32_t sheet = ps2::ld32(kSprites) & 0xFFFFu;   // sprite 0, "Vibration", is on the label sheet
+    if (tex != 'B') return sheet;
+    for (std::uint32_t i = 0; i < 0x3C; ++i) {   // the 640 x 448 background
+        const std::uint32_t w0 = ps2::ld32(kSprites + 16u * i);
+        if ((w0 >> 16) == 640u && ps2::ld32(kSprites + 16u * i + 4) == 448u && (w0 & 0xFFFFu) != 0xFFFFu) return w0 & 0xFFFFu;
     }
-    return tex == 'B' ? back : sheet;
+    return sheet;
 }
 
 // a sprite of our own: its entry in memory the game does not use, reached through the RAM's mirror at 32 MB (the game adds
@@ -1899,7 +1916,10 @@ std::uint32_t sprite_for(const std::string &name, int &w) {
     const auto art = g_art.find(name);
     if (art == g_art.end()) { w = 0; return kNone; }
     w = art->second.w;
-    if (const auto it = g_sprite_of.find(name); it != g_sprite_of.end()) return it->second;
+    if (const auto it = g_sprite_of.find(name); it != g_sprite_of.end()) {
+        write_sprite(kSprites + 16u * it->second - 0x02000000u, art->second);   // (v0.10.3: its picture's number again: it can change)
+        return it->second;
+    }
     const std::uint32_t at = new_sprite();
     if (!at) return kNone;
     write_sprite(at, art->second);
@@ -1916,7 +1936,10 @@ Art glow_art() {
 std::uint32_t glow_for(int w) {
     if (w <= 81) return kGlow;
     const std::string name = "G:" + std::to_string(w);
-    if (const auto it = g_sprite_of.find(name); it != g_sprite_of.end()) return it->second;
+    if (const auto it = g_sprite_of.find(name); it != g_sprite_of.end()) {
+        write_sprite(kSprites + 16u * it->second - 0x02000000u, glow_art(), w);
+        return it->second;
+    }
     const std::uint32_t at = new_sprite();
     if (!at) return kGlow;
     write_sprite(at, glow_art(), w);
@@ -2000,6 +2023,7 @@ Record our_record(int i, int y) {
             g_dyn[i][0] = a ? sprite_index(a) : kNone;
             g_dyn[i][1] = b ? sprite_index(b) : kNone;
         }
+        g_value_text.push_back({kSpinX, y - 1, row.text()});
         if (g_dyn[i][0] != kNone && g_dyn[i][1] != kNone) {
             const std::uint32_t text_at = kSprites + 16u * g_dyn[i][0] - 0x02000000u, glow_at = kSprites + 16u * g_dyn[i][1] - 0x02000000u;
             if (art != g_art.end()) write_sprite(text_at, art->second);
@@ -2033,7 +2057,13 @@ Record our_record(int i, int y) {
 
 int visible() { return std::min(kVisible, static_cast<int>(g_list.size())); }
 
+// v0.10.3: the spinners' values, drawn by the engine over the list (game coordinates: centre x, top y). The game draws a row's
+// sprites from its word sheet only (texture 0x7469, full), so the value words put on the background picture's spare part were
+// never drawn: the values were blank. The window draws them in the game's font, on the glow the game draws.
+std::vector<ValueText> g_value_text;
+
 void build_window() {
+    g_value_text.clear();
     for (int s = 0; s < visible(); ++s) {
         const int item = g_list[static_cast<std::size_t>(g_offset + s)];
         const int y = kTop + kSpacing * s;
@@ -2083,7 +2113,18 @@ void make_list() {
 }
 
 // each frame of the window: on the Options screen, point its list at the rows on screen, scroll them with the cursor
+void frame_body();
+// v0.10.3: the window's overlay is painted again when the spinner values it shows change (or go)
 void frame() {
+    std::string before;
+    for (const ValueText &v : g_value_text) before += std::to_string(v.x) + "," + std::to_string(v.y) + "," + v.text + ";";
+    frame_body();
+    std::string after;
+    for (const ValueText &v : g_value_text) after += std::to_string(v.x) + "," + std::to_string(v.y) + "," + v.text + ";";
+    if (after != before) menu_paint();
+}
+
+void frame_body() {
     setup();
     if (!g_on || g_rows.empty()) return;
     for (std::size_t i = 0; i < g_rows.size(); ++i) {   // the values the game set: applied here, on the window's thread
@@ -2092,11 +2133,11 @@ void frame() {
         if (g_rows[i].spinner()) { if (p != 1) g_rows[i].step(p > 1 ? 1 : -1); }
         else if (g_rows[i].set) g_rows[i].set(p);
     }
-    if (ps2::ld32(0x48F488u) != 16u) { g_list_at = 0; return; }   // the game's Options screen (scene SETTING)
+    if (ps2::ld32(0x48F488u) != 16u) { g_list_at = 0; g_value_text.clear(); return; }   // the game's Options screen (scene SETTING)
     {   // the Options overlay (US) is in
         static const char kHelp[] = "Adjust Screen Position";
         for (std::uint32_t k = 0; k < sizeof kHelp - 1; ++k)
-            if (ps2::ld8(0x73D6D0u + k) != static_cast<std::uint8_t>(kHelp[k])) { g_list_at = 0; return; }
+            if (ps2::ld8(0x73D6D0u + k) != static_cast<std::uint8_t>(kHelp[k])) { g_list_at = 0; g_value_text.clear(); return; }
     }
     const std::uint32_t work = ps2::ld32(kWorkPtr);
     if (work < 0x100000u || work >= 0x2000000u - 0x1000u) return;
@@ -2119,6 +2160,7 @@ void frame() {
             std::fprintf(stderr, "[options] the Options list has the PC rows (%d rows, %d at a time)\n", total, shown);
             return;
         }
+        g_value_text.clear();
         return;
     }
     int cursor = static_cast<int>(ps2::ld32(g_list_at + 8));
@@ -2685,15 +2727,20 @@ void menu_command(quickmenu::Command c, int step) {
         if (row < g_recomp_row_section.size() && g_recomp_row_section[row] == kStepsRow) {
             // the game's, 20, 30, 60 (vblanks a step 3, 2, 1)
             static const int kOrder[] = {0, 3, 2, 1};
+            static std::uint32_t own = 0;   // v0.10.3: the build's own vblanks a step (3, or 2 / 1 in the 30 / 60 builds), put back after the test
+            if (g_force_vblanks == 0 && debug_steps().set) {
+                const std::uint32_t g = ps2::ld32(debug_steps().pointer);
+                if (g >= 0x100000u && g < 0x2000000u) own = ps2::ld32(g + debug_steps().offset);
+            }
             int k = 0;
             while (k < 4 && kOrder[k] != g_force_vblanks) ++k;
             k = ((k == 4 ? 0 : k) + (step < 0 ? 3 : 1)) % 4;
             g_force_vblanks = kOrder[k];
             if (g_force_vblanks == 0 && debug_steps().set) {
                 const std::uint32_t g = ps2::ld32(debug_steps().pointer);
-                if (g >= 0x100000u && g < 0x2000000u) ps2::st32(g + debug_steps().offset, 3u);   // the US disc's
+                if (g >= 0x100000u && g < 0x2000000u) ps2::st32(g + debug_steps().offset, own >= 1u && own <= 3u ? own : 3u);   // the build's own
             }
-            g_recomp_note = g_force_vblanks == 0 ? "Game steps: the game's own (20 a second)"
+            g_recomp_note = g_force_vblanks == 0 ? "Game steps: the build's own (the launcher's Frame rate)"
                                                  : "Game steps: " + std::to_string(60 / g_force_vblanks) + " a second: a fixed-step game, everything runs faster (a test)";
             break;
         }
@@ -3548,6 +3595,26 @@ void show_speed() {
         if (const float wet = ps2::hero_wetness(); wet >= 0.0f) g_stats_rows.push_back({"Clothes wet", std::to_string(static_cast<int>(wet * 100.0f + 0.5f)) + " %"});
         static const char *const kViews[] = {"the game's", "AO alone", "depth", "capsules"};
         g_stats_rows.push_back({"Picture", kViews[std::clamp(ps2::debug_view(), 0, 3)]});
+        // v0.10.3: the game's steps a second as measured (the hero's, once a step) and the vblanks a step the game waits for
+        // (20 steps: 3, 30: 2, 60: 1). Also written to the log while the stats show, for reports on the frame-rate builds.
+        {
+            static std::uint64_t steps_before = 0;
+            const std::uint64_t steps = ps2::hero_steps();
+            const double rate = steps_before && steps >= steps_before ? static_cast<double>(steps - steps_before) / seconds : 0.0;
+            steps_before = steps;
+            std::uint32_t wait = 0;
+            if (debug_steps().set) {
+                const std::uint32_t g = ps2::ld32(debug_steps().pointer);
+                if (g >= 0x100000u && g < 0x2000000u) wait = ps2::ld32(g + debug_steps().offset);
+            }
+            char st[96];
+            if (wait > 0 && wait < 10) std::snprintf(st, sizeof st, "%.1f a second (%u vblank%s a step = %u)", rate, wait, wait == 1 ? "" : "s", 60u / wait);
+            else std::snprintf(st, sizeof st, "%.1f a second", rate);
+            g_stats_rows.push_back({"Game steps", st});
+            std::fprintf(stderr, "[steps] frame %llu: %.1f fps, game steps %.1f a second, vblanks a step %u%s, CPU %s\n",
+                         static_cast<unsigned long long>(ps2::frame_count()), static_cast<double>(frames) / seconds, rate, wait,
+                         g_force_vblanks > 0 ? " (forced: Settings > Debug)" : "", b);
+        }
         g_stats_rows.push_back({"Frame", std::to_string(ps2::frame_count())});
         menu_paint(true);
     }

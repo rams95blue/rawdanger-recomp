@@ -454,24 +454,29 @@ namespace RawDangerLauncher
         }
 
         // Build speed: three buttons (light, balanced, full) and what the choice does; every copy of it on the pages stays in step.
-        // v0.10.2: the Enhanced Edition's game steps a second. The game was made for 20; the European release's program and overlays,
-        // compiled for 30, give every constant that holds the frame rate (docs/FRAMERATE.md). Built in: a change makes the disc and the
-        // program again.
+        // v0.10.2: the Enhanced Edition's game steps a second, shown as frames a second (v0.10.3: "Game speed" read as how fast the
+        // game runs). The PS2 game moves and draws its world 20 times a second; the European release's program and overlays, compiled
+        // for 30, give every constant that holds the frame rate (docs/FRAMERATE.md), so 30 or 60 frames a second keep the game's pace.
+        // Built in: a change makes the disc and the program again.
         void StepsPicker(Panel parent, int x, int y)
         {
-            parent.Controls.Add(MakeLabel(Lang.L("Game speed", "ゲームの更新"), x, y + 6, 110, 22, new Font(Lang.UiFont, 9.5f, FontStyle.Bold), Text1));
+            parent.Controls.Add(MakeLabel(Lang.L("Frame rate", "フレームレート"), x, y + 6, 110, 22, new Font(Lang.UiFont, 9.5f, FontStyle.Bold), Text1));
             string[] value = { "20", "30", "60" };
-            string[] names = { Lang.L("20 (original)", "20（オリジナル）"), Lang.L("30", "30"), Lang.L("60", "60") };
+            string[] names = { Lang.L("20 FPS (PS2)", "20 FPS（PS2）"), Lang.L("30 FPS", "30 FPS"), Lang.L("60 FPS", "60 FPS") };
             Button[] b = new Button[3];
-            Label note = MakeLabel("", x + 494, y + 2, 346, 34, new Font(Lang.UiFont, 8.5f), Dim);
+            Label note = MakeLabel("", x + 494, y - 2, 346, 40, new Font(Lang.UiFont, 8.5f), Dim);
             parent.Controls.Add(note);
             Action view = delegate
             {
                 for (int i = 0; i < 3; i++) Pick(b[i], settings.Steps == value[i]);
                 note.Text = settings.Steps == "20"
-                    ? Lang.L("steps a second, as on the PS2. 30 and 60 are experimental.", "回／秒（PS2と同じ）。30と60は試験的です。")
-                    : Lang.L("steps a second: experimental (menus and cutscenes not all checked); " + (settings.Steps == "60" ? "needs a fast PC. " : "") + "a change builds again.",
-                             "回／秒：試験的（メニューとムービーは未確認あり）" + (settings.Steps == "60" ? "、高速なPCが必要。" : "。") + "変更すると再ビルドします。");
+                    ? Lang.L("The game as on the PS2: its world moves and is drawn 20 times a second. 30 and 60 are smoother at the same speed (experimental).",
+                             "PS2と同じ：毎秒20回動いて描かれます。30と60は同じ速さでより滑らか（試験的）。")
+                    : settings.Steps == "30"
+                    ? Lang.L("30 times a second, at the game's own speed (the European release's timings). Experimental; a change builds again.",
+                             "毎秒30回、ゲーム本来の速さで（欧州版のタイミング）。試験的。変更すると再ビルドします。")
+                    : Lang.L("60 times a second, needs a fast PC. Experimental: some scenes still run fast (v0.10.3). A change builds again.",
+                             "毎秒60回、高速なPCが必要。試験的：一部の場面がまだ速く進みます。変更すると再ビルドします。");
             };
             for (int i = 0; i < 3; i++)
             {
@@ -879,9 +884,40 @@ namespace RawDangerLauncher
                 if (r == DialogResult.Cancel) return;
                 if (r == DialogResult.Yes) { BuildDiscs(new List<DiscInfo>(new DiscInfo[] { d }), false); return; }
             }
-            string problem = Games.Play(settings, d.GameName);
-            if (problem != null) MessageBox.Show(problem, Program.AppName);
-            else Music.Stop();   // the game has its own sound
+            PlayInBackground(d.GameName, null, null);
+        }
+
+        // v0.10.3: Play's preparation (the key and option pictures, the achievement badges, the memory card from the save
+        // folders: a few Python runs, 4 s, more after a build) ran on the window's thread, which froze the launcher meanwhile. It
+        // runs on its own thread now; the window says the game is starting and stays responsive.
+        bool starting = false;
+        void PlayInBackground(string name, Dictionary<string, string> env, Action done)
+        {
+            if (starting) return;
+            starting = true;
+            Cursor = Cursors.AppStarting;
+            string title = Text;
+            Text = title + Lang.L("  -  starting the game...", "  -  ゲームを起動しています...");
+            System.Threading.Thread t = new System.Threading.Thread(delegate ()
+            {
+                string problem;
+                try { problem = Games.Play(settings, name, env); }
+                catch (Exception e) { problem = e.Message; }
+                try
+                {
+                    BeginInvoke((MethodInvoker)delegate
+                    {
+                        starting = false;
+                        Cursor = Cursors.Default;
+                        Text = title;
+                        if (problem != null) MessageBox.Show(problem, Program.AppName);
+                        else { Music.Stop(); if (done != null) done(); }   // the game has its own sound
+                    });
+                }
+                catch (Exception) { starting = false; }
+            });
+            t.IsBackground = true;
+            t.Start();
         }
 
         // The engine's own measuring: frames that took longer than 25 ms and what they waited for, and GPU statistics,
@@ -893,10 +929,8 @@ namespace RawDangerLauncher
             Dictionary<string, string> env = new Dictionary<string, string>();
             env["PS2_HITCH_LOG"] = "25";
             env["PS2_GPU_STAT"] = "1";
-            string problem = Games.Play(settings, d.GameName, env);
-            if (problem != null) { MessageBox.Show(problem, Program.AppName); return; }
-            MessageBox.Show(Lang.L("The game is running with performance logging on. Play the slow parts for a few minutes, close the game, then send the newest file from:\n", "パフォーマンスログを有効にしてゲームを起動しました。重い場面を数分プレイしてからゲームを閉じ、次のフォルダ内の最新ファイルを送ってください:\n")
-                + Path.Combine(Games.Folder(settings, d.GameName), "logs"), Program.AppName);
+            PlayInBackground(d.GameName, env, delegate { MessageBox.Show(Lang.L("The game is running with performance logging on. Play the slow parts for a few minutes, close the game, then send the newest file from:\n", "パフォーマンスログを有効にしてゲームを起動しました。重い場面を数分プレイしてからゲームを閉じ、次のフォルダ内の最新ファイルを送ってください:\n")
+                + Path.Combine(Games.Folder(settings, d.GameName), "logs"), Program.AppName); });
         }
 
         void ShortcutFor(DiscInfo d, bool tell)
@@ -1007,6 +1041,7 @@ namespace RawDangerLauncher
                 else if (s.StartsWith("Widescreen", StringComparison.OrdinalIgnoreCase) && (wideBox.Checked || Enhanced.Is(d))) list.Add(s);
                 else if (s.IndexOf("post", StringComparison.OrdinalIgnoreCase) >= 0) list.Add(s);   // always built in: a switch (Original PS2 Post Processing Filter, on by default)
                 else if (s.StartsWith("Skip intro logos", StringComparison.OrdinalIgnoreCase) && (logosBox.Checked || Enhanced.Is(d))) list.Add(s);
+                else if (s.StartsWith("Skip opening movie", StringComparison.OrdinalIgnoreCase)) list.Add(s);   // built in: a switch, off by default (F1 -> Recomp options; v0.10.3)
             }
             return list;
         }
@@ -1492,7 +1527,7 @@ namespace RawDangerLauncher
                     play.Text = Lang.L("Play  ", "プレイ  ") + d.Title;
                     play.Size = new Size(420, 40);
                     Style(play, true);
-                    play.Click += delegate { string p = Games.Play(settings, d.GameName); if (p != null) MessageBox.Show(p, Program.AppName); };
+                    play.Click += delegate { PlayInBackground(d.GameName, null, null); };
                     doneButtons.Controls.Add(play);
                     Label what = new Label();
                     what.AutoSize = false; what.Size = new Size(820, 34); what.ForeColor = Dim; what.Font = new Font(Lang.UiFont, 8.5f);

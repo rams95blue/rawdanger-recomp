@@ -4,7 +4,7 @@
 
 <p align="center">
   <a href="https://github.com/rams95blue/rawdanger-recomp/releases"><img alt="release" src="https://img.shields.io/github/v/release/rams95blue/rawdanger-recomp?style=flat-square&color=f2c14e&labelColor=0b1324&label=release"></a>
-  <img alt="version" src="https://img.shields.io/badge/build-v0.10.2-96c4ff?style=flat-square&labelColor=0b1324">
+  <img alt="version" src="https://img.shields.io/badge/build-v0.10.3-96c4ff?style=flat-square&labelColor=0b1324">
   <img alt="platform" src="https://img.shields.io/badge/platform-Windows%2010%2F11%20x64-96c4ff?style=flat-square&labelColor=0b1324">
   <img alt="engine" src="https://img.shields.io/badge/engine-ps2--native--recomp%20fork-96c4ff?style=flat-square&labelColor=0b1324">
   <img alt="game data" src="https://img.shields.io/badge/game%20data-not%20included-e05a4f?style=flat-square&labelColor=0b1324">
@@ -29,7 +29,7 @@
 
 | | |
 |---|---|
-| **Enhanced Edition** | Built from your five discs: the US game with the European release's corrections (the "Survived" stamp, a missing newspaper document, dialogue typos) and the Japanese voices, faces, signs, logo and opening film, each switchable while you play. Game speed 20 (original), 30 or 60 steps a second, chosen before the build (30 and 60 experimental). Its title reads ENHANCED EDITION with the build number. |
+| **Enhanced Edition** | Built from your five discs: the US game with the European release's corrections (the "Survived" stamp, a missing newspaper document, dialogue typos) and the Japanese voices, faces, signs, logo and opening film, each switchable while you play. Frame rate 20 FPS (as on the PS2), 30 or 60 FPS at the game's own speed, chosen before the build (30 and 60 experimental). Its title reads ENHANCED EDITION with the build number. |
 | **Any resolution, any screen** | Internal resolution 1x to 8x, widescreen, full screen, FSR 1, SMAA, sharpening, field of view 80 to 150 %. |
 | **The PS2 look, kept or cleaned** | The game's own glow, tint and haze in one cheap GPU pass; ambient occlusion; a hero who looks wet when soaked; rain on the lens that follows the weather; cutscene bars from 100 % to none. |
 | **A modern camera** | Mouse look in the follow and first-person views, an orbit camera that circles the hero, free tilt, a hero who turns the head where you look and breathes, shivers and leans, and an option to keep your camera where the game has a fixed one. |

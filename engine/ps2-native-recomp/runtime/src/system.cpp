@@ -1406,8 +1406,21 @@ struct Limb { int from, to; float radius; };
 // game steps 30 or 60 times a second with the frame-rate constants (rawdanger-recomp docs/FRAMERATE.md, v0.10.2).
 float g_step_dt = 1.0f / 20.0f;
 std::uint64_t g_step_frame = 0;
+std::atomic<std::uint64_t> g_steps{0};   // v0.10.3: the hero's steps so far (Settings > Debug > Stats: game steps a second)
 void note_step() {
+    g_steps.fetch_add(1, std::memory_order_relaxed);
     const std::uint64_t now = frame_count();
+    static const bool log = std::getenv("PS2_STEPS_LOG") != nullptr;   // v0.10.3: the steps counted every 5 s of vblanks (tests, reports)
+    static std::uint64_t log_from = 0, log_steps = 0;
+    if (log) {
+        if (!log_from) log_from = now, log_steps = g_steps.load();
+        else if (now >= log_from + 300) {
+            std::fprintf(stderr, "[steps] vblanks %llu-%llu: %llu steps (%.1f a second)\n", static_cast<unsigned long long>(log_from),
+                         static_cast<unsigned long long>(now), static_cast<unsigned long long>(g_steps.load() - log_steps),
+                         static_cast<double>(g_steps.load() - log_steps) * 60.0 / static_cast<double>(now - log_from));
+            log_from = now, log_steps = g_steps.load();
+        }
+    }
     if (g_step_frame != 0 && now > g_step_frame && now - g_step_frame < 30)
         g_step_dt += (std::clamp(static_cast<float>(now - g_step_frame) / 60.0f, 1.0f / 60.0f, 0.25f) - g_step_dt) * 0.25f;
     g_step_frame = now;
@@ -1772,6 +1785,8 @@ struct HeadFollowSetup {
 };
 HeadFollowSetup g_head_setup;
 }  // namespace
+std::uint64_t hero_steps() { return g_steps.load(std::memory_order_relaxed); }
+
 float hero_wetness() {
     const HeroWet &h = hero_wet_setup();
     float wet = -1.0f;

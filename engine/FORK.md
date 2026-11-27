@@ -179,6 +179,11 @@
   degrees in a bone's local turn goes half the way each step; the spine and chest get breathing standing still, a hunch when
   wet, shivering when cold and a lean into turns, turned in the world after they are built (the head and arms follow).
   Settings > Controls > Livelier hero (keys.ini anim_layers, on); Settings > Debug: the layers x4.
+- **0047-rd-ao-options-bars-steps** (rawdanger-recomp v0.10.3): the AO after the game's colour filter (it came out two or three
+  times as dark under it), closer occluders only, gentler, once per game pixel (9x less work at 3x); the PC rows' spinner values
+  drawn by the window in the game's font (the game draws a row's sprites from its word sheet only); the cutscene bars found
+  while they slide in and out; the measured game steps in Settings > Debug > Stats and the log (PS2_STEPS_LOG); Pause in
+  background off by default.
 - **0046-rd-ease-by-time** (rawdanger-recomp v0.10.2): the hero's head turn and the wet look ease by time (the measured time
   between two of the hero's steps), so they keep their pace at 30 or 60 game steps a second.
 - **0045-rd-ao-without-depth-filter** (rawdanger-recomp v0.10.1): the ambient occlusion also where the game has no depth

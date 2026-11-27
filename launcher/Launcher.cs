@@ -28,7 +28,7 @@ namespace RawDangerLauncher
 {
     public static class Program
     {
-        public const string Version = "0.10.2";
+        public const string Version = "0.10.3";
         public const string AppName = "Raw Danger PC";
         public static bool Restart;
 
@@ -107,6 +107,7 @@ namespace RawDangerLauncher
             if (x.Contains("original ps2 post processing")) return Lang.L("PS2 post-processing filter", "PS2ポストプロセスフィルター");
             if (x.Contains("post-processing") || x.Contains("post processing")) return Lang.L("no blur filter", "ぼかし無効");
             if (x.StartsWith("skip intro logos")) return Lang.L("no intro logos", "起動ロゴなし");
+            if (x.StartsWith("skip opening movie")) return Lang.L("no opening movie", "オープニングムービーなし");
             if (x.StartsWith("free camera tilt")) return Lang.L("free camera tilt (look further up and down)", "カメラの上下を広く");
             if (x.StartsWith("direct mouse look")) return Lang.L("direct mouse look", "マウスで直接視点操作");
             if (x.Contains("debug")) return Lang.L("debug text", "デバッグ表示");
@@ -830,12 +831,32 @@ namespace RawDangerLauncher
                 game.EnableRaisingEvents = true;
                 game.Exited += delegate
                 {
+                    try { CopyReports(s, name); } catch (Exception e) { Program.Trace("reports: " + e.Message); }
                     try { SavesAfter(s, name); if (Partner(s, name) != "") Switch(s, name); }
                     catch (Exception e) { Program.Trace("language switch: " + e.Message); }
                     finally { Interlocked.Decrement(ref running); }
                 };
             }
             catch (Exception e) { Program.Trace("language switch: " + e.Message); }
+        }
+
+        // v0.10.3: the F9 reports (and their pictures) the game wrote into its folder (games\<name>\reports) are copied to the
+        // launcher's logs\reports\<name>, next to the other logs, where they are easy to find and send.
+        static void CopyReports(Settings s, string name)
+        {
+            string from = Path.Combine(Games.Folder(s, name), "reports");
+            if (!Directory.Exists(from)) return;
+            string to = Path.Combine(Path.Combine(Path.Combine(Settings.ExeDir, "logs"), "reports"), name);
+            int n = 0;
+            foreach (string f in Directory.GetFiles(from))
+            {
+                string dest = Path.Combine(to, Path.GetFileName(f));
+                if (File.Exists(dest) && File.GetLastWriteTimeUtc(dest) >= File.GetLastWriteTimeUtc(f)) continue;
+                Directory.CreateDirectory(to);
+                File.Copy(f, dest, true);
+                n++;
+            }
+            if (n > 0) Program.Trace("reports: " + n + " file(s) copied to " + to);
         }
 
         static void Switch(Settings s, string name)

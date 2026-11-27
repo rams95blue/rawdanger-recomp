@@ -768,13 +768,15 @@ std::atomic<int> g_bar_opacity{[] { const char *v = std::getenv("PS2_BAR_OPACITY
     if (attr & 0x10u) return 0;   // textured
     const Vertex &a = s.queue[0], &b = s.queue[1];
     if (b.r | b.g | b.b) return 0;
-    if (b.a < 0x80) return 0;
+    // v0.10.3: the bars as they slide in and out between play and a cutscene count too (thin, or fading in with alpha under 0x80):
+    // only the finished bars were found, so "Cutscene bars: OFF" still showed them in every transition
+    if (b.a < 0x10) return 0;
     const Context &c = s.ctx[(attr >> 9) & 1u];
     const int ofx = static_cast<int>(c.xyoffset & 0xFFFFu), ofy = static_cast<int>((c.xyoffset >> 32) & 0xFFFFu);
     const int x0 = (static_cast<int>(std::min(a.x, b.x)) - ofx) >> 4, x1 = (static_cast<int>(std::max(a.x, b.x)) - ofx) >> 4;
     const int y0 = (static_cast<int>(std::min(a.y, b.y)) - ofy) >> 4, y1 = (static_cast<int>(std::max(a.y, b.y)) - ofy) >> 4;
     if (x0 > 0 || x1 < 512) return 0;
-    const bool bar = (y0 <= 0 && y1 >= 16 && y1 <= 120) || (y1 >= 400 && y0 >= 300 && y0 <= 432);
+    const bool bar = (y0 <= 0 && y1 >= 1 && y1 <= 120) || (y1 >= 400 && y0 >= 300 && y0 <= 447);
     if (!bar) return 0;
     return (attr & 0x40u) ? 1 : 2;
 }
@@ -1097,7 +1099,21 @@ std::uint32_t apply(const Walk &w, std::uint32_t c, std::uint32_t z, const std::
     return static_cast<std::uint32_t>(ch[0]) | static_cast<std::uint32_t>(ch[1]) << 8 | static_cast<std::uint32_t>(ch[2]) << 16 | static_cast<std::uint32_t>(a) << 24;
 }
 
+void run_ao(std::uint32_t zbp, std::uint32_t zpsm);
+void finish_pass();
+// v0.10.3: the AO goes after the colour filter, not before it. The filter's brightness curve is steep in the dark (the haze and
+// contrast of each map's preset): AO laid under it came out two or three times as dark as set, black halos round people against
+// a wall. After it, the AO darkens the finished colours by what it is set to. Still before the HUD (the walk's end is the first
+// draw after it).
 void finish() {
+    Walk &w = g_walk;
+    if (!w.active) return;
+    const std::uint32_t zbp = w.zbp, zpsm = w.zpsm;
+    finish_pass();
+    run_ao(zbp, zpsm);
+}
+
+void finish_pass() {
     Walk &w = g_walk;
     if (!w.active) return;
     w.active = false;
@@ -1247,8 +1263,7 @@ bool step(const State &s, std::uint64_t attr) {
         if (!(sprite && textured && fbw == 1 && fpsm == 0x0A && tpsm == 0x0A && tbw == 1 && tbp == zbp)) return true;
         w = Walk{};   // the walk starts: the first page of the depth copied as 16-bit into a 64-wide buffer
         w.active = true, w.zbp = zbp, w.zpsm = 0x30u | ((static_cast<std::uint32_t>(c.zbuf >> 24)) & 0xFu), w.buf = fbp, w.pages = 1, w.copies = 1;
-        run_ao(zbp, w.zpsm);
-        g_nofilter.walk_seen = 60, g_nofilter.zdraws = 0;
+        g_nofilter.walk_seen = 60, g_nofilter.zdraws = 0;   // (the AO: when the walk ends, finish())
         return true;
     }
     if (fbw != 1) {   // the walk is over
