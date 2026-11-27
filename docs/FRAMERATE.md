@@ -105,3 +105,23 @@ overlays (the law extrapolated, as for the program).
   host CPU running it at 1.9 cores in a busy room (reported: 40-58 FPS). A frame rate above 60 (the picture drawn more often
   than the game steps) would need the pictures in between made up; not planned.
 
+
+## v0.10.4: "20 FPS shown at 60 Hz", and what an uncapped frame rate takes
+
+- **Yes, the PS2 game is 20 updates a second.** The US program waits 3 vblanks (G+0x24C) between two steps of its world, and it
+  draws one picture per step: 20 pictures a second, each shown on 3 refreshes of a 60 Hz screen. The engine shows that as
+  60 Hz, but only every third refresh is a new picture. The 30 and 60 options change the step itself (the European constants),
+  so the world moves 30 or 60 times a second at the game's pace.
+- **Uncapped (more pictures than steps), the plan**: the game stays at its step rate (20 or 30, whichever is exact) and the
+  engine makes the pictures in between itself. The pieces already exist: every 3D draw goes through VU1 programs fed with the
+  camera's and the bones' matrices (VIF UNPACKs), the bones are built by one function the engine already runs (host call 202),
+  and the camera by another (host call 203).
+  1. Record a step's VU1 packet stream (the UNPACKs and MSCALs of path 1) and its 2D draws (paths 2 and 3) once.
+  2. For each picture between two steps, replay that stream with the matrices blended: the camera between its last two
+     places, each bone between its last two turns (quaternions), the world positions by the same fraction.
+  3. Draw the 2D (HUD, texts) from the latest step only, so menus never lag.
+  4. A limiter: a frame-rate cap in the settings (60 / 120 / 144 / the screen's / off) and the presentation paced to it.
+  The costs: one step of latency (the picture shows a moment between the last two steps), the replays cost a full draw each,
+  particles and anything the game places without a matrix stay at the step's place, and matching each matrix to its previous
+  step needs a stable key per object (the VU1 program and its data address work for most). Days of work; the first test is the
+  camera alone (everything blended only by the camera), which already makes turning smooth.

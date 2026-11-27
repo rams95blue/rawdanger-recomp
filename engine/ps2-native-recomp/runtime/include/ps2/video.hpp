@@ -19,6 +19,10 @@ void set_reverb(bool on);
 // rawdanger-recomp: the inner resolution while the game runs (1 to 8 times the console's), at the next picture; no restart
 void set_internal_scale(unsigned scale);
 unsigned internal_scale();
+// rawdanger-recomp (v0.10.4): the highest inner resolution the graphics device can hold (Direct3D 12: 4x), and the graphics API in use
+// ("Direct3D 12", "Vulkan", ...; "none" before the GPU started or without it)
+unsigned max_internal_scale();
+const char *graphics_api();
 // rawdanger-recomp: the SMAA preset when SMAA is on: 1 low, 2 medium, 3 high, 4 ultra
 void set_smaa_quality(unsigned quality);
 // rawdanger-recomp: the filter of upscaled 2D art (0 soft, 1 sharp, 2 sharpest), at the next picture

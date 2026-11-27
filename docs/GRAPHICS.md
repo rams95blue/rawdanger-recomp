@@ -4,7 +4,8 @@ In the game: F1 -> **Graphics and sound** (saved in `keys.ini` next to the memor
 
 | Setting | What it does |
 |---|---|
-| Internal resolution | 640 x 448 (the console's) times 1 to 4, or **auto**: the one whose picture is at least as tall as the screen, so the window only ever shows it reduced (supersampled), never enlarged; no filter is needed then. Chosen when the game starts. Above 1x the engine draws everything with its compute painter (the fast drawing path needs 1x), so it costs more. |
+| Internal resolution | 640 x 448 (the console's) times 1 to 8, or **auto**: the one whose picture is at least as tall as the screen, so the window only ever shows it reduced (supersampled), never enlarged; no filter is needed then. Changes at once. **Direct3D 12 holds 4x at most** (it binds 128 MB of one buffer, and the picture's working memory is 8 MB times the scale squared); higher asks are held to 4x and the menu says so (v0.10.4; before, 5x and up failed and the game stopped or showed nothing, which is what auto picked on a 4K screen). Vulkan drivers mostly allow 8x. Above 1x the engine draws everything with its compute painter (the fast drawing path needs 1x), so it costs more. |
+| Graphics API (v0.10.4) | **Auto** (Direct3D 12 on Windows, the faster painter on the PCs measured, but Vulkan first when the resolution asked for is above 4x), **Vulkan** or **Direct3D 12**; from the next start (keys.ini `graphics_api`). The one asked for is tried first and the other one when it cannot start, so a PC without a Vulkan driver still gets a picture. The log names the API used (`[gpu] graphics API: ...`). Which is faster depends on the card and driver: try both (Settings > Debug > Stats shows the frame time). |
 | Game runs behind the F1 menu | **On** (default): the game goes on while the F1 menu is open (its input is held back); off: it waits, as before. With *Pause in background* on, leaving the window still makes it wait. |
 | Anti-aliasing | Off, *smooth edges* (an edge-direction blend along jagged stairs, FXAA-like, done while enlarging) or **SMAA 1x** (on the console picture before it is enlarged: finds edges by brightness, measures each edge's length and shape, and blends just enough across it; a port of the MIT reference implementation, HIGH preset). |
 | Upscale filter | How a smaller picture is enlarged to the window. **Raw pixels** (the default now): every console pixel stays a hard square, only the border between two pixels is blended over one screen pixel, so a window of any size shows clean, even pixels without a blur. Soft (TV): a plain blend. Sharp: a cubic enlargement with light contrast-adaptive sharpening. **FSR 1**: AMD's edge-adaptive enlargement (EASU): finds the direction and length of the edge under each screen pixel and stretches a sharp lobe along it, clamped to the nearest source pixels, so slanted edges and text grow clean without blur or halos; best for a 1x picture on a big screen. Each also with *smooth edges* (an edge-direction blend along jagged stairs, FXAA-like). |
@@ -18,6 +19,15 @@ SMAA works (a debug view of its passes shows the edges found, the weights and wh
 resolution the game normally runs at (AUTO: the picture at least as tall as the screen, then reduced to the window) the picture is
 already supersampled: the stair steps it would smooth are smaller than a screen pixel, so switching it shows little or nothing.
 Anti-aliasing matters at 1x and 2x. v0.7.7 also reads SMAA's search table with point filtering, as the reference does.
+
+v0.10.4, measured on the same frame (`PS2_PRESENT_DUMP=<vblank>,<file.ppm>` writes the picture as the window gets it, after
+SMAA, with SMAA's edges and weights beside it): in a street at night SMAA changed 0.4 % of the pixels, and the stairs on the
+hero's outline stayed. Raw Danger's pictures are dark (night, rain, the filter's haze: most pixels at 5 to 25 % brightness), and
+on the plain luma almost no edge passes the reference's threshold (0.1). The edge test now compares the square root of the
+brightness, which spreads the dark tones: about twice the pixels get smoothed there, bright scenes nearly as before. It stays a
+light touch: SMAA 1x moves colour across an edge by a fraction of a console pixel, so at 1x on a big screen (each console pixel
+a block of screen pixels) the steps are still visible. For clean edges, raise the internal resolution: 3x or 4x is real
+supersampling, and it is what *auto* picks.
 
 ## Original PS2 Post Processing Filter (the game's colour filter, the old "blur filter")
 
@@ -136,9 +146,11 @@ version darkens the hero as the clothes get wet.
   bones' world places, see docs/CAMERA.md) and projects twelve limbs (torso, neck, head, arms with the hands, legs with the feet,
   the skirt or the coat tails) with the game's own world-to-screen matrix (0x5FD690) into capsules: two ends, a radius, and the
   nearest and farthest depth.
-- **The look**: the AO pass (before the game's colour filter) darkens the pixels inside a capsule whose depth is between the
-  capsule's nearest and farthest by up to 38 % and deepens their colours by 25 %, with a soft edge, eased in and out as the
-  wetness changes (about two seconds).
+- **The look**: the AO pass darkens the pixels inside a capsule whose depth is between the capsule's nearest and farthest, with
+  a soft edge, eased in and out as the wetness changes (about two seconds). v0.10.4: since v0.10.3 the pass runs after the game's
+  colour filter, whose dark-end curve used to deepen the darkening two or three times over, so soaked looked almost like dry
+  (measured: 0.1 of 255 on average over the frame). Now: colours 40 % richer, a steeper curve (the darks darken most, a
+  highlight stays) and 40 % darker: wet hair goes dark, the sweater deep red.
 - **What it misses**: a shoe or a raised hand can fall just outside the capsules, and the look has no highlight yet.
 - Settings > Picture > Wet look (keys.ini `wet_look`, on); Settings > Debug: a forced wetness and the capsules drawn in blue.
 

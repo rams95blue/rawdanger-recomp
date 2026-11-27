@@ -1820,8 +1820,12 @@ fn game_ao(@builtin(global_invocation_id) gid: vec3<u32>) {
             col = mix(col, vec3<f32>(40.0, 120.0, 255.0), wet * 0.6);   // debug: the capsules shown plainly
         } else if (wet > 0.0) {
             // v0.9.5: wet cloth and hair: water fills the fibres, less light scatters back (darker) and what does is richer in colour
+            // v0.10.4: stronger, now that the pass runs after the colour filter (whose dark-end curve used to deepen it two or
+            // three times over): a steeper curve (wet cloth darkens its darks most, a highlight stays), richer colour, darker
             let luma = dot(col, vec3<f32>(0.299, 0.587, 0.114));
-            col = mix(col, (vec3<f32>(luma) + (col - vec3<f32>(luma)) * 1.25) * 0.62, wet);
+            let rich = max(vec3<f32>(luma) + (col - vec3<f32>(luma)) * 1.4, vec3<f32>(0.0));
+            let curved = pow(rich / 255.0, vec3<f32>(1.25)) * 255.0;
+            col = mix(col, curved * 0.6, wet);
         }
         let o = vec3<u32>(clamp(col, vec3<f32>(0.0), vec3<f32>(255.0)));
         store(fl, k, o.x | (o.y << 8u) | (o.z << 16u) | (c & 0xFF000000u));

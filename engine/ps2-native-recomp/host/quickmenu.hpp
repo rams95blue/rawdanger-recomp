@@ -38,6 +38,7 @@ enum class Command {
     widescreen,    // Graphics page: the game's widescreen option (its recomp.ini section with aspect = 16:9)
     menu_game_runs,   // Settings > Display: the game goes on behind this menu (off: it waits)
     popup_size,       // Settings > Display: the size of the pop-ups (small / normal / large / huge)
+    graphics_api,     // rawdanger-recomp (v0.10.4) Settings > Display: auto / Vulkan / Direct3D 12, at the next start
     field_of_view,    // Settings > Picture: the camera's field of view (80 % to 150 % of the game's)
     ambient_occlusion, // Settings > Picture: shading in creases and corners from the game's depth (off / light / strong)
     filter_pass,      // Settings > Picture: the post processing in one GPU pass or drawn the game's way (to compare)
@@ -73,6 +74,9 @@ struct Values {
     int scale_now = 1;      // the inner resolution the game runs at
     int scale_next = 1;     // the one written in keys.ini for the next start
     bool scale_locked = false;  // PS2_SCALE is set: keys.ini does not count
+    int scale_max = 8;          // the highest the graphics device can hold (Direct3D 12: 4x)
+    int graphics_api = 0;       // keys.ini's choice: 0 auto, 1 Vulkan, 2 Direct3D 12
+    std::string graphics_api_now;  // the API this run uses ("Vulkan", "Direct3D 12")
     int sharp_now = 1, sharp_next = 1;  // the 2D art filter (0 soft, 1 sharp, 2 sharpest): this run's, and keys.ini's for the next start
     bool sharp_locked = false;  // PS2_SHARP_2D is set
     bool fullscreen = false;

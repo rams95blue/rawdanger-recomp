@@ -1523,6 +1523,9 @@ void menu_paint(bool show_again) {
         v.scale_now = g_scale_now;
         v.scale_next = g_scale_next;
         v.scale_locked = g_scale_locked;
+        v.scale_max = static_cast<int>(ps2::max_internal_scale());
+        v.graphics_api = g_keys.graphics_api;
+        v.graphics_api_now = ps2::graphics_api();
         v.sharp_now = g_sharp_now;
         v.sharp_next = g_sharp_next;
         v.sharp_locked = g_sharp_locked;
@@ -2323,6 +2326,12 @@ void native_option_rows() {
     // Display
     spin("Resolution", "Internal resolution", [] { return g_scale_next == keymap::kScaleAuto ? std::string("AUTO") : std::to_string(g_scale_next) + "x"; },
          command(Command::scale));
+    spin("Graphics API", "Vulkan or Direct3D 12, at the next start (Vulkan allows more than 4x)", [] {
+            const std::string now = ps2::graphics_api();
+            if (g_keys.graphics_api == 1) return std::string("VULKAN");
+            if (g_keys.graphics_api == 2) return std::string("DIRECT3D 12");
+            return now == "Vulkan" ? std::string("AUTO (VULKAN)") : std::string("AUTO (DIRECT3D 12)");
+        }, command(Command::graphics_api));
     spin("Window size", "The window's size", [] {
             if (!g_window || (SDL_GetWindowFlags(g_window) & SDL_WINDOW_FULLSCREEN)) return std::string("FULL SCREEN");
             int ww = 0, wh = 0;
@@ -2368,8 +2377,9 @@ void native_option_rows() {
             static const char *const kFilters[] = {"RAW", "SOFT", "SHARP", "FSR 1"};
             return std::string(kFilters[std::clamp(g_look / 2, 0, 3)]);
         }, [](int d) { cycle_look(d); });
-    spin("Field of view", "How wide the camera sees", [] {
-            return g_keys.field_of_view == 100 ? std::string("100 % (PS2)") : std::to_string(g_keys.field_of_view) + " %";
+    spin("Field of view", "How wide the camera sees, in degrees across", [] {
+            const int game = keymap::game_field_of_view(ps2::g_options.widescreen);
+            return g_keys.field_of_view <= 0 ? std::to_string(game) + "\xC2\xB0 (PS2)" : std::to_string(g_keys.field_of_view) + "\xC2\xB0";
         }, command(Command::field_of_view));
     spin("Anti-aliasing", "Smooth edges", [] {
             static const char *const kAa[] = {"OFF", "EDGES", "SMAA LOW", "SMAA MEDIUM", "SMAA HIGH", "SMAA ULTRA", "FXAA"};
@@ -2661,11 +2671,19 @@ void menu_command(quickmenu::Command c, int step) {
         set_notice(v == 0 ? std::string("Master volume: muted") : "Master volume: " + std::to_string(v) + "%");
         break;
     }
-    case Command::field_of_view:
-        g_keys.field_of_view = std::clamp(g_keys.field_of_view + (step < 0 ? -10 : 10), 80, 150);
+    case Command::field_of_view: {
+        // v0.10.4: degrees across (the game's own first, then 45 to 110 in fives), round at the ends
+        int at = 0;
+        for (int k = 0; k < keymap::kFieldsOfViewCount; ++k)
+            if (keymap::kFieldsOfView[k] == g_keys.field_of_view) at = k;
+        at = (at + (step < 0 ? keymap::kFieldsOfViewCount - 1 : 1)) % keymap::kFieldsOfViewCount;
+        g_keys.field_of_view = keymap::kFieldsOfView[at];
         rewrite_keys_file([](const std::string &t) { return keymap::with_field_of_view(t, g_keys.field_of_view); }, "field of view");
-        set_notice("Field of view: " + std::to_string(g_keys.field_of_view) + " %" + (g_keys.field_of_view == 100 ? " (as on the PS2)" : ""));
+        const int game = keymap::game_field_of_view(ps2::g_options.widescreen);
+        set_notice(g_keys.field_of_view <= 0 ? "Field of view: " + std::to_string(game) + " degrees across (as on the PS2)"
+                                             : "Field of view: " + std::to_string(g_keys.field_of_view) + " degrees across");
         break;
+    }
     case Command::ambient_occlusion: {
         static const char *const kLevels[] = {"off", "light", "strong"};
         g_keys.ambient_occlusion = (g_keys.ambient_occlusion + (step < 0 ? 2 : 1)) % 3;
@@ -2834,12 +2852,24 @@ void menu_command(quickmenu::Command c, int step) {
                 SDL_DisplayMode mode;
                 use = SDL_GetDesktopDisplayMode(0, &mode) == 0 && mode.h > 0 ? std::clamp((mode.h + 447) / 448, 1, 6) : 2;
             }
+            const int most = static_cast<int>(ps2::max_internal_scale());
+            const bool held = use > most;
+            if (held) use = most;   // (gpu.cpp holds it too; said here so the player knows why)
             ps2::set_internal_scale(static_cast<unsigned>(use));
             g_scale_now = g_scale_next;
-            set_notice("Internal resolution " + std::to_string(640 * use) + " x " + std::to_string(448 * use) + (g_scale_next == keymap::kScaleAuto ? " (auto)" : ""));
+            set_notice("Internal resolution " + std::to_string(640 * use) + " x " + std::to_string(448 * use) + (g_scale_next == keymap::kScaleAuto ? " (auto)" : "") +
+                       (held ? std::string(" (the most ") + ps2::graphics_api() + " holds; Vulkan allows more)" : std::string()));
             std::fprintf(stderr, "[menu] resolution %dx, now\n", use);
         }
         break;
+    case Command::graphics_api: {
+        g_keys.graphics_api = (g_keys.graphics_api + step + 3) % 3;
+        rewrite_keys_file([](const std::string &t) { return keymap::with_graphics_api(t, g_keys.graphics_api); }, "graphics API");
+        static const char *const kNames[] = {"auto", "Vulkan", "Direct3D 12"};
+        set_notice(std::string("Graphics API: ") + kNames[g_keys.graphics_api] + " from the next start (now " + ps2::graphics_api() + ")");
+        std::fprintf(stderr, "[menu] graphics API %s at the next start\n", kNames[g_keys.graphics_api]);
+        break;
+    }
     case Command::sharp_2d:
         if (g_sharp_locked) {
             set_notice("Text and menus are set by PS2_SHARP_2D; remove it to choose here");
@@ -3332,7 +3362,10 @@ void poll() {
         }
         if (set) {
             const auto get = [](std::uint32_t a) { const std::uint32_t w = ps2::ld32(a); float f; std::memcpy(&f, &w, 4); return f; };
-            const float want = 100.0f / static_cast<float>(std::clamp(g_keys.field_of_view, 80, 150));
+            // v0.10.4: degrees across. The game's half-width at the screen distance: 320 / 768 at 4:3, 320 / 576 with the 16:9 patch
+            const float game_tan = ps2::g_options.widescreen ? 320.0f / 576.0f : 320.0f / 768.0f;
+            const float want = g_keys.field_of_view <= 0 ? 1.0f
+                                                         : game_tan / std::tan(static_cast<float>(std::clamp(g_keys.field_of_view, 30, 130)) * 0.5f * 0.0174533f);
             const float now = get(block + zoom);
             if ((ps2::ld32(block + state) & 0xFFu) == 0 && (now == 1.0f || now == written) && now != want) {
                 std::uint32_t w; std::memcpy(&w, &want, 4);
@@ -3961,6 +3994,18 @@ bool open_window(bool fullscreen) {
     } else if (!g_scale_locked && g_keys.scale >= 1 && g_keys.scale <= 8) {
         ps2::os::set_env("PS2_SCALE", std::to_string(g_keys.scale));
         std::fprintf(stderr, "[video] resolution %dx from %s (scale = %d)\n", g_keys.scale, g_keys_path.c_str(), g_keys.scale);
+    }
+    // rawdanger-recomp (v0.10.4): the graphics API (keys.ini graphics_api), unless PS2_GPU_BACKEND is set. Vulkan or Direct3D 12 is
+    // tried first and the other one when it cannot start. Auto: Windows' default (Direct3D 12, the faster painter on the PCs measured),
+    // but Vulkan first when the resolution asked for is more than Direct3D 12 can hold (it binds 128 MB of one buffer: 4x at most).
+    if (ps2::os::env("PS2_GPU_BACKEND").empty()) {
+        const int want_scale = std::atoi(ps2::os::env("PS2_SCALE").c_str());
+        const char *api = g_keys.graphics_api == 1 ? "vulkan-first" : g_keys.graphics_api == 2 ? "dx12-first" : want_scale > 4 ? "vulkan-first" : nullptr;
+        if (api) {
+            ps2::os::set_env("PS2_GPU_BACKEND", api);
+            std::fprintf(stderr, "[video] graphics API: %s first (%s)\n", api[0] == 'v' ? "Vulkan" : "Direct3D 12",
+                         g_keys.graphics_api ? "keys.ini graphics_api" : "auto: the resolution is above 4x");
+        }
     }
     // The picture pace (ps2/pace.hpp): the 'pace' line of keys.ini, unless PS2_PACE is set. The runtime reads it at boot, after this.
     if (!g_keys.pace.empty() && ps2::os::env("PS2_PACE").empty()) {

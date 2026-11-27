@@ -179,6 +179,15 @@
   degrees in a bone's local turn goes half the way each step; the spine and chest get breathing standing still, a hunch when
   wet, shivering when cold and a lean into turns, turned in the world after they are built (the head and arms follow).
   Settings > Controls > Livelier hero (keys.ini anim_layers, on); Settings > Debug: the layers x4.
+- **0048-rd-vulkan-scale-smaa-lookup-fov** (rawdanger-recomp v0.10.4): Settings > Display > Graphics API (keys.ini
+  `graphics_api = auto | vulkan | dx12`; `PS2_GPU_BACKEND=vulkan-first | dx12-first` tries that API first and the other when it
+  cannot start; auto keeps Direct3D 12 on Windows but takes Vulkan first above 4x); the inner resolution held to what the device
+  binds of one buffer (Direct3D 12: 128 MB, so 4x; 5x and up failed every bind group and the game stopped or showed nothing);
+  SMAA's edge test on a square-root brightness curve (the dark pictures had almost no edge past its threshold);
+  `PS2_PRESENT_DUMP=<vblank>,<file.ppm>` (the picture as the window gets it, with SMAA's edges and weights); host call 203
+  (`PS2_CAMERA_FRAME`, Raw Danger's own by default) runs the camera's step and tilts the view up past the ground while the orbit
+  is at its lowest; the field of view in degrees across (`field_of_view = ps2 | N deg`, old per cent values converted); the wet
+  look stronger (the pass runs after the colour filter since 0047).
 - **0047-rd-ao-options-bars-steps** (rawdanger-recomp v0.10.3): the AO after the game's colour filter (it came out two or three
   times as dark under it), closer occluders only, gentler, once per game pixel (9x less work at 3x); the PC rows' spinner values
   drawn by the window in the game's font (the game draws a row's sprites from its word sheet only); the cutscene bars found

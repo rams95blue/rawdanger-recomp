@@ -28,7 +28,7 @@ namespace RawDangerLauncher
 {
     public static class Program
     {
-        public const string Version = "0.10.3";
+        public const string Version = "0.10.4";
         public const string AppName = "Raw Danger PC";
         public static bool Restart;
 
@@ -479,7 +479,8 @@ namespace RawDangerLauncher
                 if (!System.IO.File.Exists(optIndex) || !System.IO.File.Exists(optArt) || System.IO.File.GetLastWriteTimeUtc(optIndex) < System.IO.File.GetLastWriteTimeUtc(iso) ||
                     recompNewer || jpNewer || !System.IO.File.ReadAllText(optArt).Contains("A:up\t") ||
                     !System.IO.File.ReadAllText(optArt).Contains("L:Keys on screen\t") ||   // v0.8.0 rows
-                    !System.IO.File.ReadAllText(optArt).Contains("L:Livelier hero\t"))   // v0.9.7 rows (and v0.9.5's Wet look, v0.9.4's Head follows camera, v0.9.2's Fixed cameras)
+                    !System.IO.File.ReadAllText(optArt, System.Text.Encoding.UTF8).Contains("D:58\u00b0 (PS2)\t") ||   // v0.10.4: the field of view in degrees
+                    !System.IO.File.ReadAllText(optArt).Contains("L:Graphics API\t"))   // v0.10.4: the Graphics API row ; also v0.9.7 rows (and v0.9.5's Wet look, v0.9.4's Head follows camera, v0.9.2's Fixed cameras)
                 {
                     string python = Path.Combine(Path.Combine(Path.Combine(Path.Combine(s.PnrDir, "tools"), "portable"), "python"), "python.exe");
                     if (!System.IO.File.Exists(python)) python = "python";
@@ -577,6 +578,7 @@ namespace RawDangerLauncher
                     psi.EnvironmentVariables["PS2_LENS_MOTION"] = "@5FD7D0,310,1B0";   // the player's movement seen from the camera
                     psi.EnvironmentVariables["PS2_FREE_CAMERA"] = "C9,17C9B0,17C250,17F610,48F4E0,3EC,A,48F488=15";   // v0.9.0: the follow camera in the places with a fixed one (pnach [Free camera everywhere]; keys.ini free_camera, off): host call 201 at 0x17C9B0 runs 0x17C250, switching mode 10 to 0 with 0x17F610 while playing (scene 21) and no cutscene bars
                     psi.EnvironmentVariables["PS2_CAMERA_ORBIT"] = "48F4E0,35C,3B8,354,C8,177270";   // v0.9.0: the orbit camera (pnach [Orbit camera]): the camera block's pointer, its height (the two distances after it), look-at offset and base height, host call 200, called at 0x177270
+                    psi.EnvironmentVariables["PS2_CAMERA_FRAME"] = "CB,17DC88,17D210,48F4E0,3EC";   // v0.10.4: looking up past the ground (pnach [Orbit camera], host call 203 at 0x17DC88 runs the camera's step 0x17D210 and tilts the direction it looks in, +0x1B0 of the camera block, up)
                     psi.EnvironmentVariables["PS2_HEAD_FOLLOW"] = "CA,323EA4,323FB0,5EAC80,48F3E4,F0,7,48F4E0,3EC,160,310,48F488=15";   // v0.9.4: the hero's head looks where the camera looks (pnach [Head follows camera]; keys.ini head_follow, on): host call 202 at 0x323EA4 builds each bone's world matrix (0x323FB0) and turns the player's head (bone 7 of the model at character +0xF0) toward the active camera's heading (+0x160 to +0x310) while the follow camera (mode 0 at +0x3EC) runs in play (scene 21)
                     psi.EnvironmentVariables["PS2_HERO_WET"] = "48F730,5C38,24,14,8,1C,30,48F3E4,64,5FD690,48F4E0,160";   // v0.9.5: the wet look and the Debug tab's dry / soak: the thing pool (gp-0x4740), the player's worn things' wetness (+0x30, 0-100), the world-to-screen matrix 0x5FD690 and the camera's place
                     if (name == Enhanced.Name && Enhanced.BuiltSteps(s) == "60")

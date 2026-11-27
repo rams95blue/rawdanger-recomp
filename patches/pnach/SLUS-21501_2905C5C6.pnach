@@ -72,11 +72,17 @@ patch=1,EE,00176FD4,word,AC007F10
 patch=1,EE,00176FEC,word,4602B580
 
 [Orbit camera]
-description=Up / down on the camera circles the hero (rawdanger-recomp v0.9.0). The game answers up / down on the right stick (and the mouse) by changing a height between two limits and sliding the camera along the ground, while the point it looks at moves with it, so the camera tilts rather than goes round. These two words call the engine where that height step starts; with the setting on (Settings > Controls > Camera up/down, keys.ini camera_orbit) the engine turns the camera's place round the point it looks at, keeping its distance, from 20 degrees under to 75 over, and the game's own height step is left at 0; with it off the game's tilt is as on the PS2. Built in (code; RawDangerPC.exe sets PS2_CAMERA_ORBIT).
+description=Up / down on the camera circles the hero (rawdanger-recomp v0.9.0). The game answers up / down on the right stick (and the mouse) by changing a height between two limits and sliding the camera along the ground, while the point it looks at moves with it, so the camera tilts rather than goes round. These two words call the engine where that height step starts; with the setting on (Settings > Controls > Camera up/down, keys.ini camera_orbit) the engine turns the camera's place round the point it looks at, keeping its distance, from 20 degrees under to 75 over, and the game's own height step is left at 0; at the lowest, more up tilts the view up to the sky (v0.10.4); with it off the game's tilt is as on the PS2. Built in (code; RawDangerPC.exe sets PS2_CAMERA_ORBIT).
 // 0x00177270: lw $v0, -0x4990($gp) -> jal 0x0FF00320 (the engine's host call 200: loads f2 = camera+0x35C as the next word did, then turns the camera)
 // 0x00177274: lwc1 $f2, 0x35C($v0) -> lw $v0, -0x4990($gp) (moved into the call's delay slot: the camera block's address)
 patch=1,EE,00177270,word,0FFC00C8
 patch=1,EE,00177274,word,8F82B670
+// v0.10.4: looking up past the ground. The game makes the camera once a step in 0x17DC80, whose first call (0x17DC88) is the camera's
+// step (0x17D210, it leaves the direction looked in at +0x1B0); the view is then made from that direction. This word makes that call
+// a call to the engine (host call 203), which runs the step itself and, while the orbit holds the camera at its lowest and up is
+// still held, tilts the direction up (to about 85 degrees over the horizon) instead of stopping at the ground.
+// 0x0017DC88: jal 0x0017D210 -> jal 0x0FF0032C (the engine's host call 203, which calls 0x17D210 itself)
+patch=1,EE,0017DC88,word,0FFC00CB
 
 [Free camera everywhere]
 description=The follow camera also in the places where the game has a fixed one (rawdanger-recomp v0.9.0). The game keeps one camera block per camera mode and switches between them in one function (0x17F610); the places that show the scene from a fixed spot use mode 10, set from the map's data, as do the cutscenes' shots. This word makes the call that runs the active camera each frame (0x17C9B0) a call to the engine, which runs it itself; with the setting on (Settings > Controls > Fixed cameras: OFF, keys.ini free_camera; off by default), while playing, a fixed camera with no cutscene bars on screen for a second is switched to the follow camera the way the game does it, so the cutscenes keep their shots. Built in (code; RawDangerPC.exe sets PS2_FREE_CAMERA).

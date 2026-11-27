@@ -77,6 +77,17 @@ constexpr std::uint32_t kDecodedOverrideWords = 28u << 20;  // allocated in g_de
 // rawdanger-recomp: what the device can bind of one storage buffer (D3D12 and many Vulkan drivers: 128 MiB): the override space
 // shrinks to fit, else enabling overrides failed every bind group ("Buffer binding 7 range 167772160 exceeds ... 134217728")
 std::uint64_t g_max_binding = 128ull << 20;
+// rawdanger-recomp (v0.10.4): the highest inner resolution the device can hold. The scratch buffer (the copies and the two shown
+// fields) is 8 MiB times the scale squared and is bound whole, the GS memory 4 MiB times it: on Direct3D 12 (128 MiB a binding)
+// that is 4x at most; 5x and up failed every bind group ("Buffer binding 5 range 209715200 exceeds ... 134217728") and the
+// game stopped or showed nothing. Vulkan drivers mostly bind far more (8x fits).
+std::uint32_t g_max_scale = 8;
+const char *g_api_name = "none";
+std::uint32_t max_scale_for(std::uint64_t binding) {
+    std::uint32_t s = 1;
+    while (s < 8 && (8ull << 20) * (s + 1) * (s + 1) <= binding) ++s;
+    return s;
+}
 std::uint32_t g_override_words = kDecodedOverrideWords;
 constexpr std::uint32_t kDecodePrims = 64;
 
@@ -4192,6 +4203,7 @@ static bool open_backend([[maybe_unused]] std::uint32_t backends, const char *na
     limits.maxStorageBufferBindingSize = supported.maxStorageBufferBindingSize;
     limits.maxBufferSize = supported.maxBufferSize;
     g_max_binding = std::min<std::uint64_t>(supported.maxStorageBufferBindingSize, supported.maxBufferSize);
+    g_max_scale = max_scale_for(g_max_binding);
     WGPUDeviceDescriptor dd = WGPU_DEVICE_DESCRIPTOR_INIT;
     dd.requiredLimits = &limits;
     WGPUFeatureName features[2];
@@ -4242,7 +4254,14 @@ bool init(Mode m) {
         for (char &c : backend) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
         if (backend == "vulkan") order.push_back({WGPUInstanceBackend_Vulkan, "Vulkan"}), forced = true;
         else if (backend == "dx12" || backend == "d3d12") order.push_back({WGPUInstanceBackend_DX12, "Direct3D 12"}), forced = true;
-        else std::fprintf(stderr, "[gpu] PS2_GPU_BACKEND=%s is not vulkan, dx12 or d3d12: ignored\n", os::env("PS2_GPU_BACKEND").c_str());
+        // rawdanger-recomp (v0.10.4): "vulkan-first" / "dx12-first" (keys.ini graphics_api, the in-game setting): that API first and
+        // the other one when it cannot start, so a PC without a Vulkan driver still gets a picture
+        else if (backend == "vulkan-first") order.push_back({WGPUInstanceBackend_Vulkan, "Vulkan"}), order.push_back({WGPUInstanceBackend_DX12, "Direct3D 12"});
+        else if (backend == "dx12-first" || backend == "d3d12-first") order.push_back({WGPUInstanceBackend_DX12, "Direct3D 12"}), order.push_back({WGPUInstanceBackend_Vulkan, "Vulkan"});
+        else std::fprintf(stderr, "[gpu] PS2_GPU_BACKEND=%s is not vulkan, dx12, vulkan-first or dx12-first: ignored\n", os::env("PS2_GPU_BACKEND").c_str());
+#ifndef _WIN32
+        if (!forced && !order.empty()) order.clear(), order.push_back({WGPUInstanceBackend_Primary, "the best API"});   // (no Direct3D here)
+#endif
     }
     if (order.empty()) {
 #ifdef _WIN32
@@ -4283,8 +4302,10 @@ bool init(Mode m) {
         if (order.size() == 1) break;
     }
     if (!chosen) return false;
+    g_api_name = chosen->name;
     if (forced) std::fprintf(stderr, "[gpu] graphics API: %s (asked for by PS2_GPU_BACKEND)\n", chosen->name);
-    else if (chosen == &order[0] && order.size() > 1) std::fprintf(stderr, "[gpu] graphics API: %s (the default on Windows%s; PS2_GPU_BACKEND=vulkan or dx12 picks)\n", chosen->name,
+    else if (chosen == &order[0] && order.size() > 1) std::fprintf(stderr, "[gpu] graphics API: %s (%s%s; PS2_GPU_BACKEND=vulkan or dx12 picks)\n", chosen->name,
+                 os::env("PS2_GPU_BACKEND").empty() ? "the default on Windows" : "asked for first",
                  hw::enabled() ? " with PS2_GPU_HW=1" :
                  "");
     else if (order.size() > 1) std::fprintf(stderr, "[gpu] graphics API: %s (%s could not be used, see above)\n", chosen->name, order[0].name);
@@ -4309,6 +4330,12 @@ bool init(Mode m) {
         }
     }
     if (const char *scale = std::getenv("PS2_SCALE")) g_scale = std::clamp<std::uint32_t>(static_cast<std::uint32_t>(std::atoi(scale)), 1u, 8u);
+    if (g_scale > g_max_scale) {
+        std::fprintf(stderr, "[gpu] inner resolution %ux is more than %s can hold (it binds %llu MB of one buffer): %ux instead%s\n", g_scale, g_api_name,
+                     static_cast<unsigned long long>(g_max_binding >> 20), g_max_scale,
+                     std::strcmp(g_api_name, "Direct3D 12") == 0 ? " (Vulkan allows more: Settings > Graphics API)" : "");
+        g_scale = g_max_scale;
+    }
     // PS2_SHARP_2D: how upscaled 2D art (text, icons, menus) is filtered, see SHARP in gs.wgsl: 0 plain bilinear, 1 sharp (the
     // default), 2 sharpest
     if (const char *sharp = std::getenv("PS2_SHARP_2D")) g_sharp_2d = std::clamp<std::uint32_t>(static_cast<std::uint32_t>(std::atoi(sharp)), 0u, 2u);
@@ -5256,7 +5283,11 @@ void apply_scale_request() {
         remake_programs();
         dec_reset();   // what was decoded with the old programs is decoded again
     }
-    const std::uint32_t want = g_scale_request.exchange(0);
+    std::uint32_t want = g_scale_request.exchange(0);
+    if (want > g_max_scale) {
+        std::fprintf(stderr, "[gpu] inner resolution %ux is more than %s can hold: %ux instead\n", want, g_api_name, g_max_scale);
+        want = g_max_scale;
+    }
     if (want == 0 || want == g_scale || !g_vram) return;
     std::vector<std::uint32_t> vram, clut;
     std::uint32_t old = 1;
@@ -5659,6 +5690,48 @@ bool present(const DisplaySource &src) {
     post::g_present_texture = st.texture;
     submit(target);
     post::g_present_texture = nullptr;
+    // rawdanger-recomp (v0.10.4): PS2_PRESENT_DUMP=<frame>,<file.ppm> writes the picture as the window gets it (after SMAA, before the
+    // enlargement to the window) at that vblank: the anti-aliasing compared on the same frame (tests, reports)
+    {
+        static unsigned long long dump_at = 0;
+        static std::string dump_file;
+        static const bool dump_set = [] {
+            const std::string v = os::env("PS2_PRESENT_DUMP");
+            const std::size_t comma = v.find(',');
+            if (comma == std::string::npos) return false;
+            dump_at = std::strtoull(v.c_str(), nullptr, 10), dump_file = v.substr(comma + 1);
+            return dump_at > 0 && !dump_file.empty();
+        }();
+        if (dump_set && frame_count() >= dump_at) {
+            dump_at = ~0ull;
+            const std::uint32_t w = blit[0], h = blit[1];
+            std::vector<std::uint32_t> px(static_cast<std::size_t>(w) * h);
+            read_back(g_scratch, px.size() * 4ull, px.data(), static_cast<std::uint64_t>(current) * 4);
+            if (std::FILE *f = os::open(dump_file.c_str(), "wb")) {
+                std::fprintf(f, "P6\n%u %u\n255\n", w, h);
+                for (std::uint32_t c : px) {
+                    const unsigned char rgb[3] = {static_cast<unsigned char>(c), static_cast<unsigned char>(c >> 8), static_cast<unsigned char>(c >> 16)};
+                    std::fwrite(rgb, 1, 3, f);
+                }
+                std::fclose(f);
+                std::fprintf(stderr, "[present] picture of vblank %llu written to %s (%ux%u, SMAA %s)\n", static_cast<unsigned long long>(frame_count()), dump_file.c_str(), w, h,
+                             (ps2::video_options() & 16u) ? "on" : "off");
+            }
+            if ((ps2::video_options() & 16u) && g_smaa_work && g_smaa_words >= px.size() * 3) {   // SMAA's edges and weights beside it
+                for (int part = 0; part < 2; ++part) {
+                    read_back(g_smaa_work, px.size() * 4ull, px.data(), static_cast<std::uint64_t>(part) * px.size() * 4);
+                    if (std::FILE *f = os::open((dump_file + (part ? ".weights.ppm" : ".edges.ppm")).c_str(), "wb")) {
+                        std::fprintf(f, "P6\n%u %u\n255\n", w, h);
+                        for (std::uint32_t c : px) {
+                            const unsigned char rgb[3] = {static_cast<unsigned char>(c), static_cast<unsigned char>(c >> 8), static_cast<unsigned char>(part ? c >> 16 : 0)};
+                            std::fwrite(rgb, 1, 3, f);
+                        }
+                        std::fclose(f);
+                    }
+                }
+            }
+        }
+    }
     if (log.on) log.lap(log.submit);
     if (!post::g_presented_async) {  // else the submit thread presents it and releases the texture (post)
 #ifndef __EMSCRIPTEN__
@@ -5938,6 +6011,8 @@ void set_sharp_2d(unsigned sharp) { ps2::gs::gpu::g_sharp_request = static_cast<
 void set_jp_textures(bool on) { ps2::gs::gpu::g_jp_textures = on; }
 void set_internal_scale(unsigned scale) { ps2::gs::gpu::g_scale_request = std::clamp(scale, 1u, 8u); }
 unsigned internal_scale() { return ps2::gs::gpu::g_scale; }
+unsigned max_internal_scale() { return ps2::gs::gpu::g_max_scale; }
+const char *graphics_api() { return ps2::gs::gpu::g_api_name; }
 
 void set_button_prompts(const std::string labels[4]) {
     {

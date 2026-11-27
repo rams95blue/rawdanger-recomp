@@ -112,7 +112,12 @@ fn weight_texel(x: i32, y: i32) -> vec4<f32> {
 }
 
 // ---- pass 1: luma edge detection --------------------------------------------------------------------------------------
-fn luma(x: i32, y: i32) -> f32 { return dot(color_texel(x, y).rgb, vec3<f32>(0.2126, 0.7152, 0.0722)); }
+// rawdanger-recomp (v0.10.4): the brightness compared on a square-root curve. Raw Danger's pictures are dark (night, rain, the
+// colour filter's haze: most of a frame between 5 and 25 % brightness), and on the plain luma almost no edge there passes the
+// reference's threshold: SMAA changed 0.4 % of the pixels of a street at night and the stairs on the hero's outline stayed. The
+// curve spreads the dark tones (a step from 4 to 9 % reads as 10 points, from 64 to 72 % as 5): dark edges get found, bright
+// areas are judged nearly as before.
+fn luma(x: i32, y: i32) -> f32 { return sqrt(dot(color_texel(x, y).rgb, vec3<f32>(0.2126, 0.7152, 0.0722))); }
 
 @compute @workgroup_size(8, 8)
 fn edges(@builtin(global_invocation_id) id: vec3<u32>) {

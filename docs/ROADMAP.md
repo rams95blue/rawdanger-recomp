@@ -152,7 +152,7 @@ Code patches go into `patches\pnach\SLUS-21501_2905C5C6.pnach` as named sections
 compiled in at build time (the native engine ignores runtime writes to code). Each one is verified on a headless build
 of the same engine: boot or a save state, frames captured every N frames, compared with the unpatched build.
 
-## Pending (as of v0.10.3)
+## Pending (as of v0.10.4)
 
 Asked for and not done yet, roughly by size:
 
@@ -168,7 +168,7 @@ Asked for and not done yet, roughly by size:
 10. **Water**: movement and reflections.
 11. **Lights**: smoother light sources, dynamic shadows.
 12. **A PC port's engine, not an emulated PS2** (docs/NATIVE_RENDERER.md): phase 1 (what the game draws) in progress.
-13. Anti-aliasing: SMAA works but changes little (FXAA added in v0.8.3).
+13. Anti-aliasing: SMAA works but changes little (FXAA added in v0.8.3). v0.10.4: it found almost no edges in the dark pictures; its edge test now uses a brightness curve (twice the pixels smoothed at night). 3x / 4x is the real fix, and now works up to 4x on Direct3D 12 and above on Vulkan (5x and up used to fail).
 14. **More regional toggles**: the Japanese character models and the Columbia items (docs/VERSION_DIFFERENCES.md: they need the Japan-only textures on the disc first).
 15. **Slow scene loads and a black screen in the tutorial** (reported with v0.8.6; not seen here with the US or the Enhanced disc,
     English voices, the window and the launcher's settings): an F9 report taken during it would show where it waits. v0.10.2:
@@ -191,7 +191,7 @@ Asked for and not done yet, roughly by size:
        The whole game steps 20 times a second (the picture too), so in-between frames wait for the uncapped frame rate (9, 12).
     3. *New clips*: the game's animation format decoded and new motion (from a source you can use) retargeted to its 48-bone
        skeleton. Days of work, in steps.
-21b. **Uncapped frame rate** (moved up, next to the animation): docs/FRAMERATE.md. v0.9.9: 30 works after a fresh map load
+21b. **Uncapped frame rate** (moved up, next to the animation): docs/FRAMERATE.md (v0.10.4: the plan for pictures between the steps, VU1 replays with blended matrices, and a limiter). v0.9.9: 30 works after a fresh map load
     (the European constants); v0.10.0: 60 with the EE overclocked; v0.10.2: the overlays, and an option in the launcher (the
     Enhanced Edition, experimental). v0.10.3: at 60 the tutorial's walk-in cutscene runs a third quick (30 is right). Next: find
     the counts 60 gets wrong, every menu and the later cutscenes at 30 and 60.
@@ -201,12 +201,12 @@ Asked for and not done yet, roughly by size:
     (everything 1.5 or 3 times as fast: measured). Two ways: the frame-rate constants changed with it (the European program,
     compiled for 30, compared with the US one would list them all), or in-between pictures drawn with the camera and the bones
     halfway between two steps.
-22a. **Reported with v0.9.9** (F9 reports awaited): the orbit camera cannot look up (v0.10.0 work in progress: during play the
-    camera is made in 0x17DC80, not through the cutscenes' route; raising the point it looks at after its step did not change the
-    picture, so the matrices come from another word), AO odd in some maps and missing in others, anti-aliasing (SMAA) seems not to
+22a. **Reported with v0.9.9** (F9 reports awaited): ~~the orbit camera cannot look up~~ (v0.10.4: host call 203 tilts the
+    direction the view is made from, docs/CAMERA.md), AO odd in some maps and missing in others, anti-aliasing (SMAA) seems not to
     work, a crash after loading a map from the debug select. v0.10.1: the AO now runs in the tutorial (it had none: patch 0045);
     "odd in some maps" may be its dark halo behind a character against a far wall (strong AO, radius 80), to be checked with
     the reports.
+22c. **Vulkan** (v0.10.4): Settings > Display > Graphics API. The engine always ran on Vulkan or Direct3D 12 through wgpu (Direct3D 12 first on Windows); now the player picks, and auto takes Vulkan when the resolution needs more than Direct3D 12 holds. Speed: to be measured on the player's PC (Settings > Debug > Stats, both APIs).
 22. **The wet look, finer**: the shoes and a raised hand can fall outside the capsules; a highlight that follows the light; wet
     ground and walls in the rain.
 

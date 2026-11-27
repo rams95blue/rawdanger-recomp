@@ -1215,6 +1215,10 @@ struct Orbit {
 Orbit g_orbit;
 std::atomic<bool> g_orbit_on{true};
 std::atomic<float> g_orbit_turn{0.0f};
+// v0.10.4: looking up. The orbit's lowest place puts the camera about 1.2 m over the floor under the hero, still looking down at
+// him ("blocked at ground level"); a further turn down raises the camera's aim instead, up to 75 degrees (camera_frame_call turns
+// the view after the game's camera step); turning back up lowers the aim first.
+std::atomic<float> g_orbit_lift{0.0f};
 float word_float(std::uint32_t w) { float f; std::memcpy(&f, &w, 4); return f; }
 std::uint32_t float_word(float f) { std::uint32_t w; std::memcpy(&w, &f, 4); return w; }
 void orbit_call(Cpu &c) {
@@ -1234,7 +1238,15 @@ void orbit_call(Cpu &c) {
     if (!std::isfinite(dist) || dist < 0.5f || along <= 0.0f) return;
     const float now = std::atan2(over, along);
     const float low = -std::asin(std::min(1.2f / dist, 0.99f));
-    const float to = std::clamp(now + turn, std::min(low, now), std::max(1.31f, now));
+    float want = now + turn;
+    float lift = g_orbit_lift.load(std::memory_order_relaxed);
+    if (want < low && now <= low + 0.01f) lift = std::min(1.3f, lift + (low - want)), want = low;   // past the floor: the aim goes up
+    else if (turn > 0.0f && lift > 0.0f) {                                                         // back up: the aim comes down first
+        const float back = std::min(lift, turn);
+        lift -= back, want = now + (turn - back);
+    }
+    g_orbit_lift.store(lift, std::memory_order_relaxed);
+    const float to = std::clamp(want, std::min(low, now), std::max(1.31f, now));
     const float new_over = dist * std::sin(to), new_along = std::max(0.3f, dist * std::cos(to));
     st32(cam + g_orbit.look, float_word(new_over - base));
     st32(cam + g_orbit.height, float_word(new_along));
@@ -1296,6 +1308,48 @@ void free_camera_call(Cpu &c) {
     call(c, g_free_camera.run, 1);
     c.r[31].sd[0] = static_cast<std::int32_t>(back);
 }
+// v0.10.4: the camera's frame. During play the game makes the camera once a step in 0x17DC80: its first call (at 0x17DC88) is the
+// camera's step (0x17D210), which leaves the direction it looks in at +0x1B0 (a unit vector, y pointing down); the view matrix is
+// then made from that direction. PS2_CAMERA_FRAME="CALL,AT,STEP,POINTER,MODE" (hex): the pnach section [Orbit camera] makes the
+// call at AT a call to the host, which runs STEP and then, with the orbit's lift (looking up), tilts that direction up. Only the
+// follow camera (mode 0) and with no cutscene bars for a second; anything else ends the lift. (v0.10.0 raised the point looked at
+// instead, +0x310, after the step: too late, the direction was already made from it.)
+struct CameraFrame { bool set = false; std::uint32_t call = 0, at = 0, step = 0, pointer = 0, mode = 0; };
+CameraFrame g_camera_frame;
+void camera_frame_call(Cpu &c) {
+    const std::uint32_t back = c.r[31].w[0];
+    call(c, g_camera_frame.step, 1);
+    c.r[31].sd[0] = static_cast<std::int32_t>(back);
+    const float lift = g_orbit_lift.load(std::memory_order_relaxed);
+    if (lift <= 0.0f) return;
+    const std::uint32_t cam = ld32(g_camera_frame.pointer);
+    if (cam < 0x100000u || cam >= 0x2000000u) return;
+    if (!g_orbit_on.load(std::memory_order_relaxed) || ld32(cam + g_camera_frame.mode) != 0 || ms_since_cinema_bars() < 1000) {
+        g_orbit_lift.store(0.0f, std::memory_order_relaxed);
+        return;
+    }
+    const float fx = word_float(ld32(cam + 0x1B0)), fy = word_float(ld32(cam + 0x1B4)), fz = word_float(ld32(cam + 0x1B8));
+    const float h = std::hypot(fx, fz);
+    if (!std::isfinite(h) || h < 1e-4f) return;
+    const float pitch = std::atan2(fy, h);                          // + down
+    const float to = std::max(pitch - lift, -1.48f);               // up to about 85 degrees over the horizon
+    st32(cam + 0x1B0, float_word(fx / h * std::cos(to)));
+    st32(cam + 0x1B4, float_word(std::sin(to)));
+    st32(cam + 0x1B8, float_word(fz / h * std::cos(to)));
+}
+struct CameraFrameSetup {
+    CameraFrameSetup() {
+        const char *v = std::getenv("PS2_CAMERA_FRAME");   // without it, Raw Danger's (US) own, as for the free camera
+        if (!v || !*v) v = "CB,17DC88,17D210,48F4E0,3EC";
+        unsigned long n = 0, at = 0, step = 0, pointer = 0, mode = 0;
+        if (std::sscanf(v, "%lx,%lx,%lx,%lx,%lx", &n, &at, &step, &pointer, &mode) != 5 || n >= kHostCalls) return;
+        g_camera_frame = {true, static_cast<std::uint32_t>(n), static_cast<std::uint32_t>(at), static_cast<std::uint32_t>(step),
+                          static_cast<std::uint32_t>(pointer), static_cast<std::uint32_t>(mode)};
+        register_host_call(g_camera_frame.call, &camera_frame_call);
+    }
+};
+CameraFrameSetup g_camera_frame_setup;
+
 struct FreeCameraSetup {
     FreeCameraSetup() {
         const char *v = std::getenv("PS2_FREE_CAMERA");   // without it, Raw Danger's (US) own, as for the orbit camera

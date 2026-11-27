@@ -43,7 +43,14 @@ not the right one. The mouse pushes the left stick there (PS2_MOUSE_LOOK_FIRST="
   Checked: the tutorial's cutscenes keep their shots. Not checked yet: a place with a fixed camera while playing (none was at hand
   in the saved states).
 - Head follows camera (v0.9.4, `[Head follows camera]`, host call 202 at 0x323EA4, `PS2_HEAD_FOLLOW`): see below.
-- Field of view (+0x450), free tilt (the -0.4 stops), direct mouse look (0x7F10): v0.8.x.
+- Looking up (v0.10.4, `[Orbit camera]`, host call 203 at 0x17DC88, `PS2_CAMERA_FRAME`): during play the camera is made once a
+  step in 0x17DC80; its first call (0x17DC88) is the camera's step 0x17D210, which leaves the direction looked in at +0x1B0 (a
+  unit vector, y down), and the view matrix is then built from that direction (0x32A890 / 0x32A490). The host runs the step and,
+  while the orbit is at its lowest and up is still held, tilts +0x1B0 up (to about 85 degrees over the horizon) by a lift that
+  grows while up is held and goes back first when the stick turns down. Only the follow camera (mode 0) with no cutscene bars
+  for a second. (v0.10.0 raised the point looked at, +0x310, after the step: too late, the direction was already made.)
+- Field of view (+0x450), free tilt (the -0.4 stops), direct mouse look (0x7F10): v0.8.x. v0.10.4: the setting is in degrees
+  across the picture (the PS2's: 58 at 16:9, 45 at 4:3), 45 to 110.
 
 ## The hero's head
 

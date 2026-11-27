@@ -2,6 +2,7 @@
 # L = a row's name (white), V = a value shown when picked (dark on the glow), B = a value of a two-value row (white and dark).
 # The labels of the Game options (recomp.ini sections) are added from recomp.ini.
 L	Resolution
+L	Graphics API
 L	Window size
 L	Full screen
 L	Widescreen 16:9
@@ -38,6 +39,10 @@ V	4x
 V	5x
 V	6x
 V	8x
+V	AUTO (DIRECT3D 12)
+V	AUTO (VULKAN)
+V	VULKAN
+V	DIRECT3D 12
 V	AUTO
 V	1280 x 720
 V	1600 x 900
@@ -111,11 +116,22 @@ B	INVERTED
 V	FXAA
 V	80 %
 V	90 %
-V	100 % (PS2)
-V	110 %
-V	120 %
-V	130 %
-V	140 %
-V	150 %
 B	ORBIT
 B	PS2
+# v0.10.4: the field of view in degrees across (was per cent of the game's)
+V	45°
+V	50°
+V	55°
+V	60°
+V	65°
+V	70°
+V	75°
+V	80°
+V	85°
+V	90°
+V	95°
+V	100°
+V	105°
+V	110°
+V	58° (PS2)
+V	45° (PS2)

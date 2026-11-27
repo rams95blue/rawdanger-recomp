@@ -41,7 +41,8 @@ struct Config {
 
     int menu_game_runs = 1;    // rawdanger-recomp: the game goes on behind the quick menu (off: it waits, as before)
     int filter_pass = -1;      // rawdanger-recomp: the post processing in one GPU pass (1) or drawn the game's way (0); -1: as the launcher says
-    int field_of_view = 100;   // rawdanger-recomp: the camera's field of view, % of the game's (80 to 150; 100 = as on the PS2)
+    int field_of_view = 0;     // rawdanger-recomp: the camera's horizontal field of view in degrees (0: the game's, 58 at 16:9, 45 at 4:3;
+                               // v0.10.4: degrees, was % of the game's: an old "field_of_view = 120" is read as per cent and turned into degrees)
     int ambient_occlusion = 1; // rawdanger-recomp: 0 off, 1 light, 2 strong (the game's depth, before its colour filter)
     int popup_size = 1;        // rawdanger-recomp: pop-ups (achievements, notes, the keys on screen): 0 small, 1 normal, 2 large, 3 huge
     int keys_on_screen = 0;    // rawdanger-recomp: the list of the player's keys stays on the screen while playing (F10)
@@ -64,6 +65,7 @@ struct Config {
     int integer_scale = 0;     // rawdanger-recomp: the picture is enlarged by whole numbers only (every console pixel row the same height)
     int lens_rain = 1;         // rawdanger-recomp: rain drops on the lens while playing (keys.ini rain_on_lens): 0 off, 1 on (how hard
                                // follows the map's rain and its gusts); the old lens_rain line (off / light / heavy) is not read any more
+    int graphics_api = 0;      // rawdanger-recomp (v0.10.4): 0 auto (Direct3D 12 on Windows, Vulkan when the resolution needs it), 1 Vulkan, 2 Direct3D 12; at the next start
     int smaa = 0;              // rawdanger-recomp: SMAA 1x on the console picture (anti-aliasing), 0 off, 1 on   // rawdanger-recomp: the volume of everything the game plays, 0 to 100 (%)
 };
 
@@ -83,7 +85,11 @@ const char *sharp_2d_word(int sharp);  // "soft", "sharp", "sharpest"
 std::string with_menu_game_runs(const std::string &file_text, int on);  // the 'menu_game_runs' line
 std::string with_popup_size(const std::string &file_text, int size);
 std::string with_filter_pass(const std::string &file_text, int fast);
-std::string with_field_of_view(const std::string &file_text, int percent);  // the 'field_of_view' line
+std::string with_field_of_view(const std::string &file_text, int degrees);  // the 'field_of_view' line ("90 deg", or "ps2" for 0)
+// rawdanger-recomp: the horizontal fields of view offered (degrees; 0 first: the game's own) and the game's own at an aspect
+extern const int kFieldsOfView[];
+extern const int kFieldsOfViewCount;
+int game_field_of_view(bool widescreen);
 std::string with_ambient_occlusion(const std::string &file_text, int level);  // the 'ambient_occlusion' line: off / light / strong  // the 'post_processing' line: fast / original    // the 'popup_size' line: small / normal / large / huge
 std::string with_keys_on_screen(const std::string &file_text, int on);  // the 'keys_on_screen' line
 std::string with_pause_unfocused(const std::string &file_text, int on);  // the 'pause_unfocused' line
@@ -106,7 +112,8 @@ std::string with_mouse_invert(const std::string &file_text, int invert);
 std::string short_input_name(int input);
 std::string with_window_size(const std::string &file_text, int w, int h);   // the 'menu_skin' line: hazard / japanese
 std::string with_lens_rain(const std::string &file_text, int level);
-std::string with_smaa(const std::string &file_text, int on);  // the 'master_volume' line
+std::string with_smaa(const std::string &file_text, int on);
+std::string with_graphics_api(const std::string &file_text, int api);  // the 'graphics_api' line (auto, vulkan, dx12)  // the 'master_volume' line
 
 const char *action_name(int action);  // the word used in keys.ini
 

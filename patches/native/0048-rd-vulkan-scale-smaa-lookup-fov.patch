@@ -1,0 +1,648 @@
+From 239bea020909fba0a45e66d8cec7233d727b595e Mon Sep 17 00:00:00 2001
+From: rawdanger-recomp <rawdanger-recomp@users.noreply.github.com>
+Date: Fri, 27 Nov 2026 02:06:17 +0000
+Subject: [PATCH] rd: Vulkan setting, resolution held to the device, SMAA in
+ the dark, look up, FOV in degrees, wetter wet look
+
+- Settings > Display > Graphics API (keys.ini graphics_api = auto | vulkan | dx12): PS2_GPU_BACKEND=vulkan-first / dx12-first,
+  the other API when the first cannot start; auto picks Vulkan first above 4x
+- the inner resolution held to what the device binds of one buffer (Direct3D 12: 128 MB, 4x); 5x and up failed every bind group
+- SMAA's edge test on a square-root brightness curve (dark pictures had almost no edges past the threshold)
+- PS2_PRESENT_DUMP=<vblank>,<file.ppm>: the picture as the window gets it, with SMAA's edges and weights
+- host call 203 (PS2_CAMERA_FRAME, Raw Danger's own by default): the camera's step run by the host, the view tilted up past the ground
+- field of view in degrees across (keys.ini field_of_view = ps2 | N deg; old per cent values converted), more steps, the degree sign
+- the wet look stronger (it runs after the colour filter since 0047)
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01QNLFPekqhcU2dj7B3Utmea
+---
+ host/keymap.cpp               | 30 +++++++++++--
+ host/keymap.hpp               | 13 ++++--
+ host/quickmenu.cpp            | 37 +++++++++++++---
+ host/quickmenu.hpp            |  4 ++
+ host/window.cpp               | 59 ++++++++++++++++++++++---
+ runtime/include/ps2/video.hpp |  4 ++
+ runtime/src/gs/gpu/gpu.cpp    | 81 +++++++++++++++++++++++++++++++++--
+ runtime/src/gs/gpu/gs.wgsl    |  6 ++-
+ runtime/src/gs/gpu/smaa.wgsl  |  7 ++-
+ runtime/src/system.cpp        | 56 +++++++++++++++++++++++-
+ 10 files changed, 272 insertions(+), 25 deletions(-)
+
+diff --git a/host/keymap.cpp b/host/keymap.cpp
+index 52040ac..315a004 100644
+--- a/host/keymap.cpp
++++ b/host/keymap.cpp
+@@ -8,6 +8,7 @@
+ #include <cctype>
+ #include <cstdio>
+ #include <cstdlib>
++#include <cmath>
+ #include <cstring>
+ #include <map>
+ 
+@@ -225,6 +226,10 @@ std::string with_window_size(const std::string &file_text, int w, int h) {
+ std::string with_menu_skin(const std::string &file_text, int skin) { return with_line(file_text, "menuskin", std::string("menu_skin = ") + (skin == 2 ? "game" : skin == 1 ? "japanese" : "hazard")); }
+ std::string with_integer_scale(const std::string &file_text, int on) { return with_line(file_text, "integerscale", "integer_scale = " + std::to_string(on ? 1 : 0)); }
+ std::string with_lens_rain(const std::string &file_text, int level) { return with_line(file_text, "rainonlens", std::string("rain_on_lens = ") + (level ? "on" : "off")); }
++std::string with_graphics_api(const std::string &file_text, int api) {
++    static const char *const kNames[3] = {"auto", "vulkan", "dx12"};
++    return with_line(file_text, "graphicsapi", std::string("graphics_api = ") + kNames[std::clamp(api, 0, 2)]);
++}
+ std::string with_smaa(const std::string &file_text, int on) {
+     static const char *const kNames[6] = {"off", "low", "medium", "high", "ultra", "fxaa"};   // rawdanger-recomp: 5 = FXAA
+     return with_line(file_text, "smaa", std::string("smaa = ") + kNames[std::clamp(on, 0, 5)]);
+@@ -237,9 +242,14 @@ const char *sharp_2d_word(int sharp) {
+ 
+ std::string with_master_volume(const std::string &file_text, int percent) { return with_line(file_text, "mastervolume", "master_volume = " + std::to_string(percent)); }
+ std::string with_filter_pass(const std::string &file_text, int fast) { return with_line(file_text, "postprocessing", std::string("post_processing = ") + (fast ? "fast" : "original")); }
+-std::string with_field_of_view(const std::string &file_text, int percent) {
+-    return with_line(file_text, "fieldofview", "field_of_view = " + std::to_string(std::clamp(percent, 80, 150)));
++std::string with_field_of_view(const std::string &file_text, int degrees) {
++    return with_line(file_text, "fieldofview", degrees <= 0 ? std::string("field_of_view = ps2") : "field_of_view = " + std::to_string(std::clamp(degrees, 30, 130)) + " deg");
+ }
++// Raw Danger's projection: 768 units from the eye to the screen, the picture 640 wide (its x scaled by 3/4 with the 16:9 patch):
++// tan(half) = 320 / 768 = 0.4167 at 4:3 (45 degrees across), 320 / 576 = 0.5556 at 16:9 (58 degrees across)
++const int kFieldsOfView[] = {0, 45, 50, 55, 60, 65, 70, 75, 80, 85, 90, 95, 100, 105, 110};
++const int kFieldsOfViewCount = static_cast<int>(sizeof kFieldsOfView / sizeof kFieldsOfView[0]);
++int game_field_of_view(bool widescreen) { return widescreen ? 58 : 45; }
+ 
+ std::string with_ambient_occlusion(const std::string &file_text, int level) {
+     static const char *const kNames[] = {"off", "light", "strong"};
+@@ -386,6 +396,14 @@ void parse(const std::string &text, Config &config, std::vector<std::string> &pr
+             else bad("pace is 30, 20, 15, 60 or off, ignored");
+             continue;
+         }
++        if (name == "graphicsapi") {
++            const std::string v = squash(value);
++            if (v == "auto") config.graphics_api = 0;
++            else if (v == "vulkan") config.graphics_api = 1;
++            else if (v == "dx12" || v == "d3d12" || v == "direct3d" || v == "direct3d12") config.graphics_api = 2;
++            else bad("graphics_api is auto, vulkan or dx12, ignored");
++            continue;
++        }
+         if (name == "smaa") {
+             const std::string v = squash(value);
+             if (v == "1" || v == "on" || v == "high") config.smaa = 3;
+@@ -532,10 +550,14 @@ void parse(const std::string &text, Config &config, std::vector<std::string> &pr
+             continue;
+         }
+         if (name == "fieldofview" || name == "fov") {
++            if (value == "ps2" || value == "game" || value == "0") { config.field_of_view = 0; continue; }
+             char *end = nullptr;
+             const long v = std::strtol(value.c_str(), &end, 10);
+-            if (end != value.c_str() && v >= 80 && v <= 150) config.field_of_view = static_cast<int>(v);
+-            else bad("field_of_view is a number from 80 to 150 (per cent of the game's), ignored");
++            const bool degrees = end && (std::strstr(end, "deg") != nullptr || std::strstr(end, "\xC2\xB0") != nullptr);
++            if (end != value.c_str() && degrees && v >= 30 && v <= 130) config.field_of_view = static_cast<int>(v);
++            else if (end != value.c_str() && !degrees && v >= 80 && v <= 150)   // before v0.10.4: per cent of the game's (16:9)
++                config.field_of_view = v == 100 ? 0 : static_cast<int>(std::lround(2.0 * std::atan(320.0 / 576.0 * v / 100.0) * 57.29578));
++            else bad("field_of_view is ps2 or degrees across, from 30 to 130 (\"90 deg\"), ignored");
+             continue;
+         }
+         if (name == "popupsize") {
+diff --git a/host/keymap.hpp b/host/keymap.hpp
+index b31a161..d6577bf 100644
+--- a/host/keymap.hpp
++++ b/host/keymap.hpp
+@@ -41,7 +41,8 @@ struct Config {
+ 
+     int menu_game_runs = 1;    // rawdanger-recomp: the game goes on behind the quick menu (off: it waits, as before)
+     int filter_pass = -1;      // rawdanger-recomp: the post processing in one GPU pass (1) or drawn the game's way (0); -1: as the launcher says
+-    int field_of_view = 100;   // rawdanger-recomp: the camera's field of view, % of the game's (80 to 150; 100 = as on the PS2)
++    int field_of_view = 0;     // rawdanger-recomp: the camera's horizontal field of view in degrees (0: the game's, 58 at 16:9, 45 at 4:3;
++                               // v0.10.4: degrees, was % of the game's: an old "field_of_view = 120" is read as per cent and turned into degrees)
+     int ambient_occlusion = 1; // rawdanger-recomp: 0 off, 1 light, 2 strong (the game's depth, before its colour filter)
+     int popup_size = 1;        // rawdanger-recomp: pop-ups (achievements, notes, the keys on screen): 0 small, 1 normal, 2 large, 3 huge
+     int keys_on_screen = 0;    // rawdanger-recomp: the list of the player's keys stays on the screen while playing (F10)
+@@ -64,6 +65,7 @@ struct Config {
+     int integer_scale = 0;     // rawdanger-recomp: the picture is enlarged by whole numbers only (every console pixel row the same height)
+     int lens_rain = 1;         // rawdanger-recomp: rain drops on the lens while playing (keys.ini rain_on_lens): 0 off, 1 on (how hard
+                                // follows the map's rain and its gusts); the old lens_rain line (off / light / heavy) is not read any more
++    int graphics_api = 0;      // rawdanger-recomp (v0.10.4): 0 auto (Direct3D 12 on Windows, Vulkan when the resolution needs it), 1 Vulkan, 2 Direct3D 12; at the next start
+     int smaa = 0;              // rawdanger-recomp: SMAA 1x on the console picture (anti-aliasing), 0 off, 1 on   // rawdanger-recomp: the volume of everything the game plays, 0 to 100 (%)
+ };
+ 
+@@ -83,7 +85,11 @@ const char *sharp_2d_word(int sharp);  // "soft", "sharp", "sharpest"
+ std::string with_menu_game_runs(const std::string &file_text, int on);  // the 'menu_game_runs' line
+ std::string with_popup_size(const std::string &file_text, int size);
+ std::string with_filter_pass(const std::string &file_text, int fast);
+-std::string with_field_of_view(const std::string &file_text, int percent);  // the 'field_of_view' line
++std::string with_field_of_view(const std::string &file_text, int degrees);  // the 'field_of_view' line ("90 deg", or "ps2" for 0)
++// rawdanger-recomp: the horizontal fields of view offered (degrees; 0 first: the game's own) and the game's own at an aspect
++extern const int kFieldsOfView[];
++extern const int kFieldsOfViewCount;
++int game_field_of_view(bool widescreen);
+ std::string with_ambient_occlusion(const std::string &file_text, int level);  // the 'ambient_occlusion' line: off / light / strong  // the 'post_processing' line: fast / original    // the 'popup_size' line: small / normal / large / huge
+ std::string with_keys_on_screen(const std::string &file_text, int on);  // the 'keys_on_screen' line
+ std::string with_pause_unfocused(const std::string &file_text, int on);  // the 'pause_unfocused' line
+@@ -106,7 +112,8 @@ std::string with_mouse_invert(const std::string &file_text, int invert);
+ std::string short_input_name(int input);
+ std::string with_window_size(const std::string &file_text, int w, int h);   // the 'menu_skin' line: hazard / japanese
+ std::string with_lens_rain(const std::string &file_text, int level);
+-std::string with_smaa(const std::string &file_text, int on);  // the 'master_volume' line
++std::string with_smaa(const std::string &file_text, int on);
++std::string with_graphics_api(const std::string &file_text, int api);  // the 'graphics_api' line (auto, vulkan, dx12)  // the 'master_volume' line
+ 
+ const char *action_name(int action);  // the word used in keys.ini
+ 
+diff --git a/host/quickmenu.cpp b/host/quickmenu.cpp
+index dda5bf5..6f8a0b0 100644
+--- a/host/quickmenu.cpp
++++ b/host/quickmenu.cpp
+@@ -118,8 +118,8 @@ constexpr const char *kKeys[kEntries] = {"F1", "F5", "F8", "F3", "F4", "", ""};
+ // Settings: one page, six tabs (the Game and Debug tabs list rows the window fills: the game's own options, the test switches)
+ constexpr const char *kTabNames[Menu::kTabs] = {"DISPLAY", "PICTURE", "SOUND", "CONTROLS", "GAME", "DEBUG"};
+ constexpr int kAchievementRows = 7;   // rawdanger-recomp: achievements lines shown at a time (bigger panel)
+-constexpr Command kDisplay[] = {Command::scale, Command::window_size, Command::fullscreen, Command::widescreen, Command::integer_scale, Command::menu_game_runs, Command::pause_unfocused, Command::menu_skin, Command::popup_size, Command::back};
+-constexpr const char *kDisplayKeys[] = {"", "", "F11", "", "", "", "", "", "", "Esc"};
++constexpr Command kDisplay[] = {Command::scale, Command::graphics_api, Command::window_size, Command::fullscreen, Command::widescreen, Command::integer_scale, Command::menu_game_runs, Command::pause_unfocused, Command::menu_skin, Command::popup_size, Command::back};
++constexpr const char *kDisplayKeys[] = {"", "", "", "F11", "", "", "", "", "", "", "Esc"};
+ constexpr Command kPicture[] = {Command::field_of_view, Command::look, Command::antialias, Command::sharpen, Command::sharp_2d, Command::game_blur, Command::filter_pass, Command::ambient_occlusion, Command::wet_look, Command::black_bars, Command::lens_rain, Command::back};
+ constexpr const char *kPictureKeys[] = {"", "F2", "", "", "", "", "", "", "", "", "", "Esc"};
+ constexpr Command kSound[] = {Command::master_volume, Command::reverb, Command::back};
+@@ -161,6 +161,8 @@ int game_text_width(int s, const std::string &line) {
+     const float k = game_font_k(s);
+     float x = 0;
+     for (unsigned char ch : line) {
++        if (ch == 0xC2) continue;                               // v0.10.4: the degree sign (UTF-8 C2 B0), drawn as a small ring
++        if (ch == 0xB0) { x += 8 * k + s * 0.96f; continue; }
+         const int c = (ch >= 32 && ch <= 126 ? ch : '?') - 32;
+         x += (g_font.x1[c] - g_font.x0[c] + 1) * k + s * 0.96f;
+     }
+@@ -172,6 +174,26 @@ void game_text(Picture &p, int x, int y, int s, const std::string &line, std::ui
+     float pen = static_cast<float>(x);
+     const int top = 4;   // the font's capitals start 4 pixels into their cell
+     for (unsigned char ch : line) {
++        if (ch == 0xC2) continue;
++        if (ch == 0xB0) {   // v0.10.4: the degree sign, a ring at the top of the capitals (the game's font has none)
++            const float r = 3.2f * k, cxr = pen + 4.0f * k, cyr = y + r + 0.5f * k, w = std::max(1.0f, 1.6f * k);
++            for (int py = static_cast<int>(cyr - r - 1); py <= static_cast<int>(cyr + r + 1); ++py)
++                for (int px = static_cast<int>(cxr - r - 1); px <= static_cast<int>(cxr + r + 1); ++px) {
++                    if (px < 0 || py < 0 || px >= p.width || py >= p.height) continue;
++                    const float d = std::fabs(std::hypot(px + 0.5f - cxr, py + 0.5f - cyr) - (r - w * 0.5f));
++                    const float cov = std::clamp(w * 0.5f + 0.5f - d, 0.0f, 1.0f);
++                    if (cov <= 0.0f) continue;
++                    std::uint32_t &dst = p.rgba[static_cast<std::size_t>(py) * p.width + px];
++                    std::uint32_t out = 0;
++                    for (int sh = 0; sh < 24; sh += 8) {
++                        const float a = static_cast<float>((color >> sh) & 255u), b = static_cast<float>((dst >> sh) & 255u);
++                        out |= static_cast<std::uint32_t>(a * cov + b * (1 - cov) + 0.5f) << sh;
++                    }
++                    dst = out | (std::max(dst >> 24, static_cast<std::uint32_t>(cov * 255.0f)) << 24);
++                }
++            pen += 8 * k + s * 0.96f;
++            continue;
++        }
+         const int c = (ch >= 32 && ch <= 126 ? ch : '?') - 32;
+         const int cx = (c % 16) * 24 + g_font.x0[c], cy = (2 + c / 16) * 24 + top, gw = g_font.x1[c] - g_font.x0[c] + 1, gh = 19;
+         const int tw = static_cast<int>(gw * k + 1.0f), th = static_cast<int>(gh * k + 1.0f), tx0 = static_cast<int>(pen);
+@@ -401,7 +423,7 @@ std::string entry_text(Command c, const Values &v, bool quit_armed) {
+     case Command::reverb: return std::string("Reverb (rooms, tunnels):  < ") + (v.reverb ? "on" : "off") + " >";
+     case Command::widescreen: return v.widescreen < 0 ? "Widescreen: not in this game" : std::string("Widescreen 16:9:  < ") + (v.widescreen ? "on" : "off") + " >";
+     case Command::field_of_view:
+-        return std::string("Field of view:  < ") + (v.field_of_view == 100 ? std::string("100 % (as on the PS2)") : std::to_string(v.field_of_view) + " %") + " >";
++        return std::string("Field of view:  < ") + (v.field_of_view <= 0 ? std::string("as on the PS2") : std::to_string(v.field_of_view) + " deg across") + " >";
+     case Command::ambient_occlusion: {
+         static const char *const kLevels[] = {"off", "light", "strong"};
+         return std::string("Ambient occlusion (shading in corners):  < ") + kLevels[std::clamp(v.ambient_occlusion, 0, 2)] + " >";
+@@ -437,7 +459,12 @@ std::string entry_text(Command c, const Values &v, bool quit_armed) {
+             return std::to_string(640 * n) + " x " + std::to_string(448 * n) + " (" + std::to_string(n) + "x)";
+         };
+         if (v.scale_locked) return "Internal resolution: " + name(v.scale_now) + " (set by PS2_SCALE)";
+-        return "Internal resolution:  < " + name(v.scale_next) + " >";
++        return "Internal resolution:  < " + name(v.scale_next) + " >" + (v.scale_max < 8 ? "  (up to " + std::to_string(v.scale_max) + "x here)" : std::string());
++    }
++    case Command::graphics_api: {
++        static const char *const kNames[] = {"auto", "Vulkan", "Direct3D 12"};
++        const std::string now = v.graphics_api_now.empty() || v.graphics_api_now == "none" ? std::string() : "  (now " + v.graphics_api_now + ")";
++        return std::string("Graphics API:  < ") + kNames[std::clamp(v.graphics_api, 0, 2)] + " >" + now;
+     }
+     case Command::sharp_2d: {
+         static const char *const kNames[] = {"soft", "sharp", "sharpest"};
+@@ -634,7 +661,7 @@ Command Menu::side() const {
+     if ((page_ == Page::recomp || (page_ == Page::graphics && tab_ >= kGameTab)) && selected_ < recomp_rows_) return Command::recomp_toggle;
+     if (page_ != Page::graphics || tab_ >= kGameTab) return Command::none;
+     const Command c = kTabLists[tab_].commands[selected_];
+-    return c == Command::look || c == Command::scale || c == Command::sharp_2d || c == Command::fullscreen || c == Command::widescreen || c == Command::pause_unfocused || c == Command::menu_game_runs ||
++    return c == Command::look || c == Command::scale || c == Command::graphics_api || c == Command::sharp_2d || c == Command::fullscreen || c == Command::widescreen || c == Command::pause_unfocused || c == Command::menu_game_runs ||
+                    c == Command::master_volume || c == Command::integer_scale || c == Command::lens_rain || c == Command::antialias || c == Command::menu_skin ||
+                    c == Command::window_size || c == Command::game_blur || c == Command::reverb || c == Command::key_prompts || c == Command::mouse_look || c == Command::camera_orbit || c == Command::free_camera || c == Command::head_follow || c == Command::wet_look || c == Command::anim_layers || c == Command::black_bars || c == Command::sharpen ||
+                    c == Command::mouse_speed || c == Command::mouse_invert || c == Command::mouse_invert_x || c == Command::popup_size || c == Command::keys_on_screen || c == Command::filter_pass || c == Command::ambient_occlusion || c == Command::field_of_view
+diff --git a/host/quickmenu.hpp b/host/quickmenu.hpp
+index cb253d9..c182c30 100644
+--- a/host/quickmenu.hpp
++++ b/host/quickmenu.hpp
+@@ -38,6 +38,7 @@ enum class Command {
+     widescreen,    // Graphics page: the game's widescreen option (its recomp.ini section with aspect = 16:9)
+     menu_game_runs,   // Settings > Display: the game goes on behind this menu (off: it waits)
+     popup_size,       // Settings > Display: the size of the pop-ups (small / normal / large / huge)
++    graphics_api,     // rawdanger-recomp (v0.10.4) Settings > Display: auto / Vulkan / Direct3D 12, at the next start
+     field_of_view,    // Settings > Picture: the camera's field of view (80 % to 150 % of the game's)
+     ambient_occlusion, // Settings > Picture: shading in creases and corners from the game's depth (off / light / strong)
+     filter_pass,      // Settings > Picture: the post processing in one GPU pass or drawn the game's way (to compare)
+@@ -73,6 +74,9 @@ struct Values {
+     int scale_now = 1;      // the inner resolution the game runs at
+     int scale_next = 1;     // the one written in keys.ini for the next start
+     bool scale_locked = false;  // PS2_SCALE is set: keys.ini does not count
++    int scale_max = 8;          // the highest the graphics device can hold (Direct3D 12: 4x)
++    int graphics_api = 0;       // keys.ini's choice: 0 auto, 1 Vulkan, 2 Direct3D 12
++    std::string graphics_api_now;  // the API this run uses ("Vulkan", "Direct3D 12")
+     int sharp_now = 1, sharp_next = 1;  // the 2D art filter (0 soft, 1 sharp, 2 sharpest): this run's, and keys.ini's for the next start
+     bool sharp_locked = false;  // PS2_SHARP_2D is set
+     bool fullscreen = false;
+diff --git a/host/window.cpp b/host/window.cpp
+index 089aa97..9713250 100644
+--- a/host/window.cpp
++++ b/host/window.cpp
+@@ -1523,6 +1523,9 @@ void menu_paint(bool show_again) {
+         v.scale_now = g_scale_now;
+         v.scale_next = g_scale_next;
+         v.scale_locked = g_scale_locked;
++        v.scale_max = static_cast<int>(ps2::max_internal_scale());
++        v.graphics_api = g_keys.graphics_api;
++        v.graphics_api_now = ps2::graphics_api();
+         v.sharp_now = g_sharp_now;
+         v.sharp_next = g_sharp_next;
+         v.sharp_locked = g_sharp_locked;
+@@ -2323,6 +2326,12 @@ void native_option_rows() {
+     // Display
+     spin("Resolution", "Internal resolution", [] { return g_scale_next == keymap::kScaleAuto ? std::string("AUTO") : std::to_string(g_scale_next) + "x"; },
+          command(Command::scale));
++    spin("Graphics API", "Vulkan or Direct3D 12, at the next start (Vulkan allows more than 4x)", [] {
++            const std::string now = ps2::graphics_api();
++            if (g_keys.graphics_api == 1) return std::string("VULKAN");
++            if (g_keys.graphics_api == 2) return std::string("DIRECT3D 12");
++            return now == "Vulkan" ? std::string("AUTO (VULKAN)") : std::string("AUTO (DIRECT3D 12)");
++        }, command(Command::graphics_api));
+     spin("Window size", "The window's size", [] {
+             if (!g_window || (SDL_GetWindowFlags(g_window) & SDL_WINDOW_FULLSCREEN)) return std::string("FULL SCREEN");
+             int ww = 0, wh = 0;
+@@ -2368,8 +2377,9 @@ void native_option_rows() {
+             static const char *const kFilters[] = {"RAW", "SOFT", "SHARP", "FSR 1"};
+             return std::string(kFilters[std::clamp(g_look / 2, 0, 3)]);
+         }, [](int d) { cycle_look(d); });
+-    spin("Field of view", "How wide the camera sees", [] {
+-            return g_keys.field_of_view == 100 ? std::string("100 % (PS2)") : std::to_string(g_keys.field_of_view) + " %";
++    spin("Field of view", "How wide the camera sees, in degrees across", [] {
++            const int game = keymap::game_field_of_view(ps2::g_options.widescreen);
++            return g_keys.field_of_view <= 0 ? std::to_string(game) + "\xC2\xB0 (PS2)" : std::to_string(g_keys.field_of_view) + "\xC2\xB0";
+         }, command(Command::field_of_view));
+     spin("Anti-aliasing", "Smooth edges", [] {
+             static const char *const kAa[] = {"OFF", "EDGES", "SMAA LOW", "SMAA MEDIUM", "SMAA HIGH", "SMAA ULTRA", "FXAA"};
+@@ -2661,11 +2671,19 @@ void menu_command(quickmenu::Command c, int step) {
+         set_notice(v == 0 ? std::string("Master volume: muted") : "Master volume: " + std::to_string(v) + "%");
+         break;
+     }
+-    case Command::field_of_view:
+-        g_keys.field_of_view = std::clamp(g_keys.field_of_view + (step < 0 ? -10 : 10), 80, 150);
++    case Command::field_of_view: {
++        // v0.10.4: degrees across (the game's own first, then 45 to 110 in fives), round at the ends
++        int at = 0;
++        for (int k = 0; k < keymap::kFieldsOfViewCount; ++k)
++            if (keymap::kFieldsOfView[k] == g_keys.field_of_view) at = k;
++        at = (at + (step < 0 ? keymap::kFieldsOfViewCount - 1 : 1)) % keymap::kFieldsOfViewCount;
++        g_keys.field_of_view = keymap::kFieldsOfView[at];
+         rewrite_keys_file([](const std::string &t) { return keymap::with_field_of_view(t, g_keys.field_of_view); }, "field of view");
+-        set_notice("Field of view: " + std::to_string(g_keys.field_of_view) + " %" + (g_keys.field_of_view == 100 ? " (as on the PS2)" : ""));
++        const int game = keymap::game_field_of_view(ps2::g_options.widescreen);
++        set_notice(g_keys.field_of_view <= 0 ? "Field of view: " + std::to_string(game) + " degrees across (as on the PS2)"
++                                             : "Field of view: " + std::to_string(g_keys.field_of_view) + " degrees across");
+         break;
++    }
+     case Command::ambient_occlusion: {
+         static const char *const kLevels[] = {"off", "light", "strong"};
+         g_keys.ambient_occlusion = (g_keys.ambient_occlusion + (step < 0 ? 2 : 1)) % 3;
+@@ -2834,12 +2852,24 @@ void menu_command(quickmenu::Command c, int step) {
+                 SDL_DisplayMode mode;
+                 use = SDL_GetDesktopDisplayMode(0, &mode) == 0 && mode.h > 0 ? std::clamp((mode.h + 447) / 448, 1, 6) : 2;
+             }
++            const int most = static_cast<int>(ps2::max_internal_scale());
++            const bool held = use > most;
++            if (held) use = most;   // (gpu.cpp holds it too; said here so the player knows why)
+             ps2::set_internal_scale(static_cast<unsigned>(use));
+             g_scale_now = g_scale_next;
+-            set_notice("Internal resolution " + std::to_string(640 * use) + " x " + std::to_string(448 * use) + (g_scale_next == keymap::kScaleAuto ? " (auto)" : ""));
++            set_notice("Internal resolution " + std::to_string(640 * use) + " x " + std::to_string(448 * use) + (g_scale_next == keymap::kScaleAuto ? " (auto)" : "") +
++                       (held ? std::string(" (the most ") + ps2::graphics_api() + " holds; Vulkan allows more)" : std::string()));
+             std::fprintf(stderr, "[menu] resolution %dx, now\n", use);
+         }
+         break;
++    case Command::graphics_api: {
++        g_keys.graphics_api = (g_keys.graphics_api + step + 3) % 3;
++        rewrite_keys_file([](const std::string &t) { return keymap::with_graphics_api(t, g_keys.graphics_api); }, "graphics API");
++        static const char *const kNames[] = {"auto", "Vulkan", "Direct3D 12"};
++        set_notice(std::string("Graphics API: ") + kNames[g_keys.graphics_api] + " from the next start (now " + ps2::graphics_api() + ")");
++        std::fprintf(stderr, "[menu] graphics API %s at the next start\n", kNames[g_keys.graphics_api]);
++        break;
++    }
+     case Command::sharp_2d:
+         if (g_sharp_locked) {
+             set_notice("Text and menus are set by PS2_SHARP_2D; remove it to choose here");
+@@ -3332,7 +3362,10 @@ void poll() {
+         }
+         if (set) {
+             const auto get = [](std::uint32_t a) { const std::uint32_t w = ps2::ld32(a); float f; std::memcpy(&f, &w, 4); return f; };
+-            const float want = 100.0f / static_cast<float>(std::clamp(g_keys.field_of_view, 80, 150));
++            // v0.10.4: degrees across. The game's half-width at the screen distance: 320 / 768 at 4:3, 320 / 576 with the 16:9 patch
++            const float game_tan = ps2::g_options.widescreen ? 320.0f / 576.0f : 320.0f / 768.0f;
++            const float want = g_keys.field_of_view <= 0 ? 1.0f
++                                                         : game_tan / std::tan(static_cast<float>(std::clamp(g_keys.field_of_view, 30, 130)) * 0.5f * 0.0174533f);
+             const float now = get(block + zoom);
+             if ((ps2::ld32(block + state) & 0xFFu) == 0 && (now == 1.0f || now == written) && now != want) {
+                 std::uint32_t w; std::memcpy(&w, &want, 4);
+@@ -3962,6 +3995,18 @@ bool open_window(bool fullscreen) {
+         ps2::os::set_env("PS2_SCALE", std::to_string(g_keys.scale));
+         std::fprintf(stderr, "[video] resolution %dx from %s (scale = %d)\n", g_keys.scale, g_keys_path.c_str(), g_keys.scale);
+     }
++    // rawdanger-recomp (v0.10.4): the graphics API (keys.ini graphics_api), unless PS2_GPU_BACKEND is set. Vulkan or Direct3D 12 is
++    // tried first and the other one when it cannot start. Auto: Windows' default (Direct3D 12, the faster painter on the PCs measured),
++    // but Vulkan first when the resolution asked for is more than Direct3D 12 can hold (it binds 128 MB of one buffer: 4x at most).
++    if (ps2::os::env("PS2_GPU_BACKEND").empty()) {
++        const int want_scale = std::atoi(ps2::os::env("PS2_SCALE").c_str());
++        const char *api = g_keys.graphics_api == 1 ? "vulkan-first" : g_keys.graphics_api == 2 ? "dx12-first" : want_scale > 4 ? "vulkan-first" : nullptr;
++        if (api) {
++            ps2::os::set_env("PS2_GPU_BACKEND", api);
++            std::fprintf(stderr, "[video] graphics API: %s first (%s)\n", api[0] == 'v' ? "Vulkan" : "Direct3D 12",
++                         g_keys.graphics_api ? "keys.ini graphics_api" : "auto: the resolution is above 4x");
++        }
++    }
+     // The picture pace (ps2/pace.hpp): the 'pace' line of keys.ini, unless PS2_PACE is set. The runtime reads it at boot, after this.
+     if (!g_keys.pace.empty() && ps2::os::env("PS2_PACE").empty()) {
+         ps2::os::set_env("PS2_PACE", g_keys.pace);
+diff --git a/runtime/include/ps2/video.hpp b/runtime/include/ps2/video.hpp
+index 3f02d1b..079379e 100644
+--- a/runtime/include/ps2/video.hpp
++++ b/runtime/include/ps2/video.hpp
+@@ -19,6 +19,10 @@ void set_reverb(bool on);
+ // rawdanger-recomp: the inner resolution while the game runs (1 to 8 times the console's), at the next picture; no restart
+ void set_internal_scale(unsigned scale);
+ unsigned internal_scale();
++// rawdanger-recomp (v0.10.4): the highest inner resolution the graphics device can hold (Direct3D 12: 4x), and the graphics API in use
++// ("Direct3D 12", "Vulkan", ...; "none" before the GPU started or without it)
++unsigned max_internal_scale();
++const char *graphics_api();
+ // rawdanger-recomp: the SMAA preset when SMAA is on: 1 low, 2 medium, 3 high, 4 ultra
+ void set_smaa_quality(unsigned quality);
+ // rawdanger-recomp: the filter of upscaled 2D art (0 soft, 1 sharp, 2 sharpest), at the next picture
+diff --git a/runtime/src/gs/gpu/gpu.cpp b/runtime/src/gs/gpu/gpu.cpp
+index ca32762..371d23f 100644
+--- a/runtime/src/gs/gpu/gpu.cpp
++++ b/runtime/src/gs/gpu/gpu.cpp
+@@ -77,6 +77,17 @@ constexpr std::uint32_t kDecodedOverrideWords = 28u << 20;  // allocated in g_de
+ // rawdanger-recomp: what the device can bind of one storage buffer (D3D12 and many Vulkan drivers: 128 MiB): the override space
+ // shrinks to fit, else enabling overrides failed every bind group ("Buffer binding 7 range 167772160 exceeds ... 134217728")
+ std::uint64_t g_max_binding = 128ull << 20;
++// rawdanger-recomp (v0.10.4): the highest inner resolution the device can hold. The scratch buffer (the copies and the two shown
++// fields) is 8 MiB times the scale squared and is bound whole, the GS memory 4 MiB times it: on Direct3D 12 (128 MiB a binding)
++// that is 4x at most; 5x and up failed every bind group ("Buffer binding 5 range 209715200 exceeds ... 134217728") and the
++// game stopped or showed nothing. Vulkan drivers mostly bind far more (8x fits).
++std::uint32_t g_max_scale = 8;
++const char *g_api_name = "none";
++std::uint32_t max_scale_for(std::uint64_t binding) {
++    std::uint32_t s = 1;
++    while (s < 8 && (8ull << 20) * (s + 1) * (s + 1) <= binding) ++s;
++    return s;
++}
+ std::uint32_t g_override_words = kDecodedOverrideWords;
+ constexpr std::uint32_t kDecodePrims = 64;
+ 
+@@ -4192,6 +4203,7 @@ static bool open_backend([[maybe_unused]] std::uint32_t backends, const char *na
+     limits.maxStorageBufferBindingSize = supported.maxStorageBufferBindingSize;
+     limits.maxBufferSize = supported.maxBufferSize;
+     g_max_binding = std::min<std::uint64_t>(supported.maxStorageBufferBindingSize, supported.maxBufferSize);
++    g_max_scale = max_scale_for(g_max_binding);
+     WGPUDeviceDescriptor dd = WGPU_DEVICE_DESCRIPTOR_INIT;
+     dd.requiredLimits = &limits;
+     WGPUFeatureName features[2];
+@@ -4242,7 +4254,14 @@ bool init(Mode m) {
+         for (char &c : backend) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+         if (backend == "vulkan") order.push_back({WGPUInstanceBackend_Vulkan, "Vulkan"}), forced = true;
+         else if (backend == "dx12" || backend == "d3d12") order.push_back({WGPUInstanceBackend_DX12, "Direct3D 12"}), forced = true;
+-        else std::fprintf(stderr, "[gpu] PS2_GPU_BACKEND=%s is not vulkan, dx12 or d3d12: ignored\n", os::env("PS2_GPU_BACKEND").c_str());
++        // rawdanger-recomp (v0.10.4): "vulkan-first" / "dx12-first" (keys.ini graphics_api, the in-game setting): that API first and
++        // the other one when it cannot start, so a PC without a Vulkan driver still gets a picture
++        else if (backend == "vulkan-first") order.push_back({WGPUInstanceBackend_Vulkan, "Vulkan"}), order.push_back({WGPUInstanceBackend_DX12, "Direct3D 12"});
++        else if (backend == "dx12-first" || backend == "d3d12-first") order.push_back({WGPUInstanceBackend_DX12, "Direct3D 12"}), order.push_back({WGPUInstanceBackend_Vulkan, "Vulkan"});
++        else std::fprintf(stderr, "[gpu] PS2_GPU_BACKEND=%s is not vulkan, dx12, vulkan-first or dx12-first: ignored\n", os::env("PS2_GPU_BACKEND").c_str());
++#ifndef _WIN32
++        if (!forced && !order.empty()) order.clear(), order.push_back({WGPUInstanceBackend_Primary, "the best API"});   // (no Direct3D here)
++#endif
+     }
+     if (order.empty()) {
+ #ifdef _WIN32
+@@ -4283,8 +4302,10 @@ bool init(Mode m) {
+         if (order.size() == 1) break;
+     }
+     if (!chosen) return false;
++    g_api_name = chosen->name;
+     if (forced) std::fprintf(stderr, "[gpu] graphics API: %s (asked for by PS2_GPU_BACKEND)\n", chosen->name);
+-    else if (chosen == &order[0] && order.size() > 1) std::fprintf(stderr, "[gpu] graphics API: %s (the default on Windows%s; PS2_GPU_BACKEND=vulkan or dx12 picks)\n", chosen->name,
++    else if (chosen == &order[0] && order.size() > 1) std::fprintf(stderr, "[gpu] graphics API: %s (%s%s; PS2_GPU_BACKEND=vulkan or dx12 picks)\n", chosen->name,
++                 os::env("PS2_GPU_BACKEND").empty() ? "the default on Windows" : "asked for first",
+                  hw::enabled() ? " with PS2_GPU_HW=1" :
+                  "");
+     else if (order.size() > 1) std::fprintf(stderr, "[gpu] graphics API: %s (%s could not be used, see above)\n", chosen->name, order[0].name);
+@@ -4309,6 +4330,12 @@ bool init(Mode m) {
+         }
+     }
+     if (const char *scale = std::getenv("PS2_SCALE")) g_scale = std::clamp<std::uint32_t>(static_cast<std::uint32_t>(std::atoi(scale)), 1u, 8u);
++    if (g_scale > g_max_scale) {
++        std::fprintf(stderr, "[gpu] inner resolution %ux is more than %s can hold (it binds %llu MB of one buffer): %ux instead%s\n", g_scale, g_api_name,
++                     static_cast<unsigned long long>(g_max_binding >> 20), g_max_scale,
++                     std::strcmp(g_api_name, "Direct3D 12") == 0 ? " (Vulkan allows more: Settings > Graphics API)" : "");
++        g_scale = g_max_scale;
++    }
+     // PS2_SHARP_2D: how upscaled 2D art (text, icons, menus) is filtered, see SHARP in gs.wgsl: 0 plain bilinear, 1 sharp (the
+     // default), 2 sharpest
+     if (const char *sharp = std::getenv("PS2_SHARP_2D")) g_sharp_2d = std::clamp<std::uint32_t>(static_cast<std::uint32_t>(std::atoi(sharp)), 0u, 2u);
+@@ -5256,7 +5283,11 @@ void apply_scale_request() {
+         remake_programs();
+         dec_reset();   // what was decoded with the old programs is decoded again
+     }
+-    const std::uint32_t want = g_scale_request.exchange(0);
++    std::uint32_t want = g_scale_request.exchange(0);
++    if (want > g_max_scale) {
++        std::fprintf(stderr, "[gpu] inner resolution %ux is more than %s can hold: %ux instead\n", want, g_api_name, g_max_scale);
++        want = g_max_scale;
++    }
+     if (want == 0 || want == g_scale || !g_vram) return;
+     std::vector<std::uint32_t> vram, clut;
+     std::uint32_t old = 1;
+@@ -5659,6 +5690,48 @@ bool present(const DisplaySource &src) {
+     post::g_present_texture = st.texture;
+     submit(target);
+     post::g_present_texture = nullptr;
++    // rawdanger-recomp (v0.10.4): PS2_PRESENT_DUMP=<frame>,<file.ppm> writes the picture as the window gets it (after SMAA, before the
++    // enlargement to the window) at that vblank: the anti-aliasing compared on the same frame (tests, reports)
++    {
++        static unsigned long long dump_at = 0;
++        static std::string dump_file;
++        static const bool dump_set = [] {
++            const std::string v = os::env("PS2_PRESENT_DUMP");
++            const std::size_t comma = v.find(',');
++            if (comma == std::string::npos) return false;
++            dump_at = std::strtoull(v.c_str(), nullptr, 10), dump_file = v.substr(comma + 1);
++            return dump_at > 0 && !dump_file.empty();
++        }();
++        if (dump_set && frame_count() >= dump_at) {
++            dump_at = ~0ull;
++            const std::uint32_t w = blit[0], h = blit[1];
++            std::vector<std::uint32_t> px(static_cast<std::size_t>(w) * h);
++            read_back(g_scratch, px.size() * 4ull, px.data(), static_cast<std::uint64_t>(current) * 4);
++            if (std::FILE *f = os::open(dump_file.c_str(), "wb")) {
++                std::fprintf(f, "P6\n%u %u\n255\n", w, h);
++                for (std::uint32_t c : px) {
++                    const unsigned char rgb[3] = {static_cast<unsigned char>(c), static_cast<unsigned char>(c >> 8), static_cast<unsigned char>(c >> 16)};
++                    std::fwrite(rgb, 1, 3, f);
++                }
++                std::fclose(f);
++                std::fprintf(stderr, "[present] picture of vblank %llu written to %s (%ux%u, SMAA %s)\n", static_cast<unsigned long long>(frame_count()), dump_file.c_str(), w, h,
++                             (ps2::video_options() & 16u) ? "on" : "off");
++            }
++            if ((ps2::video_options() & 16u) && g_smaa_work && g_smaa_words >= px.size() * 3) {   // SMAA's edges and weights beside it
++                for (int part = 0; part < 2; ++part) {
++                    read_back(g_smaa_work, px.size() * 4ull, px.data(), static_cast<std::uint64_t>(part) * px.size() * 4);
++                    if (std::FILE *f = os::open((dump_file + (part ? ".weights.ppm" : ".edges.ppm")).c_str(), "wb")) {
++                        std::fprintf(f, "P6\n%u %u\n255\n", w, h);
++                        for (std::uint32_t c : px) {
++                            const unsigned char rgb[3] = {static_cast<unsigned char>(c), static_cast<unsigned char>(c >> 8), static_cast<unsigned char>(part ? c >> 16 : 0)};
++                            std::fwrite(rgb, 1, 3, f);
++                        }
++                        std::fclose(f);
++                    }
++                }
++            }
++        }
++    }
+     if (log.on) log.lap(log.submit);
+     if (!post::g_presented_async) {  // else the submit thread presents it and releases the texture (post)
+ #ifndef __EMSCRIPTEN__
+@@ -5938,6 +6011,8 @@ void set_sharp_2d(unsigned sharp) { ps2::gs::gpu::g_sharp_request = static_cast<
+ void set_jp_textures(bool on) { ps2::gs::gpu::g_jp_textures = on; }
+ void set_internal_scale(unsigned scale) { ps2::gs::gpu::g_scale_request = std::clamp(scale, 1u, 8u); }
+ unsigned internal_scale() { return ps2::gs::gpu::g_scale; }
++unsigned max_internal_scale() { return ps2::gs::gpu::g_max_scale; }
++const char *graphics_api() { return ps2::gs::gpu::g_api_name; }
+ 
+ void set_button_prompts(const std::string labels[4]) {
+     {
+diff --git a/runtime/src/gs/gpu/gs.wgsl b/runtime/src/gs/gpu/gs.wgsl
+index 4aa17b0..024c54b 100644
+--- a/runtime/src/gs/gpu/gs.wgsl
++++ b/runtime/src/gs/gpu/gs.wgsl
+@@ -1820,8 +1820,12 @@ fn game_ao(@builtin(global_invocation_id) gid: vec3<u32>) {
+             col = mix(col, vec3<f32>(40.0, 120.0, 255.0), wet * 0.6);   // debug: the capsules shown plainly
+         } else if (wet > 0.0) {
+             // v0.9.5: wet cloth and hair: water fills the fibres, less light scatters back (darker) and what does is richer in colour
++            // v0.10.4: stronger, now that the pass runs after the colour filter (whose dark-end curve used to deepen it two or
++            // three times over): a steeper curve (wet cloth darkens its darks most, a highlight stays), richer colour, darker
+             let luma = dot(col, vec3<f32>(0.299, 0.587, 0.114));
+-            col = mix(col, (vec3<f32>(luma) + (col - vec3<f32>(luma)) * 1.25) * 0.62, wet);
++            let rich = max(vec3<f32>(luma) + (col - vec3<f32>(luma)) * 1.4, vec3<f32>(0.0));
++            let curved = pow(rich / 255.0, vec3<f32>(1.25)) * 255.0;
++            col = mix(col, curved * 0.6, wet);
+         }
+         let o = vec3<u32>(clamp(col, vec3<f32>(0.0), vec3<f32>(255.0)));
+         store(fl, k, o.x | (o.y << 8u) | (o.z << 16u) | (c & 0xFF000000u));
+diff --git a/runtime/src/gs/gpu/smaa.wgsl b/runtime/src/gs/gpu/smaa.wgsl
+index ffcde89..9e4202e 100644
+--- a/runtime/src/gs/gpu/smaa.wgsl
++++ b/runtime/src/gs/gpu/smaa.wgsl
+@@ -112,7 +112,12 @@ fn weight_texel(x: i32, y: i32) -> vec4<f32> {
+ }
+ 
+ // ---- pass 1: luma edge detection --------------------------------------------------------------------------------------
+-fn luma(x: i32, y: i32) -> f32 { return dot(color_texel(x, y).rgb, vec3<f32>(0.2126, 0.7152, 0.0722)); }
++// rawdanger-recomp (v0.10.4): the brightness compared on a square-root curve. Raw Danger's pictures are dark (night, rain, the
++// colour filter's haze: most of a frame between 5 and 25 % brightness), and on the plain luma almost no edge there passes the
++// reference's threshold: SMAA changed 0.4 % of the pixels of a street at night and the stairs on the hero's outline stayed. The
++// curve spreads the dark tones (a step from 4 to 9 % reads as 10 points, from 64 to 72 % as 5): dark edges get found, bright
++// areas are judged nearly as before.
++fn luma(x: i32, y: i32) -> f32 { return sqrt(dot(color_texel(x, y).rgb, vec3<f32>(0.2126, 0.7152, 0.0722))); }
+ 
+ @compute @workgroup_size(8, 8)
+ fn edges(@builtin(global_invocation_id) id: vec3<u32>) {
+diff --git a/runtime/src/system.cpp b/runtime/src/system.cpp
+index 0bb0b25..ec55cb2 100644
+--- a/runtime/src/system.cpp
++++ b/runtime/src/system.cpp
+@@ -1215,6 +1215,10 @@ struct Orbit {
+ Orbit g_orbit;
+ std::atomic<bool> g_orbit_on{true};
+ std::atomic<float> g_orbit_turn{0.0f};
++// v0.10.4: looking up. The orbit's lowest place puts the camera about 1.2 m over the floor under the hero, still looking down at
++// him ("blocked at ground level"); a further turn down raises the camera's aim instead, up to 75 degrees (camera_frame_call turns
++// the view after the game's camera step); turning back up lowers the aim first.
++std::atomic<float> g_orbit_lift{0.0f};
+ float word_float(std::uint32_t w) { float f; std::memcpy(&f, &w, 4); return f; }
+ std::uint32_t float_word(float f) { std::uint32_t w; std::memcpy(&w, &f, 4); return w; }
+ void orbit_call(Cpu &c) {
+@@ -1234,7 +1238,15 @@ void orbit_call(Cpu &c) {
+     if (!std::isfinite(dist) || dist < 0.5f || along <= 0.0f) return;
+     const float now = std::atan2(over, along);
+     const float low = -std::asin(std::min(1.2f / dist, 0.99f));
+-    const float to = std::clamp(now + turn, std::min(low, now), std::max(1.31f, now));
++    float want = now + turn;
++    float lift = g_orbit_lift.load(std::memory_order_relaxed);
++    if (want < low && now <= low + 0.01f) lift = std::min(1.3f, lift + (low - want)), want = low;   // past the floor: the aim goes up
++    else if (turn > 0.0f && lift > 0.0f) {                                                         // back up: the aim comes down first
++        const float back = std::min(lift, turn);
++        lift -= back, want = now + (turn - back);
++    }
++    g_orbit_lift.store(lift, std::memory_order_relaxed);
++    const float to = std::clamp(want, std::min(low, now), std::max(1.31f, now));
+     const float new_over = dist * std::sin(to), new_along = std::max(0.3f, dist * std::cos(to));
+     st32(cam + g_orbit.look, float_word(new_over - base));
+     st32(cam + g_orbit.height, float_word(new_along));
+@@ -1296,6 +1308,48 @@ void free_camera_call(Cpu &c) {
+     call(c, g_free_camera.run, 1);
+     c.r[31].sd[0] = static_cast<std::int32_t>(back);
+ }
++// v0.10.4: the camera's frame. During play the game makes the camera once a step in 0x17DC80: its first call (at 0x17DC88) is the
++// camera's step (0x17D210), which leaves the direction it looks in at +0x1B0 (a unit vector, y pointing down); the view matrix is
++// then made from that direction. PS2_CAMERA_FRAME="CALL,AT,STEP,POINTER,MODE" (hex): the pnach section [Orbit camera] makes the
++// call at AT a call to the host, which runs STEP and then, with the orbit's lift (looking up), tilts that direction up. Only the
++// follow camera (mode 0) and with no cutscene bars for a second; anything else ends the lift. (v0.10.0 raised the point looked at
++// instead, +0x310, after the step: too late, the direction was already made from it.)
++struct CameraFrame { bool set = false; std::uint32_t call = 0, at = 0, step = 0, pointer = 0, mode = 0; };
++CameraFrame g_camera_frame;
++void camera_frame_call(Cpu &c) {
++    const std::uint32_t back = c.r[31].w[0];
++    call(c, g_camera_frame.step, 1);
++    c.r[31].sd[0] = static_cast<std::int32_t>(back);
++    const float lift = g_orbit_lift.load(std::memory_order_relaxed);
++    if (lift <= 0.0f) return;
++    const std::uint32_t cam = ld32(g_camera_frame.pointer);
++    if (cam < 0x100000u || cam >= 0x2000000u) return;
++    if (!g_orbit_on.load(std::memory_order_relaxed) || ld32(cam + g_camera_frame.mode) != 0 || ms_since_cinema_bars() < 1000) {
++        g_orbit_lift.store(0.0f, std::memory_order_relaxed);
++        return;
++    }
++    const float fx = word_float(ld32(cam + 0x1B0)), fy = word_float(ld32(cam + 0x1B4)), fz = word_float(ld32(cam + 0x1B8));
++    const float h = std::hypot(fx, fz);
++    if (!std::isfinite(h) || h < 1e-4f) return;
++    const float pitch = std::atan2(fy, h);                          // + down
++    const float to = std::max(pitch - lift, -1.48f);               // up to about 85 degrees over the horizon
++    st32(cam + 0x1B0, float_word(fx / h * std::cos(to)));
++    st32(cam + 0x1B4, float_word(std::sin(to)));
++    st32(cam + 0x1B8, float_word(fz / h * std::cos(to)));
++}
++struct CameraFrameSetup {
++    CameraFrameSetup() {
++        const char *v = std::getenv("PS2_CAMERA_FRAME");   // without it, Raw Danger's (US) own, as for the free camera
++        if (!v || !*v) v = "CB,17DC88,17D210,48F4E0,3EC";
++        unsigned long n = 0, at = 0, step = 0, pointer = 0, mode = 0;
++        if (std::sscanf(v, "%lx,%lx,%lx,%lx,%lx", &n, &at, &step, &pointer, &mode) != 5 || n >= kHostCalls) return;
++        g_camera_frame = {true, static_cast<std::uint32_t>(n), static_cast<std::uint32_t>(at), static_cast<std::uint32_t>(step),
++                          static_cast<std::uint32_t>(pointer), static_cast<std::uint32_t>(mode)};
++        register_host_call(g_camera_frame.call, &camera_frame_call);
++    }
++};
++CameraFrameSetup g_camera_frame_setup;
++
+ struct FreeCameraSetup {
+     FreeCameraSetup() {
+         const char *v = std::getenv("PS2_FREE_CAMERA");   // without it, Raw Danger's (US) own, as for the orbit camera
+-- 
+2.43.0
+

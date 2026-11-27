@@ -8,6 +8,7 @@
 #include <cctype>
 #include <cstdio>
 #include <cstdlib>
+#include <cmath>
 #include <cstring>
 #include <map>
 
@@ -225,6 +226,10 @@ std::string with_window_size(const std::string &file_text, int w, int h) {
 std::string with_menu_skin(const std::string &file_text, int skin) { return with_line(file_text, "menuskin", std::string("menu_skin = ") + (skin == 2 ? "game" : skin == 1 ? "japanese" : "hazard")); }
 std::string with_integer_scale(const std::string &file_text, int on) { return with_line(file_text, "integerscale", "integer_scale = " + std::to_string(on ? 1 : 0)); }
 std::string with_lens_rain(const std::string &file_text, int level) { return with_line(file_text, "rainonlens", std::string("rain_on_lens = ") + (level ? "on" : "off")); }
+std::string with_graphics_api(const std::string &file_text, int api) {
+    static const char *const kNames[3] = {"auto", "vulkan", "dx12"};
+    return with_line(file_text, "graphicsapi", std::string("graphics_api = ") + kNames[std::clamp(api, 0, 2)]);
+}
 std::string with_smaa(const std::string &file_text, int on) {
     static const char *const kNames[6] = {"off", "low", "medium", "high", "ultra", "fxaa"};   // rawdanger-recomp: 5 = FXAA
     return with_line(file_text, "smaa", std::string("smaa = ") + kNames[std::clamp(on, 0, 5)]);
@@ -237,9 +242,14 @@ const char *sharp_2d_word(int sharp) {
 
 std::string with_master_volume(const std::string &file_text, int percent) { return with_line(file_text, "mastervolume", "master_volume = " + std::to_string(percent)); }
 std::string with_filter_pass(const std::string &file_text, int fast) { return with_line(file_text, "postprocessing", std::string("post_processing = ") + (fast ? "fast" : "original")); }
-std::string with_field_of_view(const std::string &file_text, int percent) {
-    return with_line(file_text, "fieldofview", "field_of_view = " + std::to_string(std::clamp(percent, 80, 150)));
+std::string with_field_of_view(const std::string &file_text, int degrees) {
+    return with_line(file_text, "fieldofview", degrees <= 0 ? std::string("field_of_view = ps2") : "field_of_view = " + std::to_string(std::clamp(degrees, 30, 130)) + " deg");
 }
+// Raw Danger's projection: 768 units from the eye to the screen, the picture 640 wide (its x scaled by 3/4 with the 16:9 patch):
+// tan(half) = 320 / 768 = 0.4167 at 4:3 (45 degrees across), 320 / 576 = 0.5556 at 16:9 (58 degrees across)
+const int kFieldsOfView[] = {0, 45, 50, 55, 60, 65, 70, 75, 80, 85, 90, 95, 100, 105, 110};
+const int kFieldsOfViewCount = static_cast<int>(sizeof kFieldsOfView / sizeof kFieldsOfView[0]);
+int game_field_of_view(bool widescreen) { return widescreen ? 58 : 45; }
 
 std::string with_ambient_occlusion(const std::string &file_text, int level) {
     static const char *const kNames[] = {"off", "light", "strong"};
@@ -384,6 +394,14 @@ void parse(const std::string &text, Config &config, std::vector<std::string> &pr
         if (name == "pace") {
             if (ps2::pace::parse(value)) config.pace = value;
             else bad("pace is 30, 20, 15, 60 or off, ignored");
+            continue;
+        }
+        if (name == "graphicsapi") {
+            const std::string v = squash(value);
+            if (v == "auto") config.graphics_api = 0;
+            else if (v == "vulkan") config.graphics_api = 1;
+            else if (v == "dx12" || v == "d3d12" || v == "direct3d" || v == "direct3d12") config.graphics_api = 2;
+            else bad("graphics_api is auto, vulkan or dx12, ignored");
             continue;
         }
         if (name == "smaa") {
@@ -532,10 +550,14 @@ void parse(const std::string &text, Config &config, std::vector<std::string> &pr
             continue;
         }
         if (name == "fieldofview" || name == "fov") {
+            if (value == "ps2" || value == "game" || value == "0") { config.field_of_view = 0; continue; }
             char *end = nullptr;
             const long v = std::strtol(value.c_str(), &end, 10);
-            if (end != value.c_str() && v >= 80 && v <= 150) config.field_of_view = static_cast<int>(v);
-            else bad("field_of_view is a number from 80 to 150 (per cent of the game's), ignored");
+            const bool degrees = end && (std::strstr(end, "deg") != nullptr || std::strstr(end, "\xC2\xB0") != nullptr);
+            if (end != value.c_str() && degrees && v >= 30 && v <= 130) config.field_of_view = static_cast<int>(v);
+            else if (end != value.c_str() && !degrees && v >= 80 && v <= 150)   // before v0.10.4: per cent of the game's (16:9)
+                config.field_of_view = v == 100 ? 0 : static_cast<int>(std::lround(2.0 * std::atan(320.0 / 576.0 * v / 100.0) * 57.29578));
+            else bad("field_of_view is ps2 or degrees across, from 30 to 130 (\"90 deg\"), ignored");
             continue;
         }
         if (name == "popupsize") {

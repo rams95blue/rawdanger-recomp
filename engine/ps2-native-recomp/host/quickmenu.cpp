@@ -118,8 +118,8 @@ constexpr const char *kKeys[kEntries] = {"F1", "F5", "F8", "F3", "F4", "", ""};
 // Settings: one page, six tabs (the Game and Debug tabs list rows the window fills: the game's own options, the test switches)
 constexpr const char *kTabNames[Menu::kTabs] = {"DISPLAY", "PICTURE", "SOUND", "CONTROLS", "GAME", "DEBUG"};
 constexpr int kAchievementRows = 7;   // rawdanger-recomp: achievements lines shown at a time (bigger panel)
-constexpr Command kDisplay[] = {Command::scale, Command::window_size, Command::fullscreen, Command::widescreen, Command::integer_scale, Command::menu_game_runs, Command::pause_unfocused, Command::menu_skin, Command::popup_size, Command::back};
-constexpr const char *kDisplayKeys[] = {"", "", "F11", "", "", "", "", "", "", "Esc"};
+constexpr Command kDisplay[] = {Command::scale, Command::graphics_api, Command::window_size, Command::fullscreen, Command::widescreen, Command::integer_scale, Command::menu_game_runs, Command::pause_unfocused, Command::menu_skin, Command::popup_size, Command::back};
+constexpr const char *kDisplayKeys[] = {"", "", "", "F11", "", "", "", "", "", "", "Esc"};
 constexpr Command kPicture[] = {Command::field_of_view, Command::look, Command::antialias, Command::sharpen, Command::sharp_2d, Command::game_blur, Command::filter_pass, Command::ambient_occlusion, Command::wet_look, Command::black_bars, Command::lens_rain, Command::back};
 constexpr const char *kPictureKeys[] = {"", "F2", "", "", "", "", "", "", "", "", "", "Esc"};
 constexpr Command kSound[] = {Command::master_volume, Command::reverb, Command::back};
@@ -161,6 +161,8 @@ int game_text_width(int s, const std::string &line) {
     const float k = game_font_k(s);
     float x = 0;
     for (unsigned char ch : line) {
+        if (ch == 0xC2) continue;                               // v0.10.4: the degree sign (UTF-8 C2 B0), drawn as a small ring
+        if (ch == 0xB0) { x += 8 * k + s * 0.96f; continue; }
         const int c = (ch >= 32 && ch <= 126 ? ch : '?') - 32;
         x += (g_font.x1[c] - g_font.x0[c] + 1) * k + s * 0.96f;
     }
@@ -172,6 +174,26 @@ void game_text(Picture &p, int x, int y, int s, const std::string &line, std::ui
     float pen = static_cast<float>(x);
     const int top = 4;   // the font's capitals start 4 pixels into their cell
     for (unsigned char ch : line) {
+        if (ch == 0xC2) continue;
+        if (ch == 0xB0) {   // v0.10.4: the degree sign, a ring at the top of the capitals (the game's font has none)
+            const float r = 3.2f * k, cxr = pen + 4.0f * k, cyr = y + r + 0.5f * k, w = std::max(1.0f, 1.6f * k);
+            for (int py = static_cast<int>(cyr - r - 1); py <= static_cast<int>(cyr + r + 1); ++py)
+                for (int px = static_cast<int>(cxr - r - 1); px <= static_cast<int>(cxr + r + 1); ++px) {
+                    if (px < 0 || py < 0 || px >= p.width || py >= p.height) continue;
+                    const float d = std::fabs(std::hypot(px + 0.5f - cxr, py + 0.5f - cyr) - (r - w * 0.5f));
+                    const float cov = std::clamp(w * 0.5f + 0.5f - d, 0.0f, 1.0f);
+                    if (cov <= 0.0f) continue;
+                    std::uint32_t &dst = p.rgba[static_cast<std::size_t>(py) * p.width + px];
+                    std::uint32_t out = 0;
+                    for (int sh = 0; sh < 24; sh += 8) {
+                        const float a = static_cast<float>((color >> sh) & 255u), b = static_cast<float>((dst >> sh) & 255u);
+                        out |= static_cast<std::uint32_t>(a * cov + b * (1 - cov) + 0.5f) << sh;
+                    }
+                    dst = out | (std::max(dst >> 24, static_cast<std::uint32_t>(cov * 255.0f)) << 24);
+                }
+            pen += 8 * k + s * 0.96f;
+            continue;
+        }
         const int c = (ch >= 32 && ch <= 126 ? ch : '?') - 32;
         const int cx = (c % 16) * 24 + g_font.x0[c], cy = (2 + c / 16) * 24 + top, gw = g_font.x1[c] - g_font.x0[c] + 1, gh = 19;
         const int tw = static_cast<int>(gw * k + 1.0f), th = static_cast<int>(gh * k + 1.0f), tx0 = static_cast<int>(pen);
@@ -401,7 +423,7 @@ std::string entry_text(Command c, const Values &v, bool quit_armed) {
     case Command::reverb: return std::string("Reverb (rooms, tunnels):  < ") + (v.reverb ? "on" : "off") + " >";
     case Command::widescreen: return v.widescreen < 0 ? "Widescreen: not in this game" : std::string("Widescreen 16:9:  < ") + (v.widescreen ? "on" : "off") + " >";
     case Command::field_of_view:
-        return std::string("Field of view:  < ") + (v.field_of_view == 100 ? std::string("100 % (as on the PS2)") : std::to_string(v.field_of_view) + " %") + " >";
+        return std::string("Field of view:  < ") + (v.field_of_view <= 0 ? std::string("as on the PS2") : std::to_string(v.field_of_view) + " deg across") + " >";
     case Command::ambient_occlusion: {
         static const char *const kLevels[] = {"off", "light", "strong"};
         return std::string("Ambient occlusion (shading in corners):  < ") + kLevels[std::clamp(v.ambient_occlusion, 0, 2)] + " >";
@@ -437,7 +459,12 @@ std::string entry_text(Command c, const Values &v, bool quit_armed) {
             return std::to_string(640 * n) + " x " + std::to_string(448 * n) + " (" + std::to_string(n) + "x)";
         };
         if (v.scale_locked) return "Internal resolution: " + name(v.scale_now) + " (set by PS2_SCALE)";
-        return "Internal resolution:  < " + name(v.scale_next) + " >";
+        return "Internal resolution:  < " + name(v.scale_next) + " >" + (v.scale_max < 8 ? "  (up to " + std::to_string(v.scale_max) + "x here)" : std::string());
+    }
+    case Command::graphics_api: {
+        static const char *const kNames[] = {"auto", "Vulkan", "Direct3D 12"};
+        const std::string now = v.graphics_api_now.empty() || v.graphics_api_now == "none" ? std::string() : "  (now " + v.graphics_api_now + ")";
+        return std::string("Graphics API:  < ") + kNames[std::clamp(v.graphics_api, 0, 2)] + " >" + now;
     }
     case Command::sharp_2d: {
         static const char *const kNames[] = {"soft", "sharp", "sharpest"};
@@ -634,7 +661,7 @@ Command Menu::side() const {
     if ((page_ == Page::recomp || (page_ == Page::graphics && tab_ >= kGameTab)) && selected_ < recomp_rows_) return Command::recomp_toggle;
     if (page_ != Page::graphics || tab_ >= kGameTab) return Command::none;
     const Command c = kTabLists[tab_].commands[selected_];
-    return c == Command::look || c == Command::scale || c == Command::sharp_2d || c == Command::fullscreen || c == Command::widescreen || c == Command::pause_unfocused || c == Command::menu_game_runs ||
+    return c == Command::look || c == Command::scale || c == Command::graphics_api || c == Command::sharp_2d || c == Command::fullscreen || c == Command::widescreen || c == Command::pause_unfocused || c == Command::menu_game_runs ||
                    c == Command::master_volume || c == Command::integer_scale || c == Command::lens_rain || c == Command::antialias || c == Command::menu_skin ||
                    c == Command::window_size || c == Command::game_blur || c == Command::reverb || c == Command::key_prompts || c == Command::mouse_look || c == Command::camera_orbit || c == Command::free_camera || c == Command::head_follow || c == Command::wet_look || c == Command::anim_layers || c == Command::black_bars || c == Command::sharpen ||
                    c == Command::mouse_speed || c == Command::mouse_invert || c == Command::mouse_invert_x || c == Command::popup_size || c == Command::keys_on_screen || c == Command::filter_pass || c == Command::ambient_occlusion || c == Command::field_of_view
