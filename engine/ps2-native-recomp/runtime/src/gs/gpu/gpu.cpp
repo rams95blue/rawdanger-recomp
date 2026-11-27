@@ -132,16 +132,20 @@ WGPUBindGroupLayout g_interp_layout = nullptr;
 constexpr int kInterpSlots = 8;
 WGPUBuffer g_interp_work = nullptr, g_interp_params[kInterpSlots] = {}, g_interp_depth[2] = {nullptr, nullptr};
 WGPUBindGroup g_interp_group[kInterpSlots][2] = {};   // per slot, per depth snapshot
+WGPUBuffer g_interp_bones[kInterpSlots] = {};          // v0.10.6: per slot, the characters and their bones' moves (interp.wgsl binding 4)
 int g_interp_slot = 0;
 std::uint64_t g_interp_words = 0;
 constexpr std::uint32_t kInterpParamBytes = 464 * 4;   // interp.wgsl Params
 constexpr std::uint32_t kInterpDepthWords = 1024u * 1024u;   // the game's picture, one value per game pixel (640 x 448 here)
-struct InterpJob { bool on = false; int buf = 0; std::uint32_t base = 0, width = 0, height = 0; float p[kInterpParamBytes / 4] = {}; } g_interp_job;
+struct InterpJob { bool on = false; int buf = 0; std::uint32_t base = 0, width = 0, height = 0; float p[kInterpParamBytes / 4] = {}; std::vector<float> bones; } g_interp_job;
 namespace interp {
 // 0 off, 1 smooth (the picture shown with the camera between the last two steps: two thirds of a step later, always right),
 // 2 predict (the camera carried on past the last step: no delay, a little off where it turns)
 std::atomic<int> g_mode{[] { const char *v = std::getenv("PS2_FRAME_GEN"); return v ? std::clamp(std::atoi(v), 0, 2) : 0; }()};
-struct Pic { bool valid = false; int buf = 0; float m[16] = {}; float ofx = 0, ofy = 0; std::uint32_t w = 0, h = 0; int limbs = 0; float limb[12][8] = {}; };
+struct Pic { bool valid = false; int buf = 0; float m[16] = {}; float ofx = 0, ofy = 0; std::uint32_t w = 0, h = 0; int limbs = 0; float limb[12][8] = {};
+             std::vector<float> bones; int nbones = 0; };   // v0.10.6: every character's bones (system.cpp all_bones_world, 21 floats each)
+constexpr int kBoneFloats = 21, kMaxChars = 64, kMaxBones = 2048;
+constexpr std::uint32_t kBoneBufFloats = 4 + kMaxChars * 8 + kMaxBones * 24;
 Pic g_cur, g_prev;
 bool g_captured = false;
 int g_pending = 0;
@@ -153,7 +157,7 @@ std::atomic<bool> g_log_on{std::getenv("PS2_FRAME_GEN_LOG") != nullptr};   // Se
 inline bool log_on() { return g_log_on.load(std::memory_order_relaxed); }
 // Settings > Debug: 0 the picture, 1 the places nothing landed on in magenta, 2 the depth moved (bright near); PS2_FRAME_GEN_HOLES /
 // PS2_FRAME_GEN_DEPTH at the start
-std::atomic<int> g_view{std::getenv("PS2_FRAME_GEN_HOLES") ? 1 : std::getenv("PS2_FRAME_GEN_DEPTH") ? 2 : 0};
+std::atomic<int> g_view{std::getenv("PS2_FRAME_GEN_HOLES") ? 1 : std::getenv("PS2_FRAME_GEN_DEPTH") ? 2 : std::getenv("PS2_FRAME_GEN_BONES_VIEW") ? 3 : 0};
 }
 // PS2_PRESENT_DUMP / Settings > Debug > Save the next pictures: the presents to write (present())
 std::mutex g_dump_mutex;
@@ -3048,8 +3052,9 @@ void encode_smaa(WGPUCommandEncoder enc) {
 // rawdanger-recomp (v0.10.5): frame generation's four passes over the picture just made (g_interp_job), after SMAA, the result
 // copied back over it in the scratch buffer.
 void encode_interp(WGPUCommandEncoder enc) {
-    const InterpJob job = g_interp_job;
+    const InterpJob job = std::move(g_interp_job);
     g_interp_job.on = false;
+    g_interp_job.bones.clear();
     if (!job.on || !g_interp_splat || job.width == 0 || job.height == 0 || !g_interp_depth[job.buf & 1]) return;
     const std::uint64_t n = static_cast<std::uint64_t>(job.width) * job.height;
     if (n * 3 > g_interp_words || !g_interp_group[0][0]) {
@@ -3062,14 +3067,15 @@ void encode_interp(WGPUCommandEncoder enc) {
         for (int slot = 0; slot < kInterpSlots; ++slot)
         for (int i = 0; i < 2; ++i) {
             if (!g_interp_depth[i]) g_interp_depth[i] = make_buffer(kInterpDepthWords * 4ull, WGPUBufferUsage_Storage | WGPUBufferUsage_CopyDst | WGPUBufferUsage_CopySrc);
-            WGPUBindGroupEntry be[4] = {WGPU_BIND_GROUP_ENTRY_INIT, WGPU_BIND_GROUP_ENTRY_INIT, WGPU_BIND_GROUP_ENTRY_INIT, WGPU_BIND_GROUP_ENTRY_INIT};
+            WGPUBindGroupEntry be[5] = {WGPU_BIND_GROUP_ENTRY_INIT, WGPU_BIND_GROUP_ENTRY_INIT, WGPU_BIND_GROUP_ENTRY_INIT, WGPU_BIND_GROUP_ENTRY_INIT, WGPU_BIND_GROUP_ENTRY_INIT};
             be[0].binding = 0; be[0].buffer = g_scratch; be[0].size = WGPU_WHOLE_SIZE;
             be[1].binding = 1; be[1].buffer = g_interp_work; be[1].size = WGPU_WHOLE_SIZE;
             be[2].binding = 2; be[2].buffer = g_interp_depth[i]; be[2].size = WGPU_WHOLE_SIZE;
             be[3].binding = 3; be[3].buffer = g_interp_params[slot]; be[3].size = kInterpParamBytes;
+            be[4].binding = 4; be[4].buffer = g_interp_bones[slot]; be[4].size = WGPU_WHOLE_SIZE;
             WGPUBindGroupDescriptor bd = WGPU_BIND_GROUP_DESCRIPTOR_INIT;
             bd.layout = g_interp_layout;
-            bd.entryCount = 4;
+            bd.entryCount = 5;
             bd.entries = be;
             g_interp_group[slot][i] = wgpuDeviceCreateBindGroup(g_device, &bd);
         }
@@ -3077,6 +3083,7 @@ void encode_interp(WGPUCommandEncoder enc) {
     const int slot = g_interp_slot;
     g_interp_slot = (g_interp_slot + 1) % kInterpSlots;
     wgpuQueueWriteBuffer(g_queue, g_interp_params[slot], 0, job.p, kInterpParamBytes);
+    if (!job.bones.empty()) wgpuQueueWriteBuffer(g_queue, g_interp_bones[slot], 0, job.bones.data(), job.bones.size() * 4);
     WGPUComputePassDescriptor cd = WGPU_COMPUTE_PASS_DESCRIPTOR_INIT;
     WGPUComputePassEncoder pass = wgpuCommandEncoderBeginComputePass(enc, &cd);
     wgpuComputePassEncoderSetBindGroup(pass, 0, g_interp_group[slot][job.buf & 1], 0, nullptr);
@@ -3100,8 +3107,9 @@ bool make_interp() {
     md.nextInChain = &source.chain;
     WGPUShaderModule module = wgpuDeviceCreateShaderModule(g_device, &md);
     if (!module) return false;
-    WGPUBindGroupLayoutEntry le[4] = {WGPU_BIND_GROUP_LAYOUT_ENTRY_INIT, WGPU_BIND_GROUP_LAYOUT_ENTRY_INIT, WGPU_BIND_GROUP_LAYOUT_ENTRY_INIT, WGPU_BIND_GROUP_LAYOUT_ENTRY_INIT};
-    for (int i = 0; i < 4; ++i) {
+    WGPUBindGroupLayoutEntry le[5] = {WGPU_BIND_GROUP_LAYOUT_ENTRY_INIT, WGPU_BIND_GROUP_LAYOUT_ENTRY_INIT, WGPU_BIND_GROUP_LAYOUT_ENTRY_INIT, WGPU_BIND_GROUP_LAYOUT_ENTRY_INIT,
+                                      WGPU_BIND_GROUP_LAYOUT_ENTRY_INIT};
+    for (int i = 0; i < 5; ++i) {
         le[i].binding = static_cast<std::uint32_t>(i);
         le[i].visibility = WGPUShaderStage_Compute;
     }
@@ -3109,8 +3117,9 @@ bool make_interp() {
     le[1].buffer.type = WGPUBufferBindingType_Storage;
     le[2].buffer.type = WGPUBufferBindingType_ReadOnlyStorage;
     le[3].buffer.type = WGPUBufferBindingType_Uniform;
+    le[4].buffer.type = WGPUBufferBindingType_ReadOnlyStorage;
     WGPUBindGroupLayoutDescriptor ld = WGPU_BIND_GROUP_LAYOUT_DESCRIPTOR_INIT;
-    ld.entryCount = 4;
+    ld.entryCount = 5;
     ld.entries = le;
     g_interp_layout = wgpuDeviceCreateBindGroupLayout(g_device, &ld);
     WGPUPipelineLayoutDescriptor pld = WGPU_PIPELINE_LAYOUT_DESCRIPTOR_INIT;
@@ -3129,6 +3138,7 @@ bool make_interp() {
     wgpuPipelineLayoutRelease(layout);
     wgpuShaderModuleRelease(module);
     for (WGPUBuffer &b : g_interp_params) b = make_buffer(kInterpParamBytes, WGPUBufferUsage_Uniform | WGPUBufferUsage_CopyDst);
+    for (WGPUBuffer &b : g_interp_bones) b = make_buffer(interp::kBoneBufFloats * 4ull, WGPUBufferUsage_Storage | WGPUBufferUsage_CopyDst);
     const bool ok = g_interp_clear && g_interp_splat && g_interp_resolve && g_interp_fill;
     std::fprintf(stderr, "[gpu] frame generation %s\n", ok ? "ready" : "could not be made, the option does nothing");
     return ok;
@@ -3192,6 +3202,7 @@ void plan_interp(std::uint32_t base, std::uint32_t width, std::uint32_t height, 
     const int view = interp::g_view.load(std::memory_order_relaxed);
     j.p[45] = view == 2 ? 1.0f : 0.0f;   // debug: the depth moved instead of the colours
     j.p[46] = view == 1 ? 1.0f : 0.0f;   // debug: the places nothing landed on, magenta
+    j.p[47] = view == 3 ? 1.0f : 0.0f;   // debug: the pixels moved with a bone, a colour per bone
     for (unsigned b = 0; b < nb; ++b) {
         j.p[48 + b * 4 + 0] = boxes[b * 4 + 0] * static_cast<float>(game_w), j.p[48 + b * 4 + 1] = boxes[b * 4 + 1] * static_cast<float>(game_h);
         j.p[48 + b * 4 + 2] = boxes[b * 4 + 2] * static_cast<float>(game_w), j.p[48 + b * 4 + 3] = boxes[b * 4 + 3] * static_cast<float>(game_h);
@@ -3233,6 +3244,88 @@ void plan_interp(std::uint32_t base, std::uint32_t width, std::uint32_t height, 
         } else {
             j.p[416 + l * 4 + 0] = -1.0f;   // not on the screen: no pixel is on it
         }
+    }
+    // v0.10.6: the characters (a sphere round each, to skip them fast) and each bone: its segment (from its parent) as drawn, and
+    // the matrix that takes a point on it from the step drawn to the moment shown: (the drawn bone's matrix)^-1 x (the bone's matrix
+    // blended between the two steps), rows, the place in the fourth. A bone with no match in the step before, or that jumped (a new
+    // place, a cut), keeps its place.
+    if (g_cur.nbones > 0) {
+        std::vector<float> &out = j.bones;
+        out.assign(4 + kMaxChars * 8, 0.0f);
+        out.reserve(out.size() + static_cast<std::size_t>(std::min(g_cur.nbones, kMaxBones)) * 24);
+        std::unordered_map<std::uint32_t, int> before;
+        before.reserve(static_cast<std::size_t>(g_prev.nbones) * 2);
+        for (int b = 0; b < g_prev.nbones; ++b) {
+            std::uint32_t addr;
+            std::memcpy(&addr, &g_prev.bones[static_cast<std::size_t>(b) * kBoneFloats], 4);
+            before[addr] = b;
+        }
+        int chars = 0, bones = 0;
+        float last_char = -1.0f;
+        for (int b = 0; b < g_cur.nbones && bones < kMaxBones; ++b) {
+            const float *r = &g_cur.bones[static_cast<std::size_t>(b) * kBoneFloats];
+            if (r[1] != last_char) {   // a new character
+                if (chars == kMaxChars) break;
+                last_char = r[1];
+                out[4 + chars * 8 + 4] = static_cast<float>(bones);
+                ++chars;
+            }
+            const std::size_t ci = 4 + static_cast<std::size_t>(chars - 1) * 8;   // (an index: out grows below)
+            out[ci + 5] += 1.0f;
+            // affine matrices from the rows (the fourth column 0 0 0 1)
+            double fc[16], fp[16];
+            for (int i = 0; i < 4; ++i)
+                for (int k = 0; k < 4; ++k) fc[i * 4 + k] = k == 3 ? (i == 3 ? 1.0 : 0.0) : r[5 + i * 4 + k];
+            std::memcpy(fp, fc, sizeof fp);
+            std::uint32_t addr;
+            std::memcpy(&addr, r, 4);
+            const auto found = before.find(addr);
+            bool moved = false;
+            if (found != before.end()) {
+                const float *q = &g_prev.bones[static_cast<std::size_t>(found->second) * kBoneFloats];
+                const double jump = std::hypot(r[17] - q[17], r[18] - q[18], r[19] - q[19]);
+                if (jump < 2.0) {
+                    for (int i = 0; i < 4; ++i)
+                        for (int k = 0; k < 3; ++k) fp[i * 4 + k] = q[5 + i * 4 + k];
+                    moved = true;
+                }
+            }
+            float a16[16];
+            for (int i = 0; i < 16; ++i) a16[i] = static_cast<float>(fc[i]);
+            double inv[16];
+            double A[16];
+            if (moved && invert4(a16, inv)) {
+                double ff[16];
+                for (int i = 0; i < 16; ++i) ff[i] = fp[i] + (fc[i] - fp[i]) * f;
+                for (int i = 0; i < 4; ++i)
+                    for (int k = 0; k < 4; ++k) {
+                        double v = 0;
+                        for (int q2 = 0; q2 < 4; ++q2) v += inv[i * 4 + q2] * ff[q2 * 4 + k];
+                        A[i * 4 + k] = v;
+                    }
+            } else {
+                for (int i = 0; i < 16; ++i) A[i] = (i % 5 == 0) ? 1.0 : 0.0;
+            }
+            const std::size_t at = out.size();
+            out.resize(at + 24, 0.0f);
+            out[at + 0] = r[2], out[at + 1] = r[3], out[at + 2] = r[4];       // the parent's place
+            out[at + 4] = r[17], out[at + 5] = r[18], out[at + 6] = r[19];    // its own
+            for (int i = 0; i < 16; ++i) out[at + 8 + i] = static_cast<float>(A[i]);
+            out[ci + 0] += r[17], out[ci + 1] += r[18], out[ci + 2] += r[19];
+            ++bones;
+        }
+        for (int ci = 0; ci < chars; ++ci) {   // the spheres: the middle of the bones, out to the farthest one and half a metre more
+            float *c = &out[4 + ci * 8];
+            const float n = std::max(c[5], 1.0f);
+            c[0] /= n, c[1] /= n, c[2] /= n;
+            float most = 0.0f;
+            for (int b = static_cast<int>(c[4]); b < static_cast<int>(c[4] + c[5]); ++b) {
+                const float *o = &out[4 + kMaxChars * 8 + static_cast<std::size_t>(b) * 24 + 4];
+                most = std::max(most, std::hypot(o[0] - c[0], o[1] - c[1], o[2] - c[2]));
+            }
+            c[3] = most + 0.5f;
+        }
+        out[0] = static_cast<float>(chars), out[1] = static_cast<float>(bones);
     }
     j.on = true, j.buf = g_cur.buf, j.base = base, j.width = width, j.height = height;
     ++g_generated;
@@ -5254,10 +5347,18 @@ void interp_mark(const float *data, int n) {
         g_cur.buf = g_pending & 1;
         std::memcpy(g_cur.m, m, sizeof g_cur.m);
         g_cur.limbs = 0;
+        g_cur.nbones = 0;
+        g_cur.bones.clear();
         if (n >= 17) {
             const int limbs = std::clamp(static_cast<int>(data[16]), 0, std::min(12, (n - 17) / 8));
             for (int i = 0; i < limbs; ++i) std::memcpy(g_cur.limb[i], data + 17 + i * 8, sizeof g_cur.limb[i]);
             g_cur.limbs = limbs;
+            const int at = 17 + limbs * 8;   // v0.10.6: then the bones
+            if (n > at) {
+                const int nb = std::clamp(static_cast<int>(data[at]), 0, std::min(kMaxBones, (n - at - 1) / kBoneFloats));
+                g_cur.bones.assign(data + at + 1, data + at + 1 + nb * kBoneFloats);
+                g_cur.nbones = nb;
+            }
         }
         g_pending ^= 1;
         if (g_prev.valid && period >= 1 && period <= 6) g_period = period;   // refreshes a step takes (3 at 20 a second, 2 at 30)
@@ -5289,7 +5390,8 @@ void interp_mark(const float *data, int n) {
     g_cap_draws = 0;
     g_since = 0;
     if (interp::log_on()) {
-        std::fprintf(stderr, "[frame gen] step: %s, a step takes %d refreshes, %d limbs\n", g_cur.valid ? "picture taken" : "no 3D", g_period, g_cur.limbs);
+        std::fprintf(stderr, "[frame gen] step: %s, a step takes %d refreshes, %d limbs, %d bones\n", g_cur.valid ? "picture taken" : "no 3D", g_period, g_cur.limbs,
+                     g_cur.nbones);
         if (g_cur.valid && g_cur.limbs) {
             const float *a = g_cur.limb[0] + 1;
             const float *M = g_cur.m;
@@ -5309,7 +5411,7 @@ void set_frame_generation(int mode) {
     if (!mode) interp::g_cur.valid = interp::g_prev.valid = false;
 }
 int frame_generation() { return interp::g_mode.load(std::memory_order_relaxed); }
-void set_frame_generation_view(int view) { interp::g_view.store(std::clamp(view, 0, 2), std::memory_order_relaxed); }
+void set_frame_generation_view(int view) { interp::g_view.store(std::clamp(view, 0, 3), std::memory_order_relaxed); }
 int frame_generation_view() { return interp::g_view.load(std::memory_order_relaxed); }
 void set_frame_generation_log(bool on) { interp::g_log_on.store(on, std::memory_order_relaxed); }
 bool frame_generation_log() { return interp::g_log_on.load(std::memory_order_relaxed); }

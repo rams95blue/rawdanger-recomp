@@ -1181,9 +1181,10 @@ void decide(Walk &w) {
 void run_ao(std::uint32_t zbp, std::uint32_t zpsm) {
 #ifdef PS2_GPU
     // v0.10.5: frame generation takes the finished 3D's depth here (gpu.cpp interp_capture)
-    if (gpu_on() && g_scene_bp && g_scene_bw >= 8 && g_scene_bw <= 16 && gpu::frame_generation())
+    if (gpu_on() && g_scene_bp && g_scene_bw >= 8 && g_scene_bw <= 16 && gpu::frame_generation()) {
         gpu::interp_capture(zbp, zpsm, g_scene_bw, g_scene_bw * 64u, 448u, static_cast<float>(g_scene_xyoffset & 0xFFFFu) / 16.0f,
                             static_cast<float>((g_scene_xyoffset >> 32) & 0xFFFFu) / 16.0f, g_ao_draws);
+    }
         float wet = 0.0f;
         std::vector<float> caps;
         {
@@ -2409,10 +2410,10 @@ Rendered render_pending(const std::function<void(const DisplayRegs &)> &on_prese
         case queue::kState: serve_state(payload); break;
 #ifdef PS2_GPU
         case queue::kInterpMark: {
-            float m[16 + 1 + 12 * 8] = {};
-            const std::uint32_t n = std::min<std::uint32_t>(h.arg0, sizeof m / 4);
-            std::memcpy(m, payload, n * 4u);
-            gpu::interp_mark(m, static_cast<int>(n));
+            static std::vector<float> m;
+            m.resize(std::min<std::uint32_t>(h.arg0, 1u << 20));   // (a big one goes through the heap: its size is in arg0)
+            if (!m.empty()) std::memcpy(m.data(), payload, m.size() * 4u);
+            gpu::interp_mark(m.data(), static_cast<int>(m.size()));
             break;
         }
 #endif

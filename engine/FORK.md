@@ -179,6 +179,10 @@
   degrees in a bone's local turn goes half the way each step; the spine and chest get breathing standing still, a hunch when
   wet, shivering when cold and a lean into turns, turned in the world after they are built (the head and arms follow).
   Settings > Controls > Livelier hero (keys.ini anim_layers, on); Settings > Debug: the layers x4.
+- **0050-rd-frame-generation-bones** (rawdanger-recomp v0.10.6): frame generation moves the characters with their bones: each
+  step mark also carries every character's bones (the character table's models, each bone's parent place and world matrix;
+  `PS2_FRAME_GEN_BONES`), and a pixel within 35 cm of a bone moves with it between the two steps, turn included. Gaps filled from
+  further out (the motion blur's trail). Settings > Debug: the bones view.
 - **0049-rd-frame-generation** (rawdanger-recomp v0.10.5): frame generation (new interp.wgsl): the picture on screen moved to
   the camera of a moment between the last two game steps (smooth) or carried past the last one (predict), so the camera moves at
   60 pictures a second while the game steps 20 or 30 times. From the picture's depth (copied when its 3D is finished) and the

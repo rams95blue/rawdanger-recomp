@@ -162,3 +162,24 @@ the 20-a-second motion, as before); the hero's animation stays at 20 a second; g
 a sixtieth of a second when the camera turns fast; films and menus (no camera step) are shown as the game draws them. Above 60
 pictures a second (a 120 / 144 Hz screen) is the next step: the same pass at any moment, timed by the clock instead of the
 refresh.
+
+## v0.10.6: the characters' animation in the made pictures
+
+Is a deep change to the engine needed to make the animation smooth too? A **motion buffer** (the renderer writing, for each
+pixel, where it was a step earlier, as modern games do) would cover everything that moves, cars and loose things included, but it
+means matching every vertex between two steps and a second output in the compute rasterizer. Raw Danger's characters take a
+shorter way: the engine already sees every bone of every character being built (host call 202, the head turn), so each step mark
+now also carries every character's bones (engine patch 0050):
+
+- From the character table (0x5EAC80, 235 entries, the model at +0xF0): each model's bones, each bone's parent and its world
+  matrix (rows at +0x10 .. +0x40). 337 bones in the rainy street (the hero and six others).
+- Per refresh, per bone: its segment (from its parent) as drawn, and the matrix that takes a point on it from the step drawn to the
+  moment shown (the inverse of the drawn matrix times the matrix blended between the two steps). Per character a sphere round its
+  bones, so a pixel tests only the characters it is near.
+- A pixel within 35 cm of a bone moves with that bone, turn included: arms swing, legs step and the skirt sways between the steps
+  instead of jumping at them; the character stays in one piece (neighbouring bones share their joint). The hero's hair (drawn
+  without depth) takes the head's depth first.
+- Settings > Debug > Frame generation view **bones**: each pixel moved with a bone, tinted in that bone's colour.
+
+Still left: things that are not characters (cars, debris, doors) move at the step rate; gaps beside a moving character can show a
+thin streak.

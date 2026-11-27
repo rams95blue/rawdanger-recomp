@@ -1638,8 +1638,8 @@ void menu_paint(bool show_again) {
                 debug_row(kViewRow, "Picture shown", kViews[std::clamp(ps2::debug_view(), 0, 3)]);
                 debug_row(kStatsRow, "Stats on screen (FPS, CPU, GPU, scene)", g_stats_on ? "<  on  >" : "<  off >");
                 {
-                    static const char *const kFrameViews[] = {"<  the picture  >", "<  gaps in magenta  >", "<  depth moved  >"};
-                    debug_row(kFrameViewRow, "Frame generation: what the made pictures show", kFrameViews[std::clamp(ps2::frame_generation_view(), 0, 2)]);
+                    static const char *const kFrameViews[] = {"<  the picture  >", "<  gaps in magenta  >", "<  depth moved  >", "<  bones (a colour each)  >"};
+                    debug_row(kFrameViewRow, "Frame generation: what the made pictures show", kFrameViews[std::clamp(ps2::frame_generation_view(), 0, 3)]);
                     debug_row(kFrameLogRow, "Frame generation: each step in the log", ps2::frame_generation_log() ? "<  on  >" : "<  off >");
                     debug_row(kSavePicturesRow, "Save the next 6 pictures as shown (with SMAA's and frame generation's maps; for reports)", "now");
                 }
@@ -2758,8 +2758,9 @@ void menu_command(quickmenu::Command c, int step) {
         }
         if (row < g_recomp_row_section.size() && g_recomp_row_section[row] == kFrameViewRow) {
             static const char *const kNotes[] = {"Made pictures: the picture", "Made pictures: the places nothing landed on, in magenta (filled from the background)",
-                                                 "Made pictures: the depth moved instead of the colours (near bright)"};
-            const int k = (ps2::frame_generation_view() + (step < 0 ? 2 : 1)) % 3;
+                                                 "Made pictures: the depth moved instead of the colours (near bright)",
+                                                 "Made pictures: the pixels moved with a character's bone, a colour per bone"};
+            const int k = (ps2::frame_generation_view() + (step < 0 ? 3 : 1)) % 4;
             ps2::set_frame_generation_view(k);
             g_recomp_note = kNotes[k];
             break;

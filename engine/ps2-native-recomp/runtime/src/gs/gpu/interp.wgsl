@@ -31,6 +31,38 @@ struct Params {
 @group(0) @binding(1) var<storage, read_write> work: array<atomic<u32>>;   // keys (n), colours (n), the result (n)
 @group(0) @binding(2) var<storage, read> depth: array<u32>;
 @group(0) @binding(3) var<uniform> params: Params;
+// v0.10.6: the characters and their bones. [0]: how many characters, how many bones; then 64 characters, two each: the middle of its
+// bones and a radius round them, then its first bone and how many; then the bones from vec4 129, six each: the parent's place, its
+// own, and the four rows of the matrix that takes a point on the bone from the step drawn to the moment shown
+@group(0) @binding(4) var<storage, read> bones: array<vec4<f32>>;
+
+// the bone a world point is on (the nearest segment within 35 cm, of a character whose sphere holds it), -1 if none
+fn bone_at(p: vec3<f32>) -> i32 {
+    let chars = min(u32(bones[0].x), 64u);
+    var best = 0.35;
+    var found = -1;
+    for (var c = 0u; c < chars; c = c + 1u) {
+        let sphere = bones[1u + c * 2u];
+        if (distance(p, sphere.xyz) > sphere.w) {
+            continue;
+        }
+        let range = bones[2u + c * 2u];
+        let first = u32(range.x);
+        let count = u32(range.y);
+        for (var b = first; b < first + count; b = b + 1u) {
+            let at = 129u + b * 6u;
+            let a = bones[at].xyz;
+            let ab = bones[at + 1u].xyz - a;
+            let t = clamp(dot(p - a, ab) / max(dot(ab, ab), 1e-6), 0.0, 1.0);
+            let d = length(p - (a + ab * t));
+            if (d < best) {
+                best = d;
+                found = i32(b);
+            }
+        }
+    }
+    return found;
+}
 
 fn in_hud(gx: f32, gy: f32) -> bool {
     let n = min(params.count.x, 32u);
@@ -62,6 +94,7 @@ fn zat(x: i32, y: i32) -> u32 {
 
 struct Landing {
     ok: bool,
+    bone: i32,    // the bone it moved with, -1 none (the debug view)
     x: i32,       // the top left of the 2 x 2 samples it covers
     y: i32,
     key: u32,
@@ -71,6 +104,7 @@ struct Landing {
 fn land(x: u32, y: u32) -> Landing {
     var r: Landing;
     r.ok = false;
+    r.bone = -1;
     let w = params.size.x;
     let h = params.size.y;
     let s = f32(params.size.z);
@@ -120,8 +154,17 @@ fn land(x: u32, y: u32) -> Landing {
         return r;
     }
     var p = hw.xyz / hw.w;
-    // on the hero: moved with the limb it is on (the nearest one whose radius it is in)
-    let limbs = min(params.count.z, 12u);
+    // v0.10.6: on a character: moved with its bone, turn and all, to the moment shown
+    if (u32(bones[0].y) > 0u) {
+        let b = bone_at(p);
+        r.bone = b;
+        if (b >= 0) {
+            let at = 129u + u32(b) * 6u;
+            p = p.x * bones[at + 2u].xyz + p.y * bones[at + 3u].xyz + p.z * bones[at + 4u].xyz + bones[at + 5u].xyz;
+        }
+    }
+    // without the bones (a game that does not send them): the hero moves with the limb it is on
+    let limbs = select(min(params.count.z, 12u), 0u, u32(bones[0].y) > 0u);
     var best = 1e30;
     var moved = vec3<f32>(0.0);
     for (var i = 0u; i < limbs; i = i + 1u) {
@@ -202,6 +245,13 @@ fn resolve(@builtin(global_invocation_id) gid: vec3<u32>) {
         let g = min(l.key * 2u, 255u);
         colour = g | (g << 8u) | (g << 16u);
     }
+    if (params.motion.w > 0.5 && l.bone >= 0) {   // debug: the pixels moved with a bone, a colour per bone over the picture
+        let hsh = u32(l.bone) * 2654435761u;
+        let tint = vec3<u32>((hsh >> 8u) & 255u, (hsh >> 16u) & 255u, (hsh >> 24u) & 255u);
+        let c = vec3<u32>(colour & 255u, (colour >> 8u) & 255u, (colour >> 16u) & 255u);
+        let m = (c + tint * 3u) / 4u;
+        colour = m.x | (m.y << 8u) | (m.z << 16u);
+    }
     let size = select(2, 1, l.key == 0xFFFFFFFFu);
     for (var dy = 0; dy < size; dy = dy + 1) {
         for (var dx = 0; dx < size; dx = dx + 1) {
@@ -252,9 +302,10 @@ fn fill(@builtin(global_invocation_id) gid: vec3<u32>) {
                 let j = u32(y) * w + u32(x);
                 let k = atomicLoad(&work[j]);
                 if (k != 0u) {
-                    // a little further in than the first landed place (its edge may still be blended)
-                    let x2 = clamp(x + dirs[d].x * i32(params.size.z), 0, i32(w) - 1);
-                    let y2 = clamp(y + dirs[d].y * i32(params.size.z), 0, i32(h) - 1);
+                    // further in than the first landed place: its edge may still carry the near thing's colour (blended edges, the
+                    // game's motion blur trailing behind a moving character)
+                    let x2 = clamp(x + dirs[d].x * i32(params.size.z) * 6, 0, i32(w) - 1);
+                    let y2 = clamp(y + dirs[d].y * i32(params.size.z) * 6, 0, i32(h) - 1);
                     let j2 = u32(y2) * w + u32(x2);
                     let k2 = atomicLoad(&work[j2]);
                     let use_j = select(j, j2, k2 != 0u && k2 != 0xFFFFFFFFu && k2 <= k);

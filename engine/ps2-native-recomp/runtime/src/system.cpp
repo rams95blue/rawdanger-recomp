@@ -1315,15 +1315,21 @@ void free_camera_call(Cpu &c) {
 // follow camera (mode 0) and with no cutscene bars for a second; anything else ends the lift. (v0.10.0 raised the point looked at
 // instead, +0x310, after the step: too late, the direction was already made from it.)
 int hero_limbs_world(float *out);   // v0.10.5 (frame generation): the hero's limbs, below
+void all_bones_world(std::vector<float> &out);   // v0.10.6 (frame generation): every character's bones, below
 struct CameraFrame { bool set = false; std::uint32_t call = 0, at = 0, step = 0, pointer = 0, mode = 0, matrix = 0; };
 CameraFrame g_camera_frame;
 void camera_frame_call(Cpu &c) {
     if (g_camera_frame.matrix && frame_generation()) {   // v0.10.5: frame generation: the matrix the pictures before this step used
-        float m[16 + 1 + 12 * 8];   // the matrix, then the hero's limbs (how many, then each: its number, both ends, its radius)
+        // the matrix, the hero's limbs (how many, then each: its number, both ends, its radius), then every character's bones
+        // (how many, then kBoneFloats each: see all_bones_world)
+        static std::vector<float> m;
+        m.assign(16 + 1 + 12 * 8, 0.0f);
         for (int i = 0; i < 16; ++i) m[i] = word_float(ld32(g_camera_frame.matrix + 4u * i));
-        const int limbs = hero_limbs_world(m + 17);
+        const int limbs = hero_limbs_world(m.data() + 17);
         m[16] = static_cast<float>(limbs);
-        frame_step(m, 17 + limbs * 8);
+        m.resize(17 + static_cast<std::size_t>(limbs) * 8);
+        all_bones_world(m);
+        frame_step(m.data(), static_cast<int>(m.size()));
     }
     const std::uint32_t back = c.r[31].w[0];
     call(c, g_camera_frame.step, 1);
@@ -1536,6 +1542,55 @@ int hero_limbs_world(float *out) {
         ++got;
     }
     return got;
+}
+// v0.10.6: frame generation of the animation. Every character's bones as they were drawn (read as the next step begins, like the
+// hero's limbs): the character table (PS2_FRAME_GEN_BONES="TABLE,COUNT,MODEL", hex; Raw Danger's 0x5EAC80, 235 entries, the model
+// at +0xF0 as for the head), each model's bone list (+4, then each bone's +4), each bone's parent (+0) and its world matrix (rows at
+// +0x10, +0x20, +0x30, the place at +0x40). Appends: how many bones, then kBoneFloats each: the bone's address (its bits), the
+// character's number, the parent's place, the 16 numbers of the matrix. Frame generation moves a pixel on a bone with that bone,
+// rotation included, between two steps.
+constexpr int kBoneFloats = 21;
+void all_bones_world(std::vector<float> &out) {
+    static const auto setup = [] {
+        struct { std::uint32_t table, count, model; } r{0x5EAC80u, 235u, 0xF0u};
+        if (const char *v = std::getenv("PS2_FRAME_GEN_BONES"); v && *v) {
+            unsigned long t = 0, n = 0, m = 0;
+            if (std::sscanf(v, "%lx,%lx,%lx", &t, &n, &m) == 3) r = {static_cast<std::uint32_t>(t), static_cast<std::uint32_t>(n), static_cast<std::uint32_t>(m)};
+        }
+        return r;
+    }();
+    const std::size_t at = out.size();
+    out.push_back(0.0f);
+    if (!setup.table || !in_ram(setup.table)) return;
+    int bones = 0;
+    std::uint32_t seen[64] = {};
+    int seen_n = 0;
+    for (std::uint32_t c = 0; c < setup.count && bones < 2048; ++c) {
+        const std::uint32_t ch = ld32(setup.table + 4u * c);
+        if (!in_ram(ch)) continue;
+        const std::uint32_t model = ld32(ch + setup.model);
+        if (!in_ram(model)) continue;
+        bool dup = false;   // two entries for one model: once
+        for (int i = 0; i < seen_n; ++i) dup |= seen[i] == model;
+        if (dup) continue;
+        if (seen_n < 64) seen[seen_n++] = model;
+        std::uint32_t b = ld32(model + 4u);
+        for (int i = 0; i < 64 && in_ram(b); ++i, b = ld32(b + 4u)) {
+            float rec[kBoneFloats];
+            std::memcpy(&rec[0], &b, 4);
+            rec[1] = static_cast<float>(c);
+            const std::uint32_t parent = ld32(b);
+            const std::uint32_t from = in_ram(parent) ? parent : b;
+            bool ok = true;
+            for (int k = 0; k < 3; ++k) ok &= std::isfinite(rec[2 + k] = word_float(ld32(from + 0x40u + 4u * k)));
+            for (int r = 0; r < 4; ++r)
+                for (int k = 0; k < 4; ++k) ok &= std::isfinite(rec[5 + r * 4 + k] = word_float(ld32(b + 0x10u + 0x10u * r + 4u * k)));
+            if (!ok) continue;
+            out.insert(out.end(), rec, rec + kBoneFloats);
+            ++bones;
+        }
+    }
+    out[at] = static_cast<float>(bones);
 }
 void update_wet_look(std::uint32_t head) {
     const HeroWet &h = hero_wet_setup();

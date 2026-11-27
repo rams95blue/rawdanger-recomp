@@ -42,7 +42,8 @@ void set_ui_boxes(bool on);
 void set_frame_generation(int mode);
 int frame_generation();
 void frame_step(const float *data, int n);
-// Settings > Debug: what frame generation draws (0 the picture, 1 the places nothing landed on in magenta, 2 the depth moved), its log
+// Settings > Debug: what frame generation draws (0 the picture, 1 the places nothing landed on in magenta, 2 the depth moved, 3 the
+// pixels moved with a bone, a colour each), its log
 // lines, and the next presents saved as the window gets them (base.0.ppm, base.1.ppm, ...: after SMAA and frame generation, with
 // SMAA's edges and weights, frame generation's depth and keys beside them)
 void set_frame_generation_view(int view);
