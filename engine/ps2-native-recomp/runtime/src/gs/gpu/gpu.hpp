@@ -39,6 +39,13 @@ void interp_mark(const float *data, int n);
 void set_frame_generation(int mode);
 int frame_generation();
 void set_frame_generation_view(int view);
+// rawdanger-recomp (v0.10.7): pictures at the window's pace (frame generation on, a limit other than 60; 0 none)
+void set_fps_limit(int fps);
+int fps_limit();
+void set_paced_threads(bool on);
+bool paced();
+bool present_paced();
+void paced_counts(std::uint64_t &made, std::uint64_t &taken);
 int frame_generation_view();
 void set_frame_generation_log(bool on);
 bool frame_generation_log();

@@ -51,6 +51,16 @@ int frame_generation_view();
 void set_frame_generation_log(bool on);
 bool frame_generation_log();
 void dump_presents(const char *base, int count);
+// rawdanger-recomp (v0.10.7): more pictures a second than the console's 60. With frame generation on and a limit other than 60
+// (0: none), the game's presents only take its picture and the window thread shows pictures made from it at the limit's pace, each
+// with the camera of the moment by the clock (present_paced, from the window's loop; set_paced_threads: the window runs the game on
+// its own threads, the only case where it can keep a pace). paced_counts: pictures shown and game pictures taken so far.
+void set_fps_limit(int fps);
+int fps_limit();
+void set_paced_threads(bool on);
+bool paced_presents();
+bool present_paced();
+void paced_counts(std::uint64_t &made, std::uint64_t &taken);
 void set_debug_text(bool on);
 // rawdanger-recomp: Raw Danger's colour filter done in one pass (1, PS2_GAME_FILTER_PASS=1) or drawn the game's way (0, slow); from
 // the next frame

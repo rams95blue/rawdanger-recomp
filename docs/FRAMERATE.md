@@ -183,3 +183,24 @@ now also carries every character's bones (engine patch 0050):
 
 Still left: things that are not characters (cars, debris, doors) move at the step rate; gaps beside a moving character can show a
 thin streak.
+
+## v0.10.7: more than 60 pictures a second (a limit)
+
+Settings > Display > **Pictures a second** (keys.ini `fps_limit = 60 | 120 | 144 | 165 | 240 | none`), with frame generation on.
+At 60 nothing changes: one picture per refresh of the console. Otherwise (engine patch 0051):
+
+- The game's presents (60 a second, one per console refresh) only **take** its picture: the display read and SMAA, kept in a buffer.
+- The **window thread** shows pictures at the limit's pace (between its other work: it now hands over after 2 ms of drawing
+  instead of 8, so a picture is not late behind a long frame). Each is made from the taken picture with the camera and the bones of
+  the moment it is shown, **by the clock**: the time since the step's mark over the time a step takes (measured between marks and
+  smoothed, so a PC that cannot keep the console's pace gets pictures spread over its real steps, not bunched at the start).
+  Smooth: a third of the way at once, the step itself two thirds of a step later, held until the next; predict: the step itself at
+  once, carried on until the next.
+- The pair of steps used is the one taken with the picture (a step's mark can come a moment before its picture).
+- The surface already presents without waiting for the screen (immediate or mailbox), so the limit is the pace; without a limit
+  the pictures come as fast as the graphics card makes them. Set the limit to the screen's refresh rate.
+- Settings > Debug > Stats on screen: "Pictures a second": shown and from the game.
+
+Measured here only on a software graphics card (about 12 pictures shown per 3 game pictures a second, the pass being the limit
+there); the pacing, the moments and the pictures were checked with the log and saved pictures. A real graphics card should make the
+pass far faster (not measured yet: the stats row shows it).

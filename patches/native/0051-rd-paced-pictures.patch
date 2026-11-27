@@ -1,0 +1,648 @@
+From 61f50e87ec27bef92cae735ba34cb7ba2c6ded3b Mon Sep 17 00:00:00 2001
+From: rawdanger-recomp <rawdanger-recomp@users.noreply.github.com>
+Date: Fri, 27 Nov 2026 15:41:04 +0000
+Subject: [PATCH] rd: more pictures a second than 60 with frame generation (a
+ limit, paced by the window)
+
+- keys.ini fps_limit = 60 | 120 | 144 | 165 | 240 | none (PS2_FPS_LIMIT), Settings > Display > Pictures a second, the PC options row
+- with frame generation on and a limit other than 60 (threads on), the game's presents only take its picture (after SMAA) into a
+  store; the window thread shows pictures made from it at the limit's pace, each with the camera and bones of the moment by the
+  clock (since the step's mark, a step lasting the real time between marks, smoothed)
+- the pair of steps used is the one taken with the picture (a mark can come before its picture)
+- Settings > Debug > Stats: pictures shown and from the game a second; the frame generation log: each paced picture's moment and
+  the rates each second
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01QNLFPekqhcU2dj7B3Utmea
+---
+ host/keymap.cpp               |  15 +++
+ host/keymap.hpp               |   6 +-
+ host/quickmenu.cpp            |  10 +-
+ host/quickmenu.hpp            |   3 +
+ host/window.cpp               |  61 +++++++++++-
+ runtime/include/ps2/video.hpp |  10 ++
+ runtime/src/gs/gpu/gpu.cpp    | 170 ++++++++++++++++++++++++++++------
+ runtime/src/gs/gpu/gpu.hpp    |   7 ++
+ runtime/src/gs/gs.cpp         |  12 +++
+ 9 files changed, 256 insertions(+), 38 deletions(-)
+
+diff --git a/host/keymap.cpp b/host/keymap.cpp
+index 72dbaba..3e4a448 100644
+--- a/host/keymap.cpp
++++ b/host/keymap.cpp
+@@ -226,6 +226,11 @@ std::string with_window_size(const std::string &file_text, int w, int h) {
+ std::string with_menu_skin(const std::string &file_text, int skin) { return with_line(file_text, "menuskin", std::string("menu_skin = ") + (skin == 2 ? "game" : skin == 1 ? "japanese" : "hazard")); }
+ std::string with_integer_scale(const std::string &file_text, int on) { return with_line(file_text, "integerscale", "integer_scale = " + std::to_string(on ? 1 : 0)); }
+ std::string with_lens_rain(const std::string &file_text, int level) { return with_line(file_text, "rainonlens", std::string("rain_on_lens = ") + (level ? "on" : "off")); }
++const int kFpsLimits[] = {60, 120, 144, 165, 240, 0};
++const int kFpsLimitsCount = 6;
++std::string with_fps_limit(const std::string &file_text, int fps) {
++    return with_line(file_text, "fpslimit", fps <= 0 ? std::string("fps_limit = none") : "fps_limit = " + std::to_string(fps));
++}
+ std::string with_frame_generation(const std::string &file_text, int mode) {
+     static const char *const kNames[3] = {"off", "smooth", "predict"};
+     return with_line(file_text, "framegeneration", std::string("frame_generation = ") + kNames[std::clamp(mode, 0, 2)]);
+@@ -400,6 +405,16 @@ void parse(const std::string &text, Config &config, std::vector<std::string> &pr
+             else bad("pace is 30, 20, 15, 60 or off, ignored");
+             continue;
+         }
++        if (name == "fpslimit") {
++            const std::string v = squash(value);
++            if (v == "none" || v == "off" || v == "0" || v == "unlimited") config.fps_limit = 0;
++            else {
++                const int n = std::atoi(v.c_str());
++                if (n >= 30 && n <= 1000) config.fps_limit = n;
++                else bad("fps_limit is a number of pictures a second (30 to 1000) or none, ignored");
++            }
++            continue;
++        }
+         if (name == "framegeneration") {
+             const std::string v = squash(value);
+             if (v == "off" || v == "0") config.frame_generation = 0;
+diff --git a/host/keymap.hpp b/host/keymap.hpp
+index ccef849..747a257 100644
+--- a/host/keymap.hpp
++++ b/host/keymap.hpp
+@@ -65,6 +65,7 @@ struct Config {
+     int integer_scale = 0;     // rawdanger-recomp: the picture is enlarged by whole numbers only (every console pixel row the same height)
+     int lens_rain = 1;         // rawdanger-recomp: rain drops on the lens while playing (keys.ini rain_on_lens): 0 off, 1 on (how hard
+                                // follows the map's rain and its gusts); the old lens_rain line (off / light / heavy) is not read any more
++    int fps_limit = 60;        // rawdanger-recomp (v0.10.7): pictures a second with frame generation (60 the console's, 120, 144, 165, 240, 0 no limit)
+     int frame_generation = 0;  // rawdanger-recomp (v0.10.5): 0 off, 1 smooth (the camera between the last two game steps), 2 predict (carried on)
+     int graphics_api = 0;      // rawdanger-recomp (v0.10.4): 0 auto (Direct3D 12 on Windows, Vulkan when the resolution needs it), 1 Vulkan, 2 Direct3D 12; at the next start
+     int smaa = 0;              // rawdanger-recomp: SMAA 1x on the console picture (anti-aliasing), 0 off, 1 on   // rawdanger-recomp: the volume of everything the game plays, 0 to 100 (%)
+@@ -115,7 +116,10 @@ std::string with_window_size(const std::string &file_text, int w, int h);   // t
+ std::string with_lens_rain(const std::string &file_text, int level);
+ std::string with_smaa(const std::string &file_text, int on);
+ std::string with_graphics_api(const std::string &file_text, int api);
+-std::string with_frame_generation(const std::string &file_text, int mode);  // the 'frame_generation' line (off, smooth, predict)  // the 'graphics_api' line (auto, vulkan, dx12)  // the 'master_volume' line
++std::string with_frame_generation(const std::string &file_text, int mode);
++std::string with_fps_limit(const std::string &file_text, int fps);  // the 'fps_limit' line (60, 120, ..., none)
++extern const int kFpsLimits[];
++extern const int kFpsLimitsCount;  // the 'frame_generation' line (off, smooth, predict)  // the 'graphics_api' line (auto, vulkan, dx12)  // the 'master_volume' line
+ 
+ const char *action_name(int action);  // the word used in keys.ini
+ 
+diff --git a/host/quickmenu.cpp b/host/quickmenu.cpp
+index 4f5e286..7830f96 100644
+--- a/host/quickmenu.cpp
++++ b/host/quickmenu.cpp
+@@ -118,8 +118,8 @@ constexpr const char *kKeys[kEntries] = {"F1", "F5", "F8", "F3", "F4", "", ""};
+ // Settings: one page, six tabs (the Game and Debug tabs list rows the window fills: the game's own options, the test switches)
+ constexpr const char *kTabNames[Menu::kTabs] = {"DISPLAY", "PICTURE", "SOUND", "CONTROLS", "GAME", "DEBUG"};
+ constexpr int kAchievementRows = 7;   // rawdanger-recomp: achievements lines shown at a time (bigger panel)
+-constexpr Command kDisplay[] = {Command::scale, Command::frame_generation, Command::graphics_api, Command::window_size, Command::fullscreen, Command::widescreen, Command::integer_scale, Command::menu_game_runs, Command::pause_unfocused, Command::menu_skin, Command::popup_size, Command::back};
+-constexpr const char *kDisplayKeys[] = {"", "", "", "", "F11", "", "", "", "", "", "", "Esc"};
++constexpr Command kDisplay[] = {Command::scale, Command::frame_generation, Command::fps_limit, Command::graphics_api, Command::window_size, Command::fullscreen, Command::widescreen, Command::integer_scale, Command::menu_game_runs, Command::pause_unfocused, Command::menu_skin, Command::popup_size, Command::back};
++constexpr const char *kDisplayKeys[] = {"", "", "", "", "", "F11", "", "", "", "", "", "", "Esc"};
+ constexpr Command kPicture[] = {Command::field_of_view, Command::look, Command::antialias, Command::sharpen, Command::sharp_2d, Command::game_blur, Command::filter_pass, Command::ambient_occlusion, Command::wet_look, Command::black_bars, Command::lens_rain, Command::back};
+ constexpr const char *kPictureKeys[] = {"", "F2", "", "", "", "", "", "", "", "", "", "Esc"};
+ constexpr Command kSound[] = {Command::master_volume, Command::reverb, Command::back};
+@@ -465,6 +465,10 @@ std::string entry_text(Command c, const Values &v, bool quit_armed) {
+         static const char *const kNames[] = {"off", "smooth", "predict"};
+         return std::string("Frame generation:  < ") + kNames[std::clamp(v.frame_generation, 0, 2)] + " >  (60 pictures from the game's 20)";
+     }
++    case Command::fps_limit: {
++        const std::string n = v.fps_limit <= 0 ? std::string("no limit") : v.fps_limit == 60 ? std::string("60 (the console's)") : std::to_string(v.fps_limit);
++        return "Pictures a second:  < " + n + " >" + (v.frame_generation ? std::string() : std::string("  (with frame generation)"));
++    }
+     case Command::graphics_api: {
+         static const char *const kNames[] = {"auto", "Vulkan", "Direct3D 12"};
+         const std::string now = v.graphics_api_now.empty() || v.graphics_api_now == "none" ? std::string() : "  (now " + v.graphics_api_now + ")";
+@@ -665,7 +669,7 @@ Command Menu::side() const {
+     if ((page_ == Page::recomp || (page_ == Page::graphics && tab_ >= kGameTab)) && selected_ < recomp_rows_) return Command::recomp_toggle;
+     if (page_ != Page::graphics || tab_ >= kGameTab) return Command::none;
+     const Command c = kTabLists[tab_].commands[selected_];
+-    return c == Command::look || c == Command::scale || c == Command::graphics_api || c == Command::frame_generation || c == Command::sharp_2d || c == Command::fullscreen || c == Command::widescreen || c == Command::pause_unfocused || c == Command::menu_game_runs ||
++    return c == Command::look || c == Command::scale || c == Command::graphics_api || c == Command::frame_generation || c == Command::fps_limit || c == Command::sharp_2d || c == Command::fullscreen || c == Command::widescreen || c == Command::pause_unfocused || c == Command::menu_game_runs ||
+                    c == Command::master_volume || c == Command::integer_scale || c == Command::lens_rain || c == Command::antialias || c == Command::menu_skin ||
+                    c == Command::window_size || c == Command::game_blur || c == Command::reverb || c == Command::key_prompts || c == Command::mouse_look || c == Command::camera_orbit || c == Command::free_camera || c == Command::head_follow || c == Command::wet_look || c == Command::anim_layers || c == Command::black_bars || c == Command::sharpen ||
+                    c == Command::mouse_speed || c == Command::mouse_invert || c == Command::mouse_invert_x || c == Command::popup_size || c == Command::keys_on_screen || c == Command::filter_pass || c == Command::ambient_occlusion || c == Command::field_of_view
+diff --git a/host/quickmenu.hpp b/host/quickmenu.hpp
+index 13758eb..d25fec0 100644
+--- a/host/quickmenu.hpp
++++ b/host/quickmenu.hpp
+@@ -39,6 +39,7 @@ enum class Command {
+     menu_game_runs,   // Settings > Display: the game goes on behind this menu (off: it waits)
+     popup_size,       // Settings > Display: the size of the pop-ups (small / normal / large / huge)
+     frame_generation, // rawdanger-recomp (v0.10.5) Settings > Display: off / smooth / predict
++    fps_limit,        // rawdanger-recomp (v0.10.7) Settings > Display: pictures a second with frame generation
+     graphics_api,     // rawdanger-recomp (v0.10.4) Settings > Display: auto / Vulkan / Direct3D 12, at the next start
+     field_of_view,    // Settings > Picture: the camera's field of view (80 % to 150 % of the game's)
+     ambient_occlusion, // Settings > Picture: shading in creases and corners from the game's depth (off / light / strong)
+@@ -78,6 +79,8 @@ struct Values {
+     int scale_max = 8;          // the highest the graphics device can hold (Direct3D 12: 4x)
+     int graphics_api = 0;       // keys.ini's choice: 0 auto, 1 Vulkan, 2 Direct3D 12
+     int frame_generation = 0;   // 0 off, 1 smooth, 2 predict
++    int fps_limit = 60;         // 0 none
++    double shown_fps = 0.0;     // pictures shown a second (paced), 0 when the game's 60
+     std::string graphics_api_now;  // the API this run uses ("Vulkan", "Direct3D 12")
+     int sharp_now = 1, sharp_next = 1;  // the 2D art filter (0 soft, 1 sharp, 2 sharpest): this run's, and keys.ini's for the next start
+     bool sharp_locked = false;  // PS2_SHARP_2D is set
+diff --git a/host/window.cpp b/host/window.cpp
+index 337a61d..9442e94 100644
+--- a/host/window.cpp
++++ b/host/window.cpp
+@@ -1529,6 +1529,7 @@ void menu_paint(bool show_again) {
+         v.scale_max = static_cast<int>(ps2::max_internal_scale());
+         v.graphics_api = g_keys.graphics_api;
+         v.frame_generation = g_keys.frame_generation;
++        v.fps_limit = g_keys.fps_limit;
+         v.graphics_api_now = ps2::graphics_api();
+         v.sharp_now = g_sharp_now;
+         v.sharp_next = g_sharp_next;
+@@ -2346,6 +2347,9 @@ void native_option_rows() {
+             static const char *const kNames[] = {"OFF", "SMOOTH", "PREDICT"};
+             return std::string(kNames[std::clamp(g_keys.frame_generation, 0, 2)]);
+         }, command(Command::frame_generation));
++    spin("Pictures a second", "With frame generation: how many pictures a second are shown (the game's 60, or 120 to 240, or no limit)", [] {
++            return g_keys.fps_limit <= 0 ? std::string("NO LIMIT") : std::to_string(g_keys.fps_limit);
++        }, command(Command::fps_limit));
+     spin("Window size", "The window's size", [] {
+             if (!g_window || (SDL_GetWindowFlags(g_window) & SDL_WINDOW_FULLSCREEN)) return std::string("FULL SCREEN");
+             int ww = 0, wh = 0;
+@@ -2910,6 +2914,18 @@ void menu_command(quickmenu::Command c, int step) {
+         set_notice(kNotes[g_keys.frame_generation]);
+         break;
+     }
++    case Command::fps_limit: {
++        int k = 0;
++        while (k < keymap::kFpsLimitsCount && keymap::kFpsLimits[k] != g_keys.fps_limit) ++k;
++        k = ((k == keymap::kFpsLimitsCount ? 0 : k) + step + keymap::kFpsLimitsCount) % keymap::kFpsLimitsCount;
++        g_keys.fps_limit = keymap::kFpsLimits[k];
++        ps2::set_fps_limit(g_keys.fps_limit);
++        rewrite_keys_file([](const std::string &t) { return keymap::with_fps_limit(t, g_keys.fps_limit); }, "pictures a second");
++        const std::string n = g_keys.fps_limit <= 0 ? std::string("no limit") : std::to_string(g_keys.fps_limit);
++        set_notice("Pictures a second: " + n + (g_keys.frame_generation ? (g_keys.fps_limit == 60 ? " (as the console)" : " (made by frame generation)")
++                                                                        : " (takes effect with frame generation on)"));
++        break;
++    }
+     case Command::graphics_api: {
+         g_keys.graphics_api = (g_keys.graphics_api + step + 3) % 3;
+         rewrite_keys_file([](const std::string &t) { return keymap::with_graphics_api(t, g_keys.graphics_api); }, "graphics API");
+@@ -3668,6 +3684,19 @@ void show_speed() {
+         std::snprintf(b, sizeof b, "%.0f %% / %.0f %%", (cpu - cpu_start) / seconds * 100.0, (gpu - gpu_start) / (seconds * 10.0));
+         std::snprintf(c, sizeof c, "%.0f MB, audio %.0f ms", resident_mb(), queued);
+         g_stats_rows = {{"FPS", a}, {"CPU / GPU", b}, {"Memory", c}};
++        if (ps2::paced_presents()) {   // v0.10.7: the pictures shown (made by frame generation) and the game's
++            static std::uint64_t made0 = 0, taken0 = 0;
++            static double at0 = 0.0;
++            std::uint64_t made = 0, taken = 0;
++            ps2::paced_counts(made, taken);
++            const double at = static_cast<double>(SDL_GetPerformanceCounter()) / static_cast<double>(SDL_GetPerformanceFrequency());
++            if (at0 > 0.0 && at > at0) {
++                char d[64];
++                std::snprintf(d, sizeof d, "%.0f shown, %.0f from the game", static_cast<double>(made - made0) / (at - at0), static_cast<double>(taken - taken0) / (at - at0));
++                g_stats_rows.push_back({"Pictures a second", d});
++            }
++            made0 = made, taken0 = taken, at0 = at;
++        }
+         if (debug_info().set) {
+             const DebugInfo &d = debug_info();
+             const std::uint32_t cam = ps2::ld32(d.camera);
+@@ -4046,6 +4075,9 @@ bool open_window(bool fullscreen) {
+     // rawdanger-recomp (v0.10.5): frame generation (keys.ini frame_generation), unless PS2_FRAME_GEN is set
+     if (ps2::os::env("PS2_FRAME_GEN").empty()) ps2::set_frame_generation(g_keys.frame_generation);
+     else g_keys.frame_generation = ps2::frame_generation();
++    // v0.10.7: the pictures a second (keys.ini fps_limit), unless PS2_FPS_LIMIT is set
++    if (ps2::os::env("PS2_FPS_LIMIT").empty()) ps2::set_fps_limit(g_keys.fps_limit);
++    else g_keys.fps_limit = ps2::fps_limit();
+     // rawdanger-recomp (v0.10.4): the graphics API (keys.ini graphics_api), unless PS2_GPU_BACKEND is set. Vulkan or Direct3D 12 is
+     // tried first and the other one when it cannot start. Auto: Windows' default (Direct3D 12, the faster painter on the PCs measured),
+     // but Vulkan first when the resolution asked for is more than Direct3D 12 can hold (it binds 128 MB of one buffer: 4x at most).
+@@ -4313,6 +4345,23 @@ int run_window(const std::function<int()> &emulate) {
+         ps2::wake_render_thread();
+     });
+     const std::function<void(const std::uint32_t *, std::uint32_t, std::uint32_t)> copy = show_pixels, none;
++    ps2::set_paced_threads(g_gpu_present);   // v0.10.7: the window keeps the pace of the pictures shown (frame generation above 60)
++    // v0.10.7: one picture made by frame generation when its time has come; the milliseconds until the next one (0: none waits)
++    const auto paced_present = []() -> int {
++        using Clock = std::chrono::steady_clock;
++        static Clock::time_point next{};
++        if (!ps2::paced_presents()) return 4;
++        const int limit = ps2::fps_limit();
++        const auto now = Clock::now();
++        const auto interval = std::chrono::nanoseconds(limit > 0 ? 1000000000LL / limit : 0);
++        if (now >= next) {
++            window_stage("showing a picture made by frame generation (present_paced)");
++            ps2::present_paced();
++            next = limit > 0 ? std::max(next + interval, now - interval) : now;
++        }
++        const auto left = std::chrono::duration_cast<std::chrono::milliseconds>(next - Clock::now()).count();
++        return static_cast<int>(std::clamp<long long>(left, 0, 4));
++    };
+     while (!done.load()) {
+         if (ps2::hitch::on()) {  // PS2_HITCH_LOG=<ms>: the window's own event handling
+             const auto p0 = WaitLog::Clock::now();
+@@ -4324,16 +4373,20 @@ int run_window(const std::function<int()> &emulate) {
+         }
+         window_stage("drawing the pictures of the emulation (render_pending)");
+         if (!g_waits.on) {
+-            if (ps2::render_pending(g_gpu_present, g_gpu_present ? none : copy, show_speed, 8.0) == ps2::Rendered::idle) {
++            const bool pacing = ps2::paced_presents();
++            const bool idle = ps2::render_pending(g_gpu_present, g_gpu_present ? none : copy, show_speed, pacing ? 2.0 : 8.0) == ps2::Rendered::idle;
++            const int wait_ms = paced_present();
++            if (idle && wait_ms > 0) {
+                 window_stage("waiting for the emulation to post work (wait_render_work)");
+-                ps2::wait_render_work(4);
++                ps2::wait_render_work(wait_ms);
+             }
+             continue;
+         }
+         const auto t0 = WaitLog::Clock::now();
+-        const bool idle = ps2::render_pending(g_gpu_present, g_gpu_present ? none : copy, show_speed, 8.0) == ps2::Rendered::idle;
++        const bool idle = ps2::render_pending(g_gpu_present, g_gpu_present ? none : copy, show_speed, ps2::paced_presents() ? 2.0 : 8.0) == ps2::Rendered::idle;
++        const int paced_wait = paced_present();
+         const auto t1 = WaitLog::Clock::now();
+-        if (idle) {
++        if (idle && paced_wait > 0) {
+             window_stage("waiting for the emulation to post work (wait_render_work)");
+             ps2::wait_render_work(4);
+         }
+diff --git a/runtime/include/ps2/video.hpp b/runtime/include/ps2/video.hpp
+index ae946b1..410fbf1 100644
+--- a/runtime/include/ps2/video.hpp
++++ b/runtime/include/ps2/video.hpp
+@@ -51,6 +51,16 @@ int frame_generation_view();
+ void set_frame_generation_log(bool on);
+ bool frame_generation_log();
+ void dump_presents(const char *base, int count);
++// rawdanger-recomp (v0.10.7): more pictures a second than the console's 60. With frame generation on and a limit other than 60
++// (0: none), the game's presents only take its picture and the window thread shows pictures made from it at the limit's pace, each
++// with the camera of the moment by the clock (present_paced, from the window's loop; set_paced_threads: the window runs the game on
++// its own threads, the only case where it can keep a pace). paced_counts: pictures shown and game pictures taken so far.
++void set_fps_limit(int fps);
++int fps_limit();
++void set_paced_threads(bool on);
++bool paced_presents();
++bool present_paced();
++void paced_counts(std::uint64_t &made, std::uint64_t &taken);
+ void set_debug_text(bool on);
+ // rawdanger-recomp: Raw Danger's colour filter done in one pass (1, PS2_GAME_FILTER_PASS=1) or drawn the game's way (0, slow); from
+ // the next frame
+diff --git a/runtime/src/gs/gpu/gpu.cpp b/runtime/src/gs/gpu/gpu.cpp
+index e705170..01aac4d 100644
+--- a/runtime/src/gs/gpu/gpu.cpp
++++ b/runtime/src/gs/gpu/gpu.cpp
+@@ -137,6 +137,19 @@ int g_interp_slot = 0;
+ std::uint64_t g_interp_words = 0;
+ constexpr std::uint32_t kInterpParamBytes = 464 * 4;   // interp.wgsl Params
+ constexpr std::uint32_t kInterpDepthWords = 1024u * 1024u;   // the game's picture, one value per game pixel (640 x 448 here)
++// rawdanger-recomp (v0.10.7): more pictures than the console's 60. With frame generation on and a limit above 60 (Settings >
++// Display > Pictures a second), the game's presents only take its picture (after SMAA) into g_paced_src; the window thread shows
++// pictures made from it at its own pace (present_paced), each with the camera of the moment it is shown (by the clock).
++namespace paced {
++std::atomic<int> g_limit{[] { const char *v = std::getenv("PS2_FPS_LIMIT"); return v && *v ? std::max(0, std::atoi(v)) : 60; }()};   // 0: no limit
++std::atomic<bool> g_threads{false};   // presents come from the window thread's queue (the pace is the window's to keep)
++bool g_stored = false;
++DisplaySource g_src{};
++WGPUBuffer g_buf = nullptr;
++std::uint64_t g_words = 0;
++std::uint64_t g_made = 0, g_taken = 0;   // pictures shown, game pictures taken (the stats)
++}
++struct CopyJob { bool on = false, store = false; std::uint32_t base = 0; std::uint64_t n = 0; } g_copy_job;   // to (store) or from g_paced_src
+ struct InterpJob { bool on = false; int buf = 0; std::uint32_t base = 0, width = 0, height = 0; float p[kInterpParamBytes / 4] = {}; std::vector<float> bones; } g_interp_job;
+ namespace interp {
+ // 0 off, 1 smooth (the picture shown with the camera between the last two steps: two thirds of a step later, always right),
+@@ -152,6 +165,10 @@ int g_pending = 0;
+ Pic g_cap;
+ std::uint32_t g_cap_zbp = 0, g_cap_zpsm = 0, g_cap_bw = 0, g_cap_draws = 0;
+ int g_since = 1000, g_period = 3;
++std::chrono::steady_clock::time_point g_mark_time{};   // v0.10.7: when the last step's mark came (the paced pictures' clock)
++double g_step_seconds = 3.0 / 59.94;                   // v0.10.7: the real time between two steps' marks, smoothed
++Pic g_show_cur, g_show_prev;                            // v0.10.7: the steps of the game picture taken last (paced pictures)
++std::chrono::steady_clock::time_point g_show_mark_time{};
+ std::uint64_t g_generated = 0, g_marks = 0;
+ std::atomic<bool> g_log_on{std::getenv("PS2_FRAME_GEN_LOG") != nullptr};   // Settings > Debug: each step and refresh in the log
+ inline bool log_on() { return g_log_on.load(std::memory_order_relaxed); }
+@@ -3100,6 +3117,21 @@ void encode_interp(WGPUCommandEncoder enc) {
+     wgpuCommandEncoderCopyBufferToBuffer(enc, g_interp_work, n * 2 * 4, g_scratch, static_cast<std::uint64_t>(job.base) * 4, n * 4);
+ }
+ 
++// v0.10.7: the game's picture to the store (paced presents) or back from it, in the same submit
++void encode_copy(WGPUCommandEncoder enc) {
++    const CopyJob job = g_copy_job;
++    g_copy_job.on = false;
++    if (!job.on || !job.n) return;
++    if (!paced::g_buf || paced::g_words < job.n) {
++        if (!job.store) return;
++        if (paced::g_buf) wgpuBufferRelease(paced::g_buf);
++        paced::g_words = job.n;
++        paced::g_buf = make_buffer(job.n * 4, WGPUBufferUsage_Storage | WGPUBufferUsage_CopySrc | WGPUBufferUsage_CopyDst);
++    }
++    if (job.store) wgpuCommandEncoderCopyBufferToBuffer(enc, g_scratch, static_cast<std::uint64_t>(job.base) * 4, paced::g_buf, 0, job.n * 4);
++    else wgpuCommandEncoderCopyBufferToBuffer(enc, paced::g_buf, 0, g_scratch, static_cast<std::uint64_t>(job.base) * 4, job.n * 4);
++}
++
+ bool make_interp() {
+     WGPUShaderSourceWGSL source = WGPU_SHADER_SOURCE_WGSL_INIT;
+     source.code = view(kInterpShader);
+@@ -3169,15 +3201,31 @@ bool invert4(const float *m, double *out) {
+ }
+ 
+ // The job for this present: which part of the step this refresh shows, the camera of that moment, T
+-void plan_interp(std::uint32_t base, std::uint32_t width, std::uint32_t height, std::uint32_t game_w, std::uint32_t game_h) {
++void plan_interp(std::uint32_t base, std::uint32_t width, std::uint32_t height, std::uint32_t game_w, std::uint32_t game_h, bool by_clock = false) {
+     using namespace interp;
+-    const int k = g_since++;
++    const int k = by_clock ? 0 : g_since++;
++    // the pair of steps the picture shown belongs to: the paced pictures keep the one taken with the game's picture (a step's
++    // mark can come before its picture is taken)
++    const Pic &cur = by_clock ? g_show_cur : g_cur;
++    const Pic &prev = by_clock ? g_show_prev : g_prev;
++    const auto mark_time = by_clock ? g_show_mark_time : g_mark_time;
+     if (interp::log_on()) std::fprintf(stderr, "[frame gen] present (vblank %llu), refresh %d since the step\n", static_cast<unsigned long long>(frame_count()), k);
+     const int mode = interp::g_mode.load(std::memory_order_relaxed);
+-    if (!mode || !g_interp_splat || !g_cur.valid || !g_prev.valid || game_w != g_cur.w || game_h != g_cur.h || k >= g_period || g_period < 2) return;
++    if (!mode || !g_interp_splat || !cur.valid || !prev.valid || game_w != cur.w || game_h != cur.h || (!by_clock && k >= g_period) || g_period < 2) return;
+     // smooth: refresh k of the step shows the camera (k + 1) / period of the way from the step before (the last one: the step itself);
+     // predict: the step itself first, then carried on by k / period of the last step's move
+     float f = mode == 1 ? static_cast<float>(k + 1) / static_cast<float>(g_period) : 1.0f + static_cast<float>(k) / static_cast<float>(g_period);
++    if (by_clock) {
++        // v0.10.7, the pictures shown at the window's pace: the moment by the clock since the step's mark came, a step lasting
++        // period / 59.94 s (smooth: a third of the way at once, the step itself two thirds of a step later, then held; predict: the
++        // step itself at once, then carried on, at most one step)
++        const double since = std::chrono::duration<double>(std::chrono::steady_clock::now() - mark_time).count();
++        const double nominal = static_cast<double>(g_period) / 59.94;
++        const double step = std::clamp(g_step_seconds, nominal * 0.75, 0.5);   // as the steps come (slower than the console's when the PC lags)
++        const double t = std::clamp(since / step, 0.0, 1.0);
++        f = mode == 1 ? static_cast<float>(std::min(1.0, t + 1.0 / g_period)) : static_cast<float>(1.0 + std::min(t, 1.0 - 1.0 / g_period));
++        if (interp::log_on()) std::fprintf(stderr, "[frame gen] paced picture %.1f ms after the step's mark, a step %.1f ms: at %.2f\n", since * 1000.0, step * 1000.0, f);
++    }
+     static const char *const force = std::getenv("PS2_FRAME_GEN_AT");   // test: every refresh at this point of the step (0: the step before)
+     if (force && *force) {
+         const float at = static_cast<float>(std::atof(force));
+@@ -3186,18 +3234,18 @@ void plan_interp(std::uint32_t base, std::uint32_t width, std::uint32_t height,
+     }
+     if (f == 1.0f) return;
+     float mf[16];
+-    for (int i = 0; i < 16; ++i) mf[i] = g_prev.m[i] + (g_cur.m[i] - g_prev.m[i]) * f;
++    for (int i = 0; i < 16; ++i) mf[i] = prev.m[i] + (cur.m[i] - prev.m[i]) * f;
+     double inv[16];
+-    if (!invert4(g_cur.m, inv)) return;
++    if (!invert4(cur.m, inv)) return;
+     InterpJob &j = g_interp_job;
+     j = InterpJob{};
+     for (int i = 0; i < 16; ++i) j.p[i] = static_cast<float>(inv[i]), j.p[16 + i] = mf[i];
+     std::uint32_t *u = reinterpret_cast<std::uint32_t *>(j.p);
+     u[32] = width, u[33] = height, u[34] = g_scale, u[35] = base;
+-    j.p[36] = g_cur.ofx, j.p[37] = g_cur.ofy, j.p[38] = static_cast<float>(game_w), j.p[39] = static_cast<float>(game_h);
++    j.p[36] = cur.ofx, j.p[37] = cur.ofy, j.p[38] = static_cast<float>(game_w), j.p[39] = static_cast<float>(game_h);
+     float boxes[32 * 4];
+     const unsigned nb = std::min(ps2::gs::ui_boxes(boxes), 32u);
+-    u[40] = nb, u[41] = g_cur.w, u[42] = static_cast<std::uint32_t>(g_cur.limbs);
++    u[40] = nb, u[41] = cur.w, u[42] = static_cast<std::uint32_t>(cur.limbs);
+     j.p[44] = f - 1.0f;
+     const int view = interp::g_view.load(std::memory_order_relaxed);
+     j.p[45] = view == 2 ? 1.0f : 0.0f;   // debug: the depth moved instead of the colours
+@@ -3210,28 +3258,28 @@ void plan_interp(std::uint32_t base, std::uint32_t width, std::uint32_t height,
+     // The hero moves as one piece, with the torso (limb 0): each limb moved on its own tore the picture apart where the pose
+     // changes (the arms against the body); the pose itself changes at the steps, as on the PS2.
+     float root[3] = {0, 0, 0};
+-    for (int l = 0; l < g_cur.limbs; ++l)
+-        if (g_cur.limb[l][0] == 0.0f)
+-            for (int q = 0; q < g_prev.limbs; ++q)
+-                if (g_prev.limb[q][0] == 0.0f)
++    for (int l = 0; l < cur.limbs; ++l)
++        if (cur.limb[l][0] == 0.0f)
++            for (int q = 0; q < prev.limbs; ++q)
++                if (prev.limb[q][0] == 0.0f)
+                     for (int k = 0; k < 3; ++k) {
+-                        const float d = (g_cur.limb[l][1 + k] + g_cur.limb[l][4 + k] - g_prev.limb[q][1 + k] - g_prev.limb[q][4 + k]) * 0.5f;
++                        const float d = (cur.limb[l][1 + k] + cur.limb[l][4 + k] - prev.limb[q][1 + k] - prev.limb[q][4 + k]) * 0.5f;
+                         root[k] = std::fabs(d) < 2.0f ? d : 0.0f;   // a jump (a new place, a cut): not a move
+                     }
+-    for (int l = 0; l < g_cur.limbs; ++l) {   // the hero's limbs (which pixels are the hero's) and the move
+-        const float *c = g_cur.limb[l];
++    for (int l = 0; l < cur.limbs; ++l) {   // the hero's limbs (which pixels are the hero's) and the move
++        const float *c = cur.limb[l];
+         for (int k = 0; k < 3; ++k) {
+             j.p[176 + l * 4 + k] = c[1 + k], j.p[224 + l * 4 + k] = c[4 + k];
+             j.p[272 + l * 4 + k] = root[k], j.p[320 + l * 4 + k] = root[k];
+         }
+         j.p[176 + l * 4 + 3] = c[7];
+         // on the screen (game pixels), with the matrix the picture was drawn with
+-        const float *M = g_cur.m;
++        const float *M = cur.m;
+         const auto project = [&](float x, float y, float z, float out[3]) {
+             const float px = x * M[0] + y * M[4] + z * M[8] + M[12], py = x * M[1] + y * M[5] + z * M[9] + M[13];
+             const float pz = x * M[2] + y * M[6] + z * M[10] + M[14], pw = x * M[3] + y * M[7] + z * M[11] + M[15];
+             if (!(pw > 1e-4f)) return false;
+-            out[0] = px / pw - g_cur.ofx, out[1] = py / pw - g_cur.ofy, out[2] = pz / pw;
++            out[0] = px / pw - cur.ofx, out[1] = py / pw - cur.ofy, out[2] = pz / pw;
+             return true;
+         };
+         float sa[3], sb[3], sr[3];
+@@ -3249,21 +3297,21 @@ void plan_interp(std::uint32_t base, std::uint32_t width, std::uint32_t height,
+     // the matrix that takes a point on it from the step drawn to the moment shown: (the drawn bone's matrix)^-1 x (the bone's matrix
+     // blended between the two steps), rows, the place in the fourth. A bone with no match in the step before, or that jumped (a new
+     // place, a cut), keeps its place.
+-    if (g_cur.nbones > 0) {
++    if (cur.nbones > 0) {
+         std::vector<float> &out = j.bones;
+         out.assign(4 + kMaxChars * 8, 0.0f);
+-        out.reserve(out.size() + static_cast<std::size_t>(std::min(g_cur.nbones, kMaxBones)) * 24);
++        out.reserve(out.size() + static_cast<std::size_t>(std::min(cur.nbones, kMaxBones)) * 24);
+         std::unordered_map<std::uint32_t, int> before;
+-        before.reserve(static_cast<std::size_t>(g_prev.nbones) * 2);
+-        for (int b = 0; b < g_prev.nbones; ++b) {
++        before.reserve(static_cast<std::size_t>(prev.nbones) * 2);
++        for (int b = 0; b < prev.nbones; ++b) {
+             std::uint32_t addr;
+-            std::memcpy(&addr, &g_prev.bones[static_cast<std::size_t>(b) * kBoneFloats], 4);
++            std::memcpy(&addr, &prev.bones[static_cast<std::size_t>(b) * kBoneFloats], 4);
+             before[addr] = b;
+         }
+         int chars = 0, bones = 0;
+         float last_char = -1.0f;
+-        for (int b = 0; b < g_cur.nbones && bones < kMaxBones; ++b) {
+-            const float *r = &g_cur.bones[static_cast<std::size_t>(b) * kBoneFloats];
++        for (int b = 0; b < cur.nbones && bones < kMaxBones; ++b) {
++            const float *r = &cur.bones[static_cast<std::size_t>(b) * kBoneFloats];
+             if (r[1] != last_char) {   // a new character
+                 if (chars == kMaxChars) break;
+                 last_char = r[1];
+@@ -3282,7 +3330,7 @@ void plan_interp(std::uint32_t base, std::uint32_t width, std::uint32_t height,
+             const auto found = before.find(addr);
+             bool moved = false;
+             if (found != before.end()) {
+-                const float *q = &g_prev.bones[static_cast<std::size_t>(found->second) * kBoneFloats];
++                const float *q = &prev.bones[static_cast<std::size_t>(found->second) * kBoneFloats];
+                 const double jump = std::hypot(r[17] - q[17], r[18] - q[18], r[19] - q[19]);
+                 if (jump < 2.0) {
+                     for (int i = 0; i < 4; ++i)
+@@ -3327,11 +3375,11 @@ void plan_interp(std::uint32_t base, std::uint32_t width, std::uint32_t height,
+         }
+         out[0] = static_cast<float>(chars), out[1] = static_cast<float>(bones);
+     }
+-    j.on = true, j.buf = g_cur.buf, j.base = base, j.width = width, j.height = height;
++    j.on = true, j.buf = cur.buf, j.base = base, j.width = width, j.height = height;
+     ++g_generated;
+     if (interp::log_on()) {
+         // how far the screen's middle (at a background's depth) moves in this made picture
+-        const double sx = game_w * 0.5 + g_cur.ofx, sy = game_h * 0.5 + g_cur.ofy, zz = 8000.0;
++        const double sx = game_w * 0.5 + cur.ofx, sy = game_h * 0.5 + cur.ofy, zz = 8000.0;
+         double wp[4];
+         for (int c = 0; c < 4; ++c) wp[c] = sx * inv[c] + sy * inv[4 + c] + zz * inv[8 + c] + inv[12 + c];
+         const double x = wp[0] / wp[3], y = wp[1] / wp[3], z = wp[2] / wp[3];
+@@ -3507,7 +3555,12 @@ void submit(WGPUTextureView present_view = nullptr) {
+         wgpuCommandEncoderResolveQuerySet(enc, g_queries, 0, 2, g_query_resolve, 0);
+         wgpuCommandEncoderCopyBufferToBuffer(enc, g_query_resolve, 0, g_query_read, 0, 16);
+     }
++    if (!present_view && g_copy_job.on && g_copy_job.store) {   // v0.10.7: the game's picture taken for the paced presents
++        encode_smaa(enc);
++        encode_copy(enc);
++    }
+     if (present_view) {
++        if (g_copy_job.on && !g_copy_job.store) encode_copy(enc);   // v0.10.7: a paced present: the taken picture back first
+         encode_smaa(enc);  // rawdanger-recomp: when asked for, the antialiasing of the picture before it is shown
+         encode_interp(enc);  // rawdanger-recomp (v0.10.5): frame generation, the camera between two game steps
+         wt::Scope s(wt::kRenderPass);
+@@ -5389,6 +5442,12 @@ void interp_mark(const float *data, int n) {
+     g_captured = false;
+     g_cap_draws = 0;
+     g_since = 0;
++    {   // the real time a step takes, smoothed (the game may run slower than the console when the PC cannot keep up)
++        const auto now = std::chrono::steady_clock::now();
++        const double dt = std::chrono::duration<double>(now - g_mark_time).count();
++        if (dt > 0.0 && dt < 1.0) g_step_seconds = g_step_seconds * 0.8 + dt * 0.2;
++        g_mark_time = now;
++    }
+     if (interp::log_on()) {
+         std::fprintf(stderr, "[frame gen] step: %s, a step takes %d refreshes, %d limbs, %d bones\n", g_cur.valid ? "picture taken" : "no 3D", g_period, g_cur.limbs,
+                      g_cur.nbones);
+@@ -5411,6 +5470,12 @@ void set_frame_generation(int mode) {
+     if (!mode) interp::g_cur.valid = interp::g_prev.valid = false;
+ }
+ int frame_generation() { return interp::g_mode.load(std::memory_order_relaxed); }
++bool paced_on();
++void set_fps_limit(int fps) { paced::g_limit.store(std::max(0, fps), std::memory_order_relaxed); }
++int fps_limit() { return paced::g_limit.load(std::memory_order_relaxed); }
++void set_paced_threads(bool on) { paced::g_threads.store(on, std::memory_order_relaxed); }
++bool paced() { return paced_on(); }
++void paced_counts(std::uint64_t &made, std::uint64_t &taken) { made = paced::g_made, taken = paced::g_taken; }
+ void set_frame_generation_view(int view) { interp::g_view.store(std::clamp(view, 0, 3), std::memory_order_relaxed); }
+ int frame_generation_view() { return interp::g_view.load(std::memory_order_relaxed); }
+ void set_frame_generation_log(bool on) { interp::g_log_on.store(on, std::memory_order_relaxed); }
+@@ -6103,9 +6168,50 @@ std::uint32_t display_params(const DisplaySource &src, std::uint32_t scratch_at)
+                         o.active ? 1u : 0u, o.fbp, o.fbw, o.psm, o.dbx, o.dby, static_cast<std::uint32_t>(o.x), static_cast<std::uint32_t>(o.y), o.width, o.height});
+ }
+ 
++bool show_picture(const DisplaySource &src, bool from_store);
++bool paced_on() {
++    return paced::g_threads.load(std::memory_order_relaxed) && interp::g_mode.load(std::memory_order_relaxed) > 0 && paced::g_limit.load(std::memory_order_relaxed) != 60;
++}
++
+ bool present(const DisplaySource &src) {
+     apply_scale_request();
+     if (!g_surface) return false;
++    if (paced_on()) {
++        // v0.10.7: the game's picture is only taken; the window thread shows pictures made from it (present_paced)
++        flush_all();
++        const std::uint32_t current = field_base(g_field);
++        push_display(src, current, display_params(src, current));
++        if ((ps2::video_options() & 16u) != 0u) g_smaa_job = SmaaJob{true, current, src.width * g_scale, src.height * g_scale};
++        g_copy_job = CopyJob{true, true, current, static_cast<std::uint64_t>(src.width) * g_scale * src.height * g_scale};
++        submit();
++        paced::g_stored = true;
++        paced::g_src = src;
++        ++paced::g_taken;
++        ++interp::g_since;   // (the refreshes a step takes are still counted by the game's presents)
++        interp::g_show_cur = interp::g_cur, interp::g_show_prev = interp::g_prev, interp::g_show_mark_time = interp::g_mark_time;
++        return true;
++    }
++    return show_picture(src, false);
++}
++
++// v0.10.7: one picture at the window's pace, made from the game's last one with the camera of this moment; false when none is taken
++bool present_paced() {
++    if (!g_surface || !paced::g_stored || !paced_on()) return false;
++    ++paced::g_made;
++    if (interp::log_on()) {   // each second: the pictures shown and the game's
++        static auto from = std::chrono::steady_clock::now();
++        static std::uint64_t made0 = 0, taken0 = 0;
++        const double sec = std::chrono::duration<double>(std::chrono::steady_clock::now() - from).count();
++        if (sec >= 1.0) {
++            std::fprintf(stderr, "[frame gen] %.1f pictures shown a second, %.1f from the game (limit %d)\n", (paced::g_made - made0) / sec, (paced::g_taken - taken0) / sec,
++                         paced::g_limit.load());
++            from = std::chrono::steady_clock::now(), made0 = paced::g_made, taken0 = paced::g_taken;
++        }
++    }
++    return show_picture(paced::g_src, true);
++}
++
++bool show_picture(const DisplaySource &src, bool from_store) {
+     static PresentLog log;
+     const double flush0 = log.flush, acquire0 = log.acquire, submit0 = log.submit, present0 = log.present;
+     if (log.on) log.mark = PresentLog::Clock::now();
+@@ -6114,12 +6220,16 @@ bool present(const DisplaySource &src) {
+     const std::uint32_t current = field_base(g_field), previous = field_base(g_field + 1);
+     static const bool weave_off = std::getenv("PS2_NO_DEINTERLACE") != nullptr;
+     const bool blend = src.halved && g_have_previous && g_last_width == src.width && g_last_height == src.height && !weave_off;
+-    const std::uint32_t param = display_params(src, current);
+-    push_display(src, current, param);
++    if (from_store) {
++        g_copy_job = CopyJob{true, false, current, static_cast<std::uint64_t>(src.width) * g_scale * src.height * g_scale};   // (SMAA is in it)
++    } else {
++        const std::uint32_t param = display_params(src, current);
++        push_display(src, current, param);
++        if ((ps2::video_options() & 16u) != 0u) g_smaa_job = SmaaJob{true, current, src.width * g_scale, src.height * g_scale};
++    }
+     const float sw = static_cast<float>(g_surface_width), sh = static_cast<float>(g_surface_height);
+     g_view_rows = src.height * (src.halved ? 2u : 1u);
+-    if ((ps2::video_options() & 16u) != 0u) g_smaa_job = SmaaJob{true, current, src.width * g_scale, src.height * g_scale};
+-    plan_interp(current, src.width * g_scale, src.height * g_scale, src.width, src.height * (src.halved ? 2u : 1u));
++    plan_interp(current, src.width * g_scale, src.height * g_scale, src.width, src.height * (src.halved ? 2u : 1u), from_store);
+     float vw, vh;
+     picture_view(sw, sh, vw, vh);
+     write_lens();
+diff --git a/runtime/src/gs/gpu/gpu.hpp b/runtime/src/gs/gpu/gpu.hpp
+index fe5b581..abf476e 100644
+--- a/runtime/src/gs/gpu/gpu.hpp
++++ b/runtime/src/gs/gpu/gpu.hpp
+@@ -39,6 +39,13 @@ void interp_mark(const float *data, int n);
+ void set_frame_generation(int mode);
+ int frame_generation();
+ void set_frame_generation_view(int view);
++// rawdanger-recomp (v0.10.7): pictures at the window's pace (frame generation on, a limit other than 60; 0 none)
++void set_fps_limit(int fps);
++int fps_limit();
++void set_paced_threads(bool on);
++bool paced();
++bool present_paced();
++void paced_counts(std::uint64_t &made, std::uint64_t &taken);
+ int frame_generation_view();
+ void set_frame_generation_log(bool on);
+ bool frame_generation_log();
+diff --git a/runtime/src/gs/gs.cpp b/runtime/src/gs/gs.cpp
+index beddce5..1b03493 100644
+--- a/runtime/src/gs/gs.cpp
++++ b/runtime/src/gs/gs.cpp
+@@ -2691,12 +2691,24 @@ int frame_generation() {
+ #endif
+ }
+ #ifdef PS2_GPU
++void set_fps_limit(int fps) { ps2::gs::gpu::set_fps_limit(fps); }
++int fps_limit() { return ps2::gs::gpu::fps_limit(); }
++void set_paced_threads(bool on) { ps2::gs::gpu::set_paced_threads(on); }
++bool paced_presents() { return ps2::gs::gpu::paced(); }
++bool present_paced() { return ps2::gs::gpu::has_surface() && ps2::gs::gpu::present_paced(); }
++void paced_counts(std::uint64_t &made, std::uint64_t &taken) { ps2::gs::gpu::paced_counts(made, taken); }
+ void set_frame_generation_view(int view) { ps2::gs::gpu::set_frame_generation_view(view); }
+ int frame_generation_view() { return ps2::gs::gpu::frame_generation_view(); }
+ void set_frame_generation_log(bool on) { ps2::gs::gpu::set_frame_generation_log(on); }
+ bool frame_generation_log() { return ps2::gs::gpu::frame_generation_log(); }
+ void dump_presents(const char *base, int count) { ps2::gs::gpu::dump_presents(base ? base : "", count); }
+ #else
++void set_fps_limit(int) {}
++int fps_limit() { return 60; }
++void set_paced_threads(bool) {}
++bool paced_presents() { return false; }
++bool present_paced() { return false; }
++void paced_counts(std::uint64_t &made, std::uint64_t &taken) { made = taken = 0; }
+ void set_frame_generation_view(int) {}
+ int frame_generation_view() { return 0; }
+ void set_frame_generation_log(bool) {}
+-- 
+2.43.0
+

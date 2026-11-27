@@ -4,6 +4,7 @@
 L	Resolution
 L	Graphics API
 L	Frame generation
+L	Pictures a second
 L	Window size
 L	Full screen
 L	Widescreen 16:9
@@ -43,6 +44,11 @@ V	8x
 V	AUTO (DIRECT3D 12)
 V	AUTO (VULKAN)
 V	VULKAN
+V	240
+V	165
+V	144
+V	120
+V	NO LIMIT
 V	PREDICT
 V	SMOOTH
 V	DIRECT3D 12

@@ -92,11 +92,12 @@ else:
 | Game steps a second (v0.9.8) | The game's, 20, 30 or 60: a test of the pacing (everything runs faster; docs/FRAMERATE.md) |
 | Frame generation: what the made pictures show (v0.10.5) | The picture; the places nothing landed on, in magenta (normally filled from the background beside them); the depth moved instead of the colours (near bright); or (v0.10.6) the pixels moved with a character's bone, a colour per bone (to check which bone each part follows) |
 | Frame generation: each step in the log (v0.10.5) | Each step (depth taken, the hero's limbs, a cut) and each made picture (where in the step, how far the screen's middle moves) in the log |
+| Stats on screen: Pictures a second (v0.10.7) | With frame generation above 60: the pictures shown a second and the game's (the frame generation log also prints both each second, and each paced picture's moment in the step) |
 | Save the next 6 pictures as shown (v0.10.5) | The next 6 presents as the window gets them (after SMAA and frame generation, before the enlargement), next to the memory card as `pictures-<date>.N.ppm`, with SMAA's edges and weights, frame generation's depth (`.depth.pgm` / raw `.depth.u32`) and its keys (`.keys.ppm`: gaps red, the HUD blue): attach them to a report |
 
 Environment switches for tests (no menu needed): `PS2_FRAME_GEN=0/1/2` (off / smooth / predict), `PS2_FRAME_GEN_LOG=1`,
 `PS2_FRAME_GEN_HOLES=1`, `PS2_FRAME_GEN_DEPTH=1`, `PS2_FRAME_GEN_AT=<0..1>` (every made picture at that point of the step: 0
 shows each picture with the step before's camera, to compare with it), `PS2_PRESENT_DUMP=<vblank>,<base>[,<count>]`,
-`PS2_WET_LOG=1` (each wet look / AO pass in the log), `PS2_FRAME_GEN_BONES_VIEW=1` (the bones view), `PS2_FRAME_GEN_BONES=TABLE,COUNT,MODEL` (hex: where the characters are; Raw Danger's 5EAC80,EB,F0).
+`PS2_WET_LOG=1` (each wet look / AO pass in the log), `PS2_FRAME_GEN_BONES_VIEW=1` (the bones view), `PS2_FPS_LIMIT=<n>` (0 no limit), `PS2_FRAME_GEN_BONES=TABLE,COUNT,MODEL` (hex: where the characters are; Raw Danger's 5EAC80,EB,F0).
 | Developers' debug menu, map select | The disc's own menus (Shift+F7, F7) |
 

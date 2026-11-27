@@ -137,6 +137,19 @@ int g_interp_slot = 0;
 std::uint64_t g_interp_words = 0;
 constexpr std::uint32_t kInterpParamBytes = 464 * 4;   // interp.wgsl Params
 constexpr std::uint32_t kInterpDepthWords = 1024u * 1024u;   // the game's picture, one value per game pixel (640 x 448 here)
+// rawdanger-recomp (v0.10.7): more pictures than the console's 60. With frame generation on and a limit above 60 (Settings >
+// Display > Pictures a second), the game's presents only take its picture (after SMAA) into g_paced_src; the window thread shows
+// pictures made from it at its own pace (present_paced), each with the camera of the moment it is shown (by the clock).
+namespace paced {
+std::atomic<int> g_limit{[] { const char *v = std::getenv("PS2_FPS_LIMIT"); return v && *v ? std::max(0, std::atoi(v)) : 60; }()};   // 0: no limit
+std::atomic<bool> g_threads{false};   // presents come from the window thread's queue (the pace is the window's to keep)
+bool g_stored = false;
+DisplaySource g_src{};
+WGPUBuffer g_buf = nullptr;
+std::uint64_t g_words = 0;
+std::uint64_t g_made = 0, g_taken = 0;   // pictures shown, game pictures taken (the stats)
+}
+struct CopyJob { bool on = false, store = false; std::uint32_t base = 0; std::uint64_t n = 0; } g_copy_job;   // to (store) or from g_paced_src
 struct InterpJob { bool on = false; int buf = 0; std::uint32_t base = 0, width = 0, height = 0; float p[kInterpParamBytes / 4] = {}; std::vector<float> bones; } g_interp_job;
 namespace interp {
 // 0 off, 1 smooth (the picture shown with the camera between the last two steps: two thirds of a step later, always right),
@@ -152,6 +165,10 @@ int g_pending = 0;
 Pic g_cap;
 std::uint32_t g_cap_zbp = 0, g_cap_zpsm = 0, g_cap_bw = 0, g_cap_draws = 0;
 int g_since = 1000, g_period = 3;
+std::chrono::steady_clock::time_point g_mark_time{};   // v0.10.7: when the last step's mark came (the paced pictures' clock)
+double g_step_seconds = 3.0 / 59.94;                   // v0.10.7: the real time between two steps' marks, smoothed
+Pic g_show_cur, g_show_prev;                            // v0.10.7: the steps of the game picture taken last (paced pictures)
+std::chrono::steady_clock::time_point g_show_mark_time{};
 std::uint64_t g_generated = 0, g_marks = 0;
 std::atomic<bool> g_log_on{std::getenv("PS2_FRAME_GEN_LOG") != nullptr};   // Settings > Debug: each step and refresh in the log
 inline bool log_on() { return g_log_on.load(std::memory_order_relaxed); }
@@ -3100,6 +3117,21 @@ void encode_interp(WGPUCommandEncoder enc) {
     wgpuCommandEncoderCopyBufferToBuffer(enc, g_interp_work, n * 2 * 4, g_scratch, static_cast<std::uint64_t>(job.base) * 4, n * 4);
 }
 
+// v0.10.7: the game's picture to the store (paced presents) or back from it, in the same submit
+void encode_copy(WGPUCommandEncoder enc) {
+    const CopyJob job = g_copy_job;
+    g_copy_job.on = false;
+    if (!job.on || !job.n) return;
+    if (!paced::g_buf || paced::g_words < job.n) {
+        if (!job.store) return;
+        if (paced::g_buf) wgpuBufferRelease(paced::g_buf);
+        paced::g_words = job.n;
+        paced::g_buf = make_buffer(job.n * 4, WGPUBufferUsage_Storage | WGPUBufferUsage_CopySrc | WGPUBufferUsage_CopyDst);
+    }
+    if (job.store) wgpuCommandEncoderCopyBufferToBuffer(enc, g_scratch, static_cast<std::uint64_t>(job.base) * 4, paced::g_buf, 0, job.n * 4);
+    else wgpuCommandEncoderCopyBufferToBuffer(enc, paced::g_buf, 0, g_scratch, static_cast<std::uint64_t>(job.base) * 4, job.n * 4);
+}
+
 bool make_interp() {
     WGPUShaderSourceWGSL source = WGPU_SHADER_SOURCE_WGSL_INIT;
     source.code = view(kInterpShader);
@@ -3169,15 +3201,31 @@ bool invert4(const float *m, double *out) {
 }
 
 // The job for this present: which part of the step this refresh shows, the camera of that moment, T
-void plan_interp(std::uint32_t base, std::uint32_t width, std::uint32_t height, std::uint32_t game_w, std::uint32_t game_h) {
+void plan_interp(std::uint32_t base, std::uint32_t width, std::uint32_t height, std::uint32_t game_w, std::uint32_t game_h, bool by_clock = false) {
     using namespace interp;
-    const int k = g_since++;
+    const int k = by_clock ? 0 : g_since++;
+    // the pair of steps the picture shown belongs to: the paced pictures keep the one taken with the game's picture (a step's
+    // mark can come before its picture is taken)
+    const Pic &cur = by_clock ? g_show_cur : g_cur;
+    const Pic &prev = by_clock ? g_show_prev : g_prev;
+    const auto mark_time = by_clock ? g_show_mark_time : g_mark_time;
     if (interp::log_on()) std::fprintf(stderr, "[frame gen] present (vblank %llu), refresh %d since the step\n", static_cast<unsigned long long>(frame_count()), k);
     const int mode = interp::g_mode.load(std::memory_order_relaxed);
-    if (!mode || !g_interp_splat || !g_cur.valid || !g_prev.valid || game_w != g_cur.w || game_h != g_cur.h || k >= g_period || g_period < 2) return;
+    if (!mode || !g_interp_splat || !cur.valid || !prev.valid || game_w != cur.w || game_h != cur.h || (!by_clock && k >= g_period) || g_period < 2) return;
     // smooth: refresh k of the step shows the camera (k + 1) / period of the way from the step before (the last one: the step itself);
     // predict: the step itself first, then carried on by k / period of the last step's move
     float f = mode == 1 ? static_cast<float>(k + 1) / static_cast<float>(g_period) : 1.0f + static_cast<float>(k) / static_cast<float>(g_period);
+    if (by_clock) {
+        // v0.10.7, the pictures shown at the window's pace: the moment by the clock since the step's mark came, a step lasting
+        // period / 59.94 s (smooth: a third of the way at once, the step itself two thirds of a step later, then held; predict: the
+        // step itself at once, then carried on, at most one step)
+        const double since = std::chrono::duration<double>(std::chrono::steady_clock::now() - mark_time).count();
+        const double nominal = static_cast<double>(g_period) / 59.94;
+        const double step = std::clamp(g_step_seconds, nominal * 0.75, 0.5);   // as the steps come (slower than the console's when the PC lags)
+        const double t = std::clamp(since / step, 0.0, 1.0);
+        f = mode == 1 ? static_cast<float>(std::min(1.0, t + 1.0 / g_period)) : static_cast<float>(1.0 + std::min(t, 1.0 - 1.0 / g_period));
+        if (interp::log_on()) std::fprintf(stderr, "[frame gen] paced picture %.1f ms after the step's mark, a step %.1f ms: at %.2f\n", since * 1000.0, step * 1000.0, f);
+    }
     static const char *const force = std::getenv("PS2_FRAME_GEN_AT");   // test: every refresh at this point of the step (0: the step before)
     if (force && *force) {
         const float at = static_cast<float>(std::atof(force));
@@ -3186,18 +3234,18 @@ void plan_interp(std::uint32_t base, std::uint32_t width, std::uint32_t height, 
     }
     if (f == 1.0f) return;
     float mf[16];
-    for (int i = 0; i < 16; ++i) mf[i] = g_prev.m[i] + (g_cur.m[i] - g_prev.m[i]) * f;
+    for (int i = 0; i < 16; ++i) mf[i] = prev.m[i] + (cur.m[i] - prev.m[i]) * f;
     double inv[16];
-    if (!invert4(g_cur.m, inv)) return;
+    if (!invert4(cur.m, inv)) return;
     InterpJob &j = g_interp_job;
     j = InterpJob{};
     for (int i = 0; i < 16; ++i) j.p[i] = static_cast<float>(inv[i]), j.p[16 + i] = mf[i];
     std::uint32_t *u = reinterpret_cast<std::uint32_t *>(j.p);
     u[32] = width, u[33] = height, u[34] = g_scale, u[35] = base;
-    j.p[36] = g_cur.ofx, j.p[37] = g_cur.ofy, j.p[38] = static_cast<float>(game_w), j.p[39] = static_cast<float>(game_h);
+    j.p[36] = cur.ofx, j.p[37] = cur.ofy, j.p[38] = static_cast<float>(game_w), j.p[39] = static_cast<float>(game_h);
     float boxes[32 * 4];
     const unsigned nb = std::min(ps2::gs::ui_boxes(boxes), 32u);
-    u[40] = nb, u[41] = g_cur.w, u[42] = static_cast<std::uint32_t>(g_cur.limbs);
+    u[40] = nb, u[41] = cur.w, u[42] = static_cast<std::uint32_t>(cur.limbs);
     j.p[44] = f - 1.0f;
     const int view = interp::g_view.load(std::memory_order_relaxed);
     j.p[45] = view == 2 ? 1.0f : 0.0f;   // debug: the depth moved instead of the colours
@@ -3210,28 +3258,28 @@ void plan_interp(std::uint32_t base, std::uint32_t width, std::uint32_t height, 
     // The hero moves as one piece, with the torso (limb 0): each limb moved on its own tore the picture apart where the pose
     // changes (the arms against the body); the pose itself changes at the steps, as on the PS2.
     float root[3] = {0, 0, 0};
-    for (int l = 0; l < g_cur.limbs; ++l)
-        if (g_cur.limb[l][0] == 0.0f)
-            for (int q = 0; q < g_prev.limbs; ++q)
-                if (g_prev.limb[q][0] == 0.0f)
+    for (int l = 0; l < cur.limbs; ++l)
+        if (cur.limb[l][0] == 0.0f)
+            for (int q = 0; q < prev.limbs; ++q)
+                if (prev.limb[q][0] == 0.0f)
                     for (int k = 0; k < 3; ++k) {
-                        const float d = (g_cur.limb[l][1 + k] + g_cur.limb[l][4 + k] - g_prev.limb[q][1 + k] - g_prev.limb[q][4 + k]) * 0.5f;
+                        const float d = (cur.limb[l][1 + k] + cur.limb[l][4 + k] - prev.limb[q][1 + k] - prev.limb[q][4 + k]) * 0.5f;
                         root[k] = std::fabs(d) < 2.0f ? d : 0.0f;   // a jump (a new place, a cut): not a move
                     }
-    for (int l = 0; l < g_cur.limbs; ++l) {   // the hero's limbs (which pixels are the hero's) and the move
-        const float *c = g_cur.limb[l];
+    for (int l = 0; l < cur.limbs; ++l) {   // the hero's limbs (which pixels are the hero's) and the move
+        const float *c = cur.limb[l];
         for (int k = 0; k < 3; ++k) {
             j.p[176 + l * 4 + k] = c[1 + k], j.p[224 + l * 4 + k] = c[4 + k];
             j.p[272 + l * 4 + k] = root[k], j.p[320 + l * 4 + k] = root[k];
         }
         j.p[176 + l * 4 + 3] = c[7];
         // on the screen (game pixels), with the matrix the picture was drawn with
-        const float *M = g_cur.m;
+        const float *M = cur.m;
         const auto project = [&](float x, float y, float z, float out[3]) {
             const float px = x * M[0] + y * M[4] + z * M[8] + M[12], py = x * M[1] + y * M[5] + z * M[9] + M[13];
             const float pz = x * M[2] + y * M[6] + z * M[10] + M[14], pw = x * M[3] + y * M[7] + z * M[11] + M[15];
             if (!(pw > 1e-4f)) return false;
-            out[0] = px / pw - g_cur.ofx, out[1] = py / pw - g_cur.ofy, out[2] = pz / pw;
+            out[0] = px / pw - cur.ofx, out[1] = py / pw - cur.ofy, out[2] = pz / pw;
             return true;
         };
         float sa[3], sb[3], sr[3];
@@ -3249,21 +3297,21 @@ void plan_interp(std::uint32_t base, std::uint32_t width, std::uint32_t height, 
     // the matrix that takes a point on it from the step drawn to the moment shown: (the drawn bone's matrix)^-1 x (the bone's matrix
     // blended between the two steps), rows, the place in the fourth. A bone with no match in the step before, or that jumped (a new
     // place, a cut), keeps its place.
-    if (g_cur.nbones > 0) {
+    if (cur.nbones > 0) {
         std::vector<float> &out = j.bones;
         out.assign(4 + kMaxChars * 8, 0.0f);
-        out.reserve(out.size() + static_cast<std::size_t>(std::min(g_cur.nbones, kMaxBones)) * 24);
+        out.reserve(out.size() + static_cast<std::size_t>(std::min(cur.nbones, kMaxBones)) * 24);
         std::unordered_map<std::uint32_t, int> before;
-        before.reserve(static_cast<std::size_t>(g_prev.nbones) * 2);
-        for (int b = 0; b < g_prev.nbones; ++b) {
+        before.reserve(static_cast<std::size_t>(prev.nbones) * 2);
+        for (int b = 0; b < prev.nbones; ++b) {
             std::uint32_t addr;
-            std::memcpy(&addr, &g_prev.bones[static_cast<std::size_t>(b) * kBoneFloats], 4);
+            std::memcpy(&addr, &prev.bones[static_cast<std::size_t>(b) * kBoneFloats], 4);
             before[addr] = b;
         }
         int chars = 0, bones = 0;
         float last_char = -1.0f;
-        for (int b = 0; b < g_cur.nbones && bones < kMaxBones; ++b) {
-            const float *r = &g_cur.bones[static_cast<std::size_t>(b) * kBoneFloats];
+        for (int b = 0; b < cur.nbones && bones < kMaxBones; ++b) {
+            const float *r = &cur.bones[static_cast<std::size_t>(b) * kBoneFloats];
             if (r[1] != last_char) {   // a new character
                 if (chars == kMaxChars) break;
                 last_char = r[1];
@@ -3282,7 +3330,7 @@ void plan_interp(std::uint32_t base, std::uint32_t width, std::uint32_t height, 
             const auto found = before.find(addr);
             bool moved = false;
             if (found != before.end()) {
-                const float *q = &g_prev.bones[static_cast<std::size_t>(found->second) * kBoneFloats];
+                const float *q = &prev.bones[static_cast<std::size_t>(found->second) * kBoneFloats];
                 const double jump = std::hypot(r[17] - q[17], r[18] - q[18], r[19] - q[19]);
                 if (jump < 2.0) {
                     for (int i = 0; i < 4; ++i)
@@ -3327,11 +3375,11 @@ void plan_interp(std::uint32_t base, std::uint32_t width, std::uint32_t height, 
         }
         out[0] = static_cast<float>(chars), out[1] = static_cast<float>(bones);
     }
-    j.on = true, j.buf = g_cur.buf, j.base = base, j.width = width, j.height = height;
+    j.on = true, j.buf = cur.buf, j.base = base, j.width = width, j.height = height;
     ++g_generated;
     if (interp::log_on()) {
         // how far the screen's middle (at a background's depth) moves in this made picture
-        const double sx = game_w * 0.5 + g_cur.ofx, sy = game_h * 0.5 + g_cur.ofy, zz = 8000.0;
+        const double sx = game_w * 0.5 + cur.ofx, sy = game_h * 0.5 + cur.ofy, zz = 8000.0;
         double wp[4];
         for (int c = 0; c < 4; ++c) wp[c] = sx * inv[c] + sy * inv[4 + c] + zz * inv[8 + c] + inv[12 + c];
         const double x = wp[0] / wp[3], y = wp[1] / wp[3], z = wp[2] / wp[3];
@@ -3507,7 +3555,12 @@ void submit(WGPUTextureView present_view = nullptr) {
         wgpuCommandEncoderResolveQuerySet(enc, g_queries, 0, 2, g_query_resolve, 0);
         wgpuCommandEncoderCopyBufferToBuffer(enc, g_query_resolve, 0, g_query_read, 0, 16);
     }
+    if (!present_view && g_copy_job.on && g_copy_job.store) {   // v0.10.7: the game's picture taken for the paced presents
+        encode_smaa(enc);
+        encode_copy(enc);
+    }
     if (present_view) {
+        if (g_copy_job.on && !g_copy_job.store) encode_copy(enc);   // v0.10.7: a paced present: the taken picture back first
         encode_smaa(enc);  // rawdanger-recomp: when asked for, the antialiasing of the picture before it is shown
         encode_interp(enc);  // rawdanger-recomp (v0.10.5): frame generation, the camera between two game steps
         wt::Scope s(wt::kRenderPass);
@@ -5389,6 +5442,12 @@ void interp_mark(const float *data, int n) {
     g_captured = false;
     g_cap_draws = 0;
     g_since = 0;
+    {   // the real time a step takes, smoothed (the game may run slower than the console when the PC cannot keep up)
+        const auto now = std::chrono::steady_clock::now();
+        const double dt = std::chrono::duration<double>(now - g_mark_time).count();
+        if (dt > 0.0 && dt < 1.0) g_step_seconds = g_step_seconds * 0.8 + dt * 0.2;
+        g_mark_time = now;
+    }
     if (interp::log_on()) {
         std::fprintf(stderr, "[frame gen] step: %s, a step takes %d refreshes, %d limbs, %d bones\n", g_cur.valid ? "picture taken" : "no 3D", g_period, g_cur.limbs,
                      g_cur.nbones);
@@ -5411,6 +5470,12 @@ void set_frame_generation(int mode) {
     if (!mode) interp::g_cur.valid = interp::g_prev.valid = false;
 }
 int frame_generation() { return interp::g_mode.load(std::memory_order_relaxed); }
+bool paced_on();
+void set_fps_limit(int fps) { paced::g_limit.store(std::max(0, fps), std::memory_order_relaxed); }
+int fps_limit() { return paced::g_limit.load(std::memory_order_relaxed); }
+void set_paced_threads(bool on) { paced::g_threads.store(on, std::memory_order_relaxed); }
+bool paced() { return paced_on(); }
+void paced_counts(std::uint64_t &made, std::uint64_t &taken) { made = paced::g_made, taken = paced::g_taken; }
 void set_frame_generation_view(int view) { interp::g_view.store(std::clamp(view, 0, 3), std::memory_order_relaxed); }
 int frame_generation_view() { return interp::g_view.load(std::memory_order_relaxed); }
 void set_frame_generation_log(bool on) { interp::g_log_on.store(on, std::memory_order_relaxed); }
@@ -6103,9 +6168,50 @@ std::uint32_t display_params(const DisplaySource &src, std::uint32_t scratch_at)
                         o.active ? 1u : 0u, o.fbp, o.fbw, o.psm, o.dbx, o.dby, static_cast<std::uint32_t>(o.x), static_cast<std::uint32_t>(o.y), o.width, o.height});
 }
 
+bool show_picture(const DisplaySource &src, bool from_store);
+bool paced_on() {
+    return paced::g_threads.load(std::memory_order_relaxed) && interp::g_mode.load(std::memory_order_relaxed) > 0 && paced::g_limit.load(std::memory_order_relaxed) != 60;
+}
+
 bool present(const DisplaySource &src) {
     apply_scale_request();
     if (!g_surface) return false;
+    if (paced_on()) {
+        // v0.10.7: the game's picture is only taken; the window thread shows pictures made from it (present_paced)
+        flush_all();
+        const std::uint32_t current = field_base(g_field);
+        push_display(src, current, display_params(src, current));
+        if ((ps2::video_options() & 16u) != 0u) g_smaa_job = SmaaJob{true, current, src.width * g_scale, src.height * g_scale};
+        g_copy_job = CopyJob{true, true, current, static_cast<std::uint64_t>(src.width) * g_scale * src.height * g_scale};
+        submit();
+        paced::g_stored = true;
+        paced::g_src = src;
+        ++paced::g_taken;
+        ++interp::g_since;   // (the refreshes a step takes are still counted by the game's presents)
+        interp::g_show_cur = interp::g_cur, interp::g_show_prev = interp::g_prev, interp::g_show_mark_time = interp::g_mark_time;
+        return true;
+    }
+    return show_picture(src, false);
+}
+
+// v0.10.7: one picture at the window's pace, made from the game's last one with the camera of this moment; false when none is taken
+bool present_paced() {
+    if (!g_surface || !paced::g_stored || !paced_on()) return false;
+    ++paced::g_made;
+    if (interp::log_on()) {   // each second: the pictures shown and the game's
+        static auto from = std::chrono::steady_clock::now();
+        static std::uint64_t made0 = 0, taken0 = 0;
+        const double sec = std::chrono::duration<double>(std::chrono::steady_clock::now() - from).count();
+        if (sec >= 1.0) {
+            std::fprintf(stderr, "[frame gen] %.1f pictures shown a second, %.1f from the game (limit %d)\n", (paced::g_made - made0) / sec, (paced::g_taken - taken0) / sec,
+                         paced::g_limit.load());
+            from = std::chrono::steady_clock::now(), made0 = paced::g_made, taken0 = paced::g_taken;
+        }
+    }
+    return show_picture(paced::g_src, true);
+}
+
+bool show_picture(const DisplaySource &src, bool from_store) {
     static PresentLog log;
     const double flush0 = log.flush, acquire0 = log.acquire, submit0 = log.submit, present0 = log.present;
     if (log.on) log.mark = PresentLog::Clock::now();
@@ -6114,12 +6220,16 @@ bool present(const DisplaySource &src) {
     const std::uint32_t current = field_base(g_field), previous = field_base(g_field + 1);
     static const bool weave_off = std::getenv("PS2_NO_DEINTERLACE") != nullptr;
     const bool blend = src.halved && g_have_previous && g_last_width == src.width && g_last_height == src.height && !weave_off;
-    const std::uint32_t param = display_params(src, current);
-    push_display(src, current, param);
+    if (from_store) {
+        g_copy_job = CopyJob{true, false, current, static_cast<std::uint64_t>(src.width) * g_scale * src.height * g_scale};   // (SMAA is in it)
+    } else {
+        const std::uint32_t param = display_params(src, current);
+        push_display(src, current, param);
+        if ((ps2::video_options() & 16u) != 0u) g_smaa_job = SmaaJob{true, current, src.width * g_scale, src.height * g_scale};
+    }
     const float sw = static_cast<float>(g_surface_width), sh = static_cast<float>(g_surface_height);
     g_view_rows = src.height * (src.halved ? 2u : 1u);
-    if ((ps2::video_options() & 16u) != 0u) g_smaa_job = SmaaJob{true, current, src.width * g_scale, src.height * g_scale};
-    plan_interp(current, src.width * g_scale, src.height * g_scale, src.width, src.height * (src.halved ? 2u : 1u));
+    plan_interp(current, src.width * g_scale, src.height * g_scale, src.width, src.height * (src.halved ? 2u : 1u), from_store);
     float vw, vh;
     picture_view(sw, sh, vw, vh);
     write_lens();

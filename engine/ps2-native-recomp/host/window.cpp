@@ -1529,6 +1529,7 @@ void menu_paint(bool show_again) {
         v.scale_max = static_cast<int>(ps2::max_internal_scale());
         v.graphics_api = g_keys.graphics_api;
         v.frame_generation = g_keys.frame_generation;
+        v.fps_limit = g_keys.fps_limit;
         v.graphics_api_now = ps2::graphics_api();
         v.sharp_now = g_sharp_now;
         v.sharp_next = g_sharp_next;
@@ -2346,6 +2347,9 @@ void native_option_rows() {
             static const char *const kNames[] = {"OFF", "SMOOTH", "PREDICT"};
             return std::string(kNames[std::clamp(g_keys.frame_generation, 0, 2)]);
         }, command(Command::frame_generation));
+    spin("Pictures a second", "With frame generation: how many pictures a second are shown (the game's 60, or 120 to 240, or no limit)", [] {
+            return g_keys.fps_limit <= 0 ? std::string("NO LIMIT") : std::to_string(g_keys.fps_limit);
+        }, command(Command::fps_limit));
     spin("Window size", "The window's size", [] {
             if (!g_window || (SDL_GetWindowFlags(g_window) & SDL_WINDOW_FULLSCREEN)) return std::string("FULL SCREEN");
             int ww = 0, wh = 0;
@@ -2908,6 +2912,18 @@ void menu_command(quickmenu::Command c, int step) {
                                              "Frame generation: smooth (the camera between the last two game steps; a moment behind)",
                                              "Frame generation: predict (the camera carried on past the last step; no delay)"};
         set_notice(kNotes[g_keys.frame_generation]);
+        break;
+    }
+    case Command::fps_limit: {
+        int k = 0;
+        while (k < keymap::kFpsLimitsCount && keymap::kFpsLimits[k] != g_keys.fps_limit) ++k;
+        k = ((k == keymap::kFpsLimitsCount ? 0 : k) + step + keymap::kFpsLimitsCount) % keymap::kFpsLimitsCount;
+        g_keys.fps_limit = keymap::kFpsLimits[k];
+        ps2::set_fps_limit(g_keys.fps_limit);
+        rewrite_keys_file([](const std::string &t) { return keymap::with_fps_limit(t, g_keys.fps_limit); }, "pictures a second");
+        const std::string n = g_keys.fps_limit <= 0 ? std::string("no limit") : std::to_string(g_keys.fps_limit);
+        set_notice("Pictures a second: " + n + (g_keys.frame_generation ? (g_keys.fps_limit == 60 ? " (as the console)" : " (made by frame generation)")
+                                                                        : " (takes effect with frame generation on)"));
         break;
     }
     case Command::graphics_api: {
@@ -3668,6 +3684,19 @@ void show_speed() {
         std::snprintf(b, sizeof b, "%.0f %% / %.0f %%", (cpu - cpu_start) / seconds * 100.0, (gpu - gpu_start) / (seconds * 10.0));
         std::snprintf(c, sizeof c, "%.0f MB, audio %.0f ms", resident_mb(), queued);
         g_stats_rows = {{"FPS", a}, {"CPU / GPU", b}, {"Memory", c}};
+        if (ps2::paced_presents()) {   // v0.10.7: the pictures shown (made by frame generation) and the game's
+            static std::uint64_t made0 = 0, taken0 = 0;
+            static double at0 = 0.0;
+            std::uint64_t made = 0, taken = 0;
+            ps2::paced_counts(made, taken);
+            const double at = static_cast<double>(SDL_GetPerformanceCounter()) / static_cast<double>(SDL_GetPerformanceFrequency());
+            if (at0 > 0.0 && at > at0) {
+                char d[64];
+                std::snprintf(d, sizeof d, "%.0f shown, %.0f from the game", static_cast<double>(made - made0) / (at - at0), static_cast<double>(taken - taken0) / (at - at0));
+                g_stats_rows.push_back({"Pictures a second", d});
+            }
+            made0 = made, taken0 = taken, at0 = at;
+        }
         if (debug_info().set) {
             const DebugInfo &d = debug_info();
             const std::uint32_t cam = ps2::ld32(d.camera);
@@ -4046,6 +4075,9 @@ bool open_window(bool fullscreen) {
     // rawdanger-recomp (v0.10.5): frame generation (keys.ini frame_generation), unless PS2_FRAME_GEN is set
     if (ps2::os::env("PS2_FRAME_GEN").empty()) ps2::set_frame_generation(g_keys.frame_generation);
     else g_keys.frame_generation = ps2::frame_generation();
+    // v0.10.7: the pictures a second (keys.ini fps_limit), unless PS2_FPS_LIMIT is set
+    if (ps2::os::env("PS2_FPS_LIMIT").empty()) ps2::set_fps_limit(g_keys.fps_limit);
+    else g_keys.fps_limit = ps2::fps_limit();
     // rawdanger-recomp (v0.10.4): the graphics API (keys.ini graphics_api), unless PS2_GPU_BACKEND is set. Vulkan or Direct3D 12 is
     // tried first and the other one when it cannot start. Auto: Windows' default (Direct3D 12, the faster painter on the PCs measured),
     // but Vulkan first when the resolution asked for is more than Direct3D 12 can hold (it binds 128 MB of one buffer: 4x at most).
@@ -4313,6 +4345,23 @@ int run_window(const std::function<int()> &emulate) {
         ps2::wake_render_thread();
     });
     const std::function<void(const std::uint32_t *, std::uint32_t, std::uint32_t)> copy = show_pixels, none;
+    ps2::set_paced_threads(g_gpu_present);   // v0.10.7: the window keeps the pace of the pictures shown (frame generation above 60)
+    // v0.10.7: one picture made by frame generation when its time has come; the milliseconds until the next one (0: none waits)
+    const auto paced_present = []() -> int {
+        using Clock = std::chrono::steady_clock;
+        static Clock::time_point next{};
+        if (!ps2::paced_presents()) return 4;
+        const int limit = ps2::fps_limit();
+        const auto now = Clock::now();
+        const auto interval = std::chrono::nanoseconds(limit > 0 ? 1000000000LL / limit : 0);
+        if (now >= next) {
+            window_stage("showing a picture made by frame generation (present_paced)");
+            ps2::present_paced();
+            next = limit > 0 ? std::max(next + interval, now - interval) : now;
+        }
+        const auto left = std::chrono::duration_cast<std::chrono::milliseconds>(next - Clock::now()).count();
+        return static_cast<int>(std::clamp<long long>(left, 0, 4));
+    };
     while (!done.load()) {
         if (ps2::hitch::on()) {  // PS2_HITCH_LOG=<ms>: the window's own event handling
             const auto p0 = WaitLog::Clock::now();
@@ -4324,16 +4373,20 @@ int run_window(const std::function<int()> &emulate) {
         }
         window_stage("drawing the pictures of the emulation (render_pending)");
         if (!g_waits.on) {
-            if (ps2::render_pending(g_gpu_present, g_gpu_present ? none : copy, show_speed, 8.0) == ps2::Rendered::idle) {
+            const bool pacing = ps2::paced_presents();
+            const bool idle = ps2::render_pending(g_gpu_present, g_gpu_present ? none : copy, show_speed, pacing ? 2.0 : 8.0) == ps2::Rendered::idle;
+            const int wait_ms = paced_present();
+            if (idle && wait_ms > 0) {
                 window_stage("waiting for the emulation to post work (wait_render_work)");
-                ps2::wait_render_work(4);
+                ps2::wait_render_work(wait_ms);
             }
             continue;
         }
         const auto t0 = WaitLog::Clock::now();
-        const bool idle = ps2::render_pending(g_gpu_present, g_gpu_present ? none : copy, show_speed, 8.0) == ps2::Rendered::idle;
+        const bool idle = ps2::render_pending(g_gpu_present, g_gpu_present ? none : copy, show_speed, ps2::paced_presents() ? 2.0 : 8.0) == ps2::Rendered::idle;
+        const int paced_wait = paced_present();
         const auto t1 = WaitLog::Clock::now();
-        if (idle) {
+        if (idle && paced_wait > 0) {
             window_stage("waiting for the emulation to post work (wait_render_work)");
             ps2::wait_render_work(4);
         }

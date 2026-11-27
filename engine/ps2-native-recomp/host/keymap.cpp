@@ -226,6 +226,11 @@ std::string with_window_size(const std::string &file_text, int w, int h) {
 std::string with_menu_skin(const std::string &file_text, int skin) { return with_line(file_text, "menuskin", std::string("menu_skin = ") + (skin == 2 ? "game" : skin == 1 ? "japanese" : "hazard")); }
 std::string with_integer_scale(const std::string &file_text, int on) { return with_line(file_text, "integerscale", "integer_scale = " + std::to_string(on ? 1 : 0)); }
 std::string with_lens_rain(const std::string &file_text, int level) { return with_line(file_text, "rainonlens", std::string("rain_on_lens = ") + (level ? "on" : "off")); }
+const int kFpsLimits[] = {60, 120, 144, 165, 240, 0};
+const int kFpsLimitsCount = 6;
+std::string with_fps_limit(const std::string &file_text, int fps) {
+    return with_line(file_text, "fpslimit", fps <= 0 ? std::string("fps_limit = none") : "fps_limit = " + std::to_string(fps));
+}
 std::string with_frame_generation(const std::string &file_text, int mode) {
     static const char *const kNames[3] = {"off", "smooth", "predict"};
     return with_line(file_text, "framegeneration", std::string("frame_generation = ") + kNames[std::clamp(mode, 0, 2)]);
@@ -398,6 +403,16 @@ void parse(const std::string &text, Config &config, std::vector<std::string> &pr
         if (name == "pace") {
             if (ps2::pace::parse(value)) config.pace = value;
             else bad("pace is 30, 20, 15, 60 or off, ignored");
+            continue;
+        }
+        if (name == "fpslimit") {
+            const std::string v = squash(value);
+            if (v == "none" || v == "off" || v == "0" || v == "unlimited") config.fps_limit = 0;
+            else {
+                const int n = std::atoi(v.c_str());
+                if (n >= 30 && n <= 1000) config.fps_limit = n;
+                else bad("fps_limit is a number of pictures a second (30 to 1000) or none, ignored");
+            }
             continue;
         }
         if (name == "framegeneration") {

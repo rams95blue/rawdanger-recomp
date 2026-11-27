@@ -65,6 +65,7 @@ struct Config {
     int integer_scale = 0;     // rawdanger-recomp: the picture is enlarged by whole numbers only (every console pixel row the same height)
     int lens_rain = 1;         // rawdanger-recomp: rain drops on the lens while playing (keys.ini rain_on_lens): 0 off, 1 on (how hard
                                // follows the map's rain and its gusts); the old lens_rain line (off / light / heavy) is not read any more
+    int fps_limit = 60;        // rawdanger-recomp (v0.10.7): pictures a second with frame generation (60 the console's, 120, 144, 165, 240, 0 no limit)
     int frame_generation = 0;  // rawdanger-recomp (v0.10.5): 0 off, 1 smooth (the camera between the last two game steps), 2 predict (carried on)
     int graphics_api = 0;      // rawdanger-recomp (v0.10.4): 0 auto (Direct3D 12 on Windows, Vulkan when the resolution needs it), 1 Vulkan, 2 Direct3D 12; at the next start
     int smaa = 0;              // rawdanger-recomp: SMAA 1x on the console picture (anti-aliasing), 0 off, 1 on   // rawdanger-recomp: the volume of everything the game plays, 0 to 100 (%)
@@ -115,7 +116,10 @@ std::string with_window_size(const std::string &file_text, int w, int h);   // t
 std::string with_lens_rain(const std::string &file_text, int level);
 std::string with_smaa(const std::string &file_text, int on);
 std::string with_graphics_api(const std::string &file_text, int api);
-std::string with_frame_generation(const std::string &file_text, int mode);  // the 'frame_generation' line (off, smooth, predict)  // the 'graphics_api' line (auto, vulkan, dx12)  // the 'master_volume' line
+std::string with_frame_generation(const std::string &file_text, int mode);
+std::string with_fps_limit(const std::string &file_text, int fps);  // the 'fps_limit' line (60, 120, ..., none)
+extern const int kFpsLimits[];
+extern const int kFpsLimitsCount;  // the 'frame_generation' line (off, smooth, predict)  // the 'graphics_api' line (auto, vulkan, dx12)  // the 'master_volume' line
 
 const char *action_name(int action);  // the word used in keys.ini
 

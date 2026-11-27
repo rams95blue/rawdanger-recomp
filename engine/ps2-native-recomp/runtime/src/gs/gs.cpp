@@ -2691,12 +2691,24 @@ int frame_generation() {
 #endif
 }
 #ifdef PS2_GPU
+void set_fps_limit(int fps) { ps2::gs::gpu::set_fps_limit(fps); }
+int fps_limit() { return ps2::gs::gpu::fps_limit(); }
+void set_paced_threads(bool on) { ps2::gs::gpu::set_paced_threads(on); }
+bool paced_presents() { return ps2::gs::gpu::paced(); }
+bool present_paced() { return ps2::gs::gpu::has_surface() && ps2::gs::gpu::present_paced(); }
+void paced_counts(std::uint64_t &made, std::uint64_t &taken) { ps2::gs::gpu::paced_counts(made, taken); }
 void set_frame_generation_view(int view) { ps2::gs::gpu::set_frame_generation_view(view); }
 int frame_generation_view() { return ps2::gs::gpu::frame_generation_view(); }
 void set_frame_generation_log(bool on) { ps2::gs::gpu::set_frame_generation_log(on); }
 bool frame_generation_log() { return ps2::gs::gpu::frame_generation_log(); }
 void dump_presents(const char *base, int count) { ps2::gs::gpu::dump_presents(base ? base : "", count); }
 #else
+void set_fps_limit(int) {}
+int fps_limit() { return 60; }
+void set_paced_threads(bool) {}
+bool paced_presents() { return false; }
+bool present_paced() { return false; }
+void paced_counts(std::uint64_t &made, std::uint64_t &taken) { made = taken = 0; }
 void set_frame_generation_view(int) {}
 int frame_generation_view() { return 0; }
 void set_frame_generation_log(bool) {}
