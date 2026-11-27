@@ -800,6 +800,7 @@ std::mutex g_mutex;
 float g_out[kMax * 4];
 unsigned g_out_n = 0;
 std::atomic<bool> g_on{false};
+std::atomic<bool> g_for_frames{[] { const char *v = std::getenv("PS2_FRAME_GEN"); return v && std::atoi(v) > 0; }()};   // v0.10.5: frame generation keeps the HUD's boxes where they are
 
 // A picture of the game: full-screen strips (a copy of the last picture), its 3D, full-screen strips again (colour and blur),
 // its 2D, then the vertical blanks it waits for. So what is drawn after the last strips until a blank is the 2D; it is handed
@@ -1051,6 +1052,7 @@ struct Walk {
 std::uint32_t g_last_bp[8] = {}, g_last_bw[8] = {};   // the widths of the last few buffers drawn into (the frame's is not in the walk)
 int g_last_n = 0;
 std::uint32_t g_scene_bp = 0, g_scene_bw = 0;   // the last 32-bit buffer wider than a page drawn into before the walk: the 3D picture
+std::uint32_t g_ao_draws = 0;   // v0.10.5: the draws with the depth test before this AO pass (frame generation keeps the step's biggest)
 std::uint64_t g_scene_xyoffset = 0;              // rawdanger-recomp (wet look): that picture's window offset (XYOFFSET)
 // rawdanger-recomp (v0.9.5): the wet look. The EE side (system.cpp) sends the hero's limbs as capsules on the screen (GS window
 // coordinates: x0 y0 x1 y1, radius, nearest and farthest depth) and how wet the hero is; the AO pass darkens the pixels inside them
@@ -1108,6 +1110,7 @@ void finish_pass();
 void finish() {
     Walk &w = g_walk;
     if (!w.active) return;
+    g_ao_draws = 1u << 30;   // the filter's walk ends once a picture, after all of its 3D
     const std::uint32_t zbp = w.zbp, zpsm = w.zpsm;
     finish_pass();
     run_ao(zbp, zpsm);
@@ -1177,6 +1180,10 @@ void decide(Walk &w) {
 // filter (the tutorial), when the finished 3D picture is first read (v0.10.1, below). Only with the GPU.
 void run_ao(std::uint32_t zbp, std::uint32_t zpsm) {
 #ifdef PS2_GPU
+    // v0.10.5: frame generation takes the finished 3D's depth here (gpu.cpp interp_capture)
+    if (gpu_on() && g_scene_bp && g_scene_bw >= 8 && g_scene_bw <= 16 && gpu::frame_generation())
+        gpu::interp_capture(zbp, zpsm, g_scene_bw, g_scene_bw * 64u, 448u, static_cast<float>(g_scene_xyoffset & 0xFFFFu) / 16.0f,
+                            static_cast<float>((g_scene_xyoffset >> 32) & 0xFFFFu) / 16.0f, g_ao_draws);
         float wet = 0.0f;
         std::vector<float> caps;
         {
@@ -1189,6 +1196,7 @@ void run_ao(std::uint32_t zbp, std::uint32_t zpsm) {
         if (view == 3 && caps.size() >= 7) wet = -1.0f;
         const bool show = wet < 0.0f;   // debug: the capsules drawn plainly
         const bool wet_on = (wet > 0.01f || show) && caps.size() >= 7;
+        if (std::getenv("PS2_WET_LOG")) std::fprintf(stderr, "[wet] run_ao wet %.2f caps %zu ao %d bp %x bw %u gpu %d\n", wet, caps.size() / 7, g_ao.load(), g_scene_bp, g_scene_bw, gpu_on() ? 1 : 0);
         if ((ao > 0 || wet_on || view > 0) && gpu_on() && g_scene_bp && g_scene_bw >= 8 && g_scene_bw <= 16) {
             // the AO view shows the strong AO even with AO off
             std::uint32_t p[64] = {g_scene_bp, g_scene_bw, g_scene_bw * 64u, 448u, zbp, zpsm, ao >= 2 || view == 1 ? 245u : ao > 0 ? 170u : 0u, 80u};   // v0.8.7: radius 80 (38 hardly showed)
@@ -1231,8 +1239,19 @@ void note_depth_draw(const Context &c, std::uint32_t fbp, std::uint32_t fbw) {  
 void note_picture_read(std::uint32_t fbp, std::uint32_t tbp) {   // a textured sprite: does it read the finished 3D picture?
     NoFilter &n = g_nofilter;
     if (tbp != n.fbp || fbp == n.fbp || n.zdraws < 100 || n.fbw < 10) return;   // (a narrower 3D picture: a picture in the picture)
+    const std::uint32_t draws = static_cast<std::uint32_t>(n.zdraws);
+    g_ao_draws = draws;
     n.zdraws = 0;   // once per frame: the next frame's 3D counts again
-    if (n.walk_seen > 0) { --n.walk_seen; return; }
+    if (n.walk_seen > 0) {
+        --n.walk_seen;
+#ifdef PS2_GPU
+        // v0.10.5: frame generation does not wait for the AO's 60 pictures (it would be off for 3 s after every load)
+        if (gpu_on() && gpu::frame_generation() && n.fbw >= 8 && n.fbw <= 16)
+            gpu::interp_capture(n.zbp, n.zpsm, n.fbw, n.fbw * 64u, 448u, static_cast<float>(n.xyoffset & 0xFFFFu) / 16.0f,
+                                static_cast<float>((n.xyoffset >> 32) & 0xFFFFu) / 16.0f, draws);
+#endif
+        return;
+    }
     g_scene_bp = n.fbp, g_scene_bw = n.fbw, g_scene_xyoffset = n.xyoffset;   // the 3D picture (not the last buffer drawn into)
     run_ao(n.zbp, n.zpsm);
 }
@@ -1317,6 +1336,7 @@ bool step(const State &s, std::uint64_t attr) {
 }  // namespace rdfilter
 
 // Inlined into the PACKED run (write_packed_run): as a call of its own it cost the ship about 0.15 ms of the drawing thread a frame.
+
 [[gnu::always_inline]] static inline void kick(bool draw) {
     State &s = g_state;
     const std::uint32_t prim = static_cast<std::uint32_t>(s.prim) & 7u;
@@ -1350,7 +1370,7 @@ bool step(const State &s, std::uint64_t attr) {
         if (!(s.prmodecont & 1u)) attr = (s.prim & 7u) | (s.prmode & ~7ull);
         draw = rdfilter::step(s, attr);
     }
-    if (draw && ui::g_on.load(std::memory_order_relaxed)) [[unlikely]] ui::add(s, needed);
+    if (draw && (ui::g_on.load(std::memory_order_relaxed) || ui::g_for_frames.load(std::memory_order_relaxed))) [[unlikely]] ui::add(s, needed);
     if (draw) {
         if (!trace::g_any || trace::draw(s, needed)) {
             if (cpu_raster()) raster::draw(s, s.queue, needed);
@@ -2387,6 +2407,15 @@ Rendered render_pending(const std::function<void(const DisplayRegs &)> &on_prese
             break;
         }
         case queue::kState: serve_state(payload); break;
+#ifdef PS2_GPU
+        case queue::kInterpMark: {
+            float m[16 + 1 + 12 * 8] = {};
+            const std::uint32_t n = std::min<std::uint32_t>(h.arg0, sizeof m / 4);
+            std::memcpy(m, payload, n * 4u);
+            gpu::interp_mark(m, static_cast<int>(n));
+            break;
+        }
+#endif
         case queue::kDownload: {
             std::uintptr_t target;
             std::memcpy(&target, payload, sizeof target);
@@ -2636,4 +2665,41 @@ std::int64_t ms_since_cinema_bars() {
 }
 void set_bar_opacity(unsigned percent) { ps2::gs::g_bar_opacity.store(static_cast<int>(std::min(percent, 100u)), std::memory_order_relaxed); }
 void set_ui_boxes(bool on) { ps2::gs::ui::g_on.store(on, std::memory_order_relaxed); }
+// rawdanger-recomp (v0.10.5): frame generation. The emulation side tells, in order with the drawing, that a game step began and
+// which world-to-screen matrix the pictures before it were drawn with.
+void frame_step(const float *data, int n) {
+#ifdef PS2_GPU
+    if (!ps2::gs::gpu::frame_generation() || n < 16) return;
+    if (ps2::gs::queue::active()) ps2::gs::queue::post(ps2::gs::queue::kInterpMark, static_cast<std::uint32_t>(n), 0, data, static_cast<std::uint32_t>(n) * 4u);
+    else ps2::gs::gpu::interp_mark(data, n);
+#else
+    (void)data, (void)n;
+#endif
+}
+void set_frame_generation(int mode) {
+#ifdef PS2_GPU
+    ps2::gs::gpu::set_frame_generation(mode);
+#endif
+    ps2::gs::ui::g_for_frames.store(mode > 0, std::memory_order_relaxed);
+}
+int frame_generation() {
+#ifdef PS2_GPU
+    return ps2::gs::gpu::frame_generation();
+#else
+    return 0;
+#endif
+}
+#ifdef PS2_GPU
+void set_frame_generation_view(int view) { ps2::gs::gpu::set_frame_generation_view(view); }
+int frame_generation_view() { return ps2::gs::gpu::frame_generation_view(); }
+void set_frame_generation_log(bool on) { ps2::gs::gpu::set_frame_generation_log(on); }
+bool frame_generation_log() { return ps2::gs::gpu::frame_generation_log(); }
+void dump_presents(const char *base, int count) { ps2::gs::gpu::dump_presents(base ? base : "", count); }
+#else
+void set_frame_generation_view(int) {}
+int frame_generation_view() { return 0; }
+void set_frame_generation_log(bool) {}
+bool frame_generation_log() { return false; }
+void dump_presents(const char *, int) {}
+#endif
 }

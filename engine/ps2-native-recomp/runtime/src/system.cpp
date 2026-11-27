@@ -1314,9 +1314,17 @@ void free_camera_call(Cpu &c) {
 // call at AT a call to the host, which runs STEP and then, with the orbit's lift (looking up), tilts that direction up. Only the
 // follow camera (mode 0) and with no cutscene bars for a second; anything else ends the lift. (v0.10.0 raised the point looked at
 // instead, +0x310, after the step: too late, the direction was already made from it.)
-struct CameraFrame { bool set = false; std::uint32_t call = 0, at = 0, step = 0, pointer = 0, mode = 0; };
+int hero_limbs_world(float *out);   // v0.10.5 (frame generation): the hero's limbs, below
+struct CameraFrame { bool set = false; std::uint32_t call = 0, at = 0, step = 0, pointer = 0, mode = 0, matrix = 0; };
 CameraFrame g_camera_frame;
 void camera_frame_call(Cpu &c) {
+    if (g_camera_frame.matrix && frame_generation()) {   // v0.10.5: frame generation: the matrix the pictures before this step used
+        float m[16 + 1 + 12 * 8];   // the matrix, then the hero's limbs (how many, then each: its number, both ends, its radius)
+        for (int i = 0; i < 16; ++i) m[i] = word_float(ld32(g_camera_frame.matrix + 4u * i));
+        const int limbs = hero_limbs_world(m + 17);
+        m[16] = static_cast<float>(limbs);
+        frame_step(m, 17 + limbs * 8);
+    }
     const std::uint32_t back = c.r[31].w[0];
     call(c, g_camera_frame.step, 1);
     c.r[31].sd[0] = static_cast<std::int32_t>(back);
@@ -1340,11 +1348,14 @@ void camera_frame_call(Cpu &c) {
 struct CameraFrameSetup {
     CameraFrameSetup() {
         const char *v = std::getenv("PS2_CAMERA_FRAME");   // without it, Raw Danger's (US) own, as for the free camera
-        if (!v || !*v) v = "CB,17DC88,17D210,48F4E0,3EC";
-        unsigned long n = 0, at = 0, step = 0, pointer = 0, mode = 0;
-        if (std::sscanf(v, "%lx,%lx,%lx,%lx,%lx", &n, &at, &step, &pointer, &mode) != 5 || n >= kHostCalls) return;
+        if (!v || !*v) v = "CB,17DC88,17D210,48F4E0,3EC,5FD690";
+        unsigned long n = 0, at = 0, step = 0, pointer = 0, mode = 0, matrix = 0;
+        // v0.10.5: a sixth value, the game's world-to-screen matrix (frame generation); Raw Danger's (0x5FD690) when left out
+        const int got = std::sscanf(v, "%lx,%lx,%lx,%lx,%lx,%lx", &n, &at, &step, &pointer, &mode, &matrix);
+        if (got < 5 || n >= kHostCalls) return;
+        if (got < 6) matrix = 0x5FD690;
         g_camera_frame = {true, static_cast<std::uint32_t>(n), static_cast<std::uint32_t>(at), static_cast<std::uint32_t>(step),
-                          static_cast<std::uint32_t>(pointer), static_cast<std::uint32_t>(mode)};
+                          static_cast<std::uint32_t>(pointer), static_cast<std::uint32_t>(mode), static_cast<std::uint32_t>(matrix)};
         register_host_call(g_camera_frame.call, &camera_frame_call);
     }
 };
@@ -1483,6 +1494,49 @@ void note_step() {
 float at_step_rate(float share20) { return 1.0f - std::pow(1.0f - share20, g_step_dt * 20.0f); }
 constexpr Limb kLimbs[] = {{4, 6, 0.19f}, {6, 7, 0.09f}, {7, -1, 0.14f}, {16, 18, 0.075f}, {18, 20, 0.06f}, {23, 25, 0.075f}, {25, 27, 0.06f},
                            {8, 9, 0.09f},  {9, 11, 0.075f}, {12, 13, 0.09f}, {13, 15, 0.075f}, {4, -2, 0.24f}};
+// v0.10.5: frame generation. The hero's limbs in the world (the wet look's twelve: each its number, both ends, its radius), from the
+// bones of the step just drawn (read as the next step begins: all of them built). Frame generation moves the pixels on them with
+// the hero, the rest of the picture with the camera only. 0 when the hero is not known.
+int hero_limbs_world(float *out) {
+    if (!g_head.player || !g_head.table) return 0;
+    std::uint32_t bones[48] = {};
+    {
+        const std::uint32_t pid = ld32(g_head.player);
+        if (pid > 64) return 0;
+        const std::uint32_t ch = ld32(g_head.table + 4u * pid);
+        if (!in_ram(ch)) return 0;
+        const std::uint32_t model = ld32(ch + g_head.model);
+        if (!in_ram(model)) return 0;
+        std::uint32_t n = ld32(model + 4u);
+        for (int i = 0; i < 48 && in_ram(n); ++i) bones[i] = n, n = ld32(n + 4u);
+    }
+    const auto place = [&](int i, float p[3]) {
+        if (i < 0 || i >= 48 || !in_ram(bones[i])) return false;
+        for (int k = 0; k < 3; ++k) p[k] = word_float(ld32(bones[i] + 0x40u + 4u * k));
+        return std::isfinite(p[0]) && std::isfinite(p[1]) && std::isfinite(p[2]);
+    };
+    int got = 0, index = 0;
+    for (const Limb &l : kLimbs) {
+        float a[3], b[3];
+        const int number = index++;
+        if (!place(l.from, a)) continue;
+        if (l.to == -1) b[0] = a[0], b[1] = a[1] - 0.2f, b[2] = a[2];
+        else if (l.to == -2) {
+            float sum[3] = {0, 0, 0};
+            int n = 0;
+            for (int t = 32; t < 48; t += 3) {
+                float e[3];
+                if (place(t, e)) sum[0] += e[0], sum[1] += e[1], sum[2] += e[2], ++n;
+            }
+            if (!n) continue;
+            b[0] = sum[0] / n, b[1] = sum[1] / n, b[2] = sum[2] / n;
+        } else if (!place(l.to, b)) continue;
+        float *o = out + got * 8;
+        o[0] = static_cast<float>(number), o[1] = a[0], o[2] = a[1], o[3] = a[2], o[4] = b[0], o[5] = b[1], o[6] = b[2], o[7] = l.radius;
+        ++got;
+    }
+    return got;
+}
 void update_wet_look(std::uint32_t head) {
     const HeroWet &h = hero_wet_setup();
     if (!h.set) return;

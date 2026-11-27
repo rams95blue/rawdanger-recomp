@@ -3,6 +3,7 @@
 # The labels of the Game options (recomp.ini sections) are added from recomp.ini.
 L	Resolution
 L	Graphics API
+L	Frame generation
 L	Window size
 L	Full screen
 L	Widescreen 16:9
@@ -42,6 +43,8 @@ V	8x
 V	AUTO (DIRECT3D 12)
 V	AUTO (VULKAN)
 V	VULKAN
+V	PREDICT
+V	SMOOTH
 V	DIRECT3D 12
 V	AUTO
 V	1280 x 720

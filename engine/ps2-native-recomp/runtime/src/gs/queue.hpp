@@ -7,7 +7,7 @@
 
 namespace ps2::gs::queue {
 
-enum Type : std::uint32_t { kWrap, kGif, kGifReset, kReset, kSoftReset, kVblank, kPresent, kDownload, kVif1, kVif1Write, kVuReset, kState, kVuFence, kDownloadAsync, kPath3Idle, kDownloadTrip };
+enum Type : std::uint32_t { kWrap, kGif, kGifReset, kReset, kSoftReset, kVblank, kPresent, kDownload, kVif1, kVif1Write, kVuReset, kState, kVuFence, kDownloadAsync, kPath3Idle, kDownloadTrip, kInterpMark };
 
 enum class Role { Emulation, Vu, Render };
 

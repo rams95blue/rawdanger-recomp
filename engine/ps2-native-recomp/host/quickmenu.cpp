@@ -118,8 +118,8 @@ constexpr const char *kKeys[kEntries] = {"F1", "F5", "F8", "F3", "F4", "", ""};
 // Settings: one page, six tabs (the Game and Debug tabs list rows the window fills: the game's own options, the test switches)
 constexpr const char *kTabNames[Menu::kTabs] = {"DISPLAY", "PICTURE", "SOUND", "CONTROLS", "GAME", "DEBUG"};
 constexpr int kAchievementRows = 7;   // rawdanger-recomp: achievements lines shown at a time (bigger panel)
-constexpr Command kDisplay[] = {Command::scale, Command::graphics_api, Command::window_size, Command::fullscreen, Command::widescreen, Command::integer_scale, Command::menu_game_runs, Command::pause_unfocused, Command::menu_skin, Command::popup_size, Command::back};
-constexpr const char *kDisplayKeys[] = {"", "", "", "F11", "", "", "", "", "", "", "Esc"};
+constexpr Command kDisplay[] = {Command::scale, Command::frame_generation, Command::graphics_api, Command::window_size, Command::fullscreen, Command::widescreen, Command::integer_scale, Command::menu_game_runs, Command::pause_unfocused, Command::menu_skin, Command::popup_size, Command::back};
+constexpr const char *kDisplayKeys[] = {"", "", "", "", "F11", "", "", "", "", "", "", "Esc"};
 constexpr Command kPicture[] = {Command::field_of_view, Command::look, Command::antialias, Command::sharpen, Command::sharp_2d, Command::game_blur, Command::filter_pass, Command::ambient_occlusion, Command::wet_look, Command::black_bars, Command::lens_rain, Command::back};
 constexpr const char *kPictureKeys[] = {"", "F2", "", "", "", "", "", "", "", "", "", "Esc"};
 constexpr Command kSound[] = {Command::master_volume, Command::reverb, Command::back};
@@ -461,6 +461,10 @@ std::string entry_text(Command c, const Values &v, bool quit_armed) {
         if (v.scale_locked) return "Internal resolution: " + name(v.scale_now) + " (set by PS2_SCALE)";
         return "Internal resolution:  < " + name(v.scale_next) + " >" + (v.scale_max < 8 ? "  (up to " + std::to_string(v.scale_max) + "x here)" : std::string());
     }
+    case Command::frame_generation: {
+        static const char *const kNames[] = {"off", "smooth", "predict"};
+        return std::string("Frame generation:  < ") + kNames[std::clamp(v.frame_generation, 0, 2)] + " >  (60 pictures from the game's 20)";
+    }
     case Command::graphics_api: {
         static const char *const kNames[] = {"auto", "Vulkan", "Direct3D 12"};
         const std::string now = v.graphics_api_now.empty() || v.graphics_api_now == "none" ? std::string() : "  (now " + v.graphics_api_now + ")";
@@ -661,7 +665,7 @@ Command Menu::side() const {
     if ((page_ == Page::recomp || (page_ == Page::graphics && tab_ >= kGameTab)) && selected_ < recomp_rows_) return Command::recomp_toggle;
     if (page_ != Page::graphics || tab_ >= kGameTab) return Command::none;
     const Command c = kTabLists[tab_].commands[selected_];
-    return c == Command::look || c == Command::scale || c == Command::graphics_api || c == Command::sharp_2d || c == Command::fullscreen || c == Command::widescreen || c == Command::pause_unfocused || c == Command::menu_game_runs ||
+    return c == Command::look || c == Command::scale || c == Command::graphics_api || c == Command::frame_generation || c == Command::sharp_2d || c == Command::fullscreen || c == Command::widescreen || c == Command::pause_unfocused || c == Command::menu_game_runs ||
                    c == Command::master_volume || c == Command::integer_scale || c == Command::lens_rain || c == Command::antialias || c == Command::menu_skin ||
                    c == Command::window_size || c == Command::game_blur || c == Command::reverb || c == Command::key_prompts || c == Command::mouse_look || c == Command::camera_orbit || c == Command::free_camera || c == Command::head_follow || c == Command::wet_look || c == Command::anim_layers || c == Command::black_bars || c == Command::sharpen ||
                    c == Command::mouse_speed || c == Command::mouse_invert || c == Command::mouse_invert_x || c == Command::popup_size || c == Command::keys_on_screen || c == Command::filter_pass || c == Command::ambient_occlusion || c == Command::field_of_view

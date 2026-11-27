@@ -185,6 +185,11 @@ if(EMSCRIPTEN OR EXISTS "${PS2_WGPU_DIR}/lib/libwgpu_native.a")
     add_custom_command(OUTPUT "${PS2_SMAA_WGSL}"
         COMMAND ${CMAKE_COMMAND} -DSRC=${CMAKE_SOURCE_DIR}/runtime/src/gs/gpu/smaa.wgsl -DOUT=${PS2_SMAA_WGSL} -DNAME=kSmaaShader -P ${CMAKE_SOURCE_DIR}/cmake/embed.cmake
         DEPENDS runtime/src/gs/gpu/smaa.wgsl cmake/embed.cmake)
+    # rawdanger-recomp: frame generation (interp.wgsl), the camera between two game steps
+    set(PS2_INTERP_WGSL "${CMAKE_BINARY_DIR}/interp_wgsl.cpp")
+    add_custom_command(OUTPUT "${PS2_INTERP_WGSL}"
+        COMMAND ${CMAKE_COMMAND} -DSRC=${CMAKE_SOURCE_DIR}/runtime/src/gs/gpu/interp.wgsl -DOUT=${PS2_INTERP_WGSL} -DNAME=kInterpShader -P ${CMAKE_SOURCE_DIR}/cmake/embed.cmake
+        DEPENDS runtime/src/gs/gpu/interp.wgsl cmake/embed.cmake)
     set(PS2_BLIT_WGSL "${CMAKE_BINARY_DIR}/blit_wgsl.cpp")
     add_custom_command(OUTPUT "${PS2_BLIT_WGSL}"
         COMMAND ${CMAKE_COMMAND} -DSRC=${CMAKE_SOURCE_DIR}/runtime/src/gs/gpu/blit.wgsl -DOUT=${PS2_BLIT_WGSL} -DNAME=kBlitShader -P ${CMAKE_SOURCE_DIR}/cmake/embed.cmake
@@ -208,7 +213,7 @@ if(EMSCRIPTEN OR EXISTS "${PS2_WGPU_DIR}/lib/libwgpu_native.a")
         list(APPEND PS2_HW_SOURCES "${PS2_HW_WGSL}" "${PS2_HW_SYNC_WGSL}" "${PS2_CACHE_WGSL}")
     endif()
     if(NOT PS2_PREBUILT)
-        target_sources(ps2runtime PRIVATE runtime/src/gs/gpu/gpu.cpp runtime/src/gs/gpu/tiles.cpp "${PS2_GS_WGSL}" "${PS2_BLIT_WGSL}" "${PS2_SMAA_WGSL}" runtime/src/gs/gpu/smaa_tables.cpp ${PS2_HW_SOURCES})
+        target_sources(ps2runtime PRIVATE runtime/src/gs/gpu/gpu.cpp runtime/src/gs/gpu/tiles.cpp "${PS2_GS_WGSL}" "${PS2_BLIT_WGSL}" "${PS2_SMAA_WGSL}" "${PS2_INTERP_WGSL}" runtime/src/gs/gpu/smaa_tables.cpp ${PS2_HW_SOURCES})
     endif()
     target_compile_definitions(ps2runtime ${PS2_API} PS2_GPU)
     if(EMSCRIPTEN)

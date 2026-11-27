@@ -1902,3 +1902,17 @@ fn ao_factor(x: u32, y: u32, w: u32, h: u32, k: u32, z0: f32) -> f32 {
     // v0.10.3: gentler (0.75 and twice the share before): now after the PS2 filter, which no longer steepens it
     return 1.0 - 0.55 * f32(prm(6u)) / 256.0 * keep * smoothstep(0.0, 1.0, clamp(occluded * 1.6, 0.0, 1.0));
 }
+
+// rawdanger-recomp (v0.10.5): frame generation (interp.wgsl) needs the depth of the picture on screen, one value per game pixel,
+// as it was when the 3D was finished. prm: 0 depth buffer, 1 width in pages, 2 3 width height, 4 its format, 5 the first word
+// written in the scratch buffer (copied from there into the snapshot right after)
+@compute @workgroup_size(64)
+fn interp_depth(@builtin(global_invocation_id) gid: vec3<u32>) {
+    let i = gid.x + gid.y * 64u * 1024u;
+    let w = prm(2u);
+    let h = prm(3u);
+    if (i >= w * h) {
+        return;
+    }
+    scratch[prm(5u) + i] = read_sample(prm(4u), prm(0u), prm(1u), i % w, i / w, 0u);
+}

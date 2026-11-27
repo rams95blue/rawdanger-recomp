@@ -36,6 +36,20 @@ void set_bar_opacity(unsigned percent);
 std::int64_t ms_since_cinema_bars();
 // rawdanger-recomp: note where the game's 2D lies (HUD, texts) so the rain on the lens stays under it (on while drops fall)
 void set_ui_boxes(bool on);
+// rawdanger-recomp (v0.10.5): frame generation: 0 off, 1 smooth (the camera between the last two game steps), 2 predict (carried on
+// past the last step). frame_step: a game step began; data: the world-to-screen matrix (16 floats, row-major, row vectors) the pictures
+// before it were drawn with, then the hero's limbs (a count, then 8 floats each: number, both ends, radius); n floats in all.
+void set_frame_generation(int mode);
+int frame_generation();
+void frame_step(const float *data, int n);
+// Settings > Debug: what frame generation draws (0 the picture, 1 the places nothing landed on in magenta, 2 the depth moved), its log
+// lines, and the next presents saved as the window gets them (base.0.ppm, base.1.ppm, ...: after SMAA and frame generation, with
+// SMAA's edges and weights, frame generation's depth and keys beside them)
+void set_frame_generation_view(int view);
+int frame_generation_view();
+void set_frame_generation_log(bool on);
+bool frame_generation_log();
+void dump_presents(const char *base, int count);
 void set_debug_text(bool on);
 // rawdanger-recomp: Raw Danger's colour filter done in one pass (1, PS2_GAME_FILTER_PASS=1) or drawn the game's way (0, slow); from
 // the next frame

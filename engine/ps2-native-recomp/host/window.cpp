@@ -47,6 +47,7 @@
 #include <map>
 #include <cstdint>
 #include <cstdio>
+#include <ctime>
 #include <cstdlib>
 #include <cstring>
 #include <string>
@@ -249,7 +250,9 @@ constexpr std::size_t kDebugRow = static_cast<std::size_t>(-2), kMapSelRow = sta
                       kDryRow = static_cast<std::size_t>(-7), kSoakRow = static_cast<std::size_t>(-8), kWetForceRow = static_cast<std::size_t>(-9),
                       kWetShowRow = static_cast<std::size_t>(-10), kHeadTestRow = static_cast<std::size_t>(-11),
                       kViewRow = static_cast<std::size_t>(-12), kStatsRow = static_cast<std::size_t>(-13), kAnimGainRow = static_cast<std::size_t>(-14),
-                      kStepsRow = static_cast<std::size_t>(-15);
+                      kStepsRow = static_cast<std::size_t>(-15),
+                      // v0.10.5: frame generation's test views, its log, and the next pictures saved as shown
+                      kFrameViewRow = static_cast<std::size_t>(-16), kFrameLogRow = static_cast<std::size_t>(-17), kSavePicturesRow = static_cast<std::size_t>(-18);
 // rawdanger-recomp (v0.9.2): the hero's two bars. PS2_DEBUG_HERO="TABLE,PLAYER,COUNT,NOW1,MOST1,NOW2,MOST2" (hex: the table of the
 // characters' addresses, the word with the player's number, how many the table has, and two pairs of offsets: a value and its
 // most). Raw Danger: 0x5EAC80, 0x48F3E4, 235; health (+0x368 of +0x36C, 100) and body temperature (+0x370 of +0x374, 30000: it
@@ -1525,6 +1528,7 @@ void menu_paint(bool show_again) {
         v.scale_locked = g_scale_locked;
         v.scale_max = static_cast<int>(ps2::max_internal_scale());
         v.graphics_api = g_keys.graphics_api;
+        v.frame_generation = g_keys.frame_generation;
         v.graphics_api_now = ps2::graphics_api();
         v.sharp_now = g_sharp_now;
         v.sharp_next = g_sharp_next;
@@ -1633,6 +1637,12 @@ void menu_paint(bool show_again) {
                 static const char *const kViews[] = {"<  the game's  >", "<  AO alone  >", "<  depth  >", "<  the hero's capsules  >"};
                 debug_row(kViewRow, "Picture shown", kViews[std::clamp(ps2::debug_view(), 0, 3)]);
                 debug_row(kStatsRow, "Stats on screen (FPS, CPU, GPU, scene)", g_stats_on ? "<  on  >" : "<  off >");
+                {
+                    static const char *const kFrameViews[] = {"<  the picture  >", "<  gaps in magenta  >", "<  depth moved  >"};
+                    debug_row(kFrameViewRow, "Frame generation: what the made pictures show", kFrameViews[std::clamp(ps2::frame_generation_view(), 0, 2)]);
+                    debug_row(kFrameLogRow, "Frame generation: each step in the log", ps2::frame_generation_log() ? "<  on  >" : "<  off >");
+                    debug_row(kSavePicturesRow, "Save the next 6 pictures as shown (with SMAA's and frame generation's maps; for reports)", "now");
+                }
                 if (debug_info().set) debug_row(kInfoRow, "Where am I (scene, camera, place, wetness: for reports)", "show");
                 if (debug_hero().set) {
                     debug_row(kHealRow, "Heal, warm and dry the hero", "now");
@@ -2332,6 +2342,10 @@ void native_option_rows() {
             if (g_keys.graphics_api == 2) return std::string("DIRECT3D 12");
             return now == "Vulkan" ? std::string("AUTO (VULKAN)") : std::string("AUTO (DIRECT3D 12)");
         }, command(Command::graphics_api));
+    spin("Frame generation", "60 pictures a second from the game's 20: the camera moved between two steps (smooth) or carried on (predict)", [] {
+            static const char *const kNames[] = {"OFF", "SMOOTH", "PREDICT"};
+            return std::string(kNames[std::clamp(g_keys.frame_generation, 0, 2)]);
+        }, command(Command::frame_generation));
     spin("Window size", "The window's size", [] {
             if (!g_window || (SDL_GetWindowFlags(g_window) & SDL_WINDOW_FULLSCREEN)) return std::string("FULL SCREEN");
             int ww = 0, wh = 0;
@@ -2742,6 +2756,29 @@ void menu_command(quickmenu::Command c, int step) {
             g_recomp_note = kViews[k];
             break;
         }
+        if (row < g_recomp_row_section.size() && g_recomp_row_section[row] == kFrameViewRow) {
+            static const char *const kNotes[] = {"Made pictures: the picture", "Made pictures: the places nothing landed on, in magenta (filled from the background)",
+                                                 "Made pictures: the depth moved instead of the colours (near bright)"};
+            const int k = (ps2::frame_generation_view() + (step < 0 ? 2 : 1)) % 3;
+            ps2::set_frame_generation_view(k);
+            g_recomp_note = kNotes[k];
+            break;
+        }
+        if (row < g_recomp_row_section.size() && g_recomp_row_section[row] == kFrameLogRow) {
+            ps2::set_frame_generation_log(!ps2::frame_generation_log());
+            g_recomp_note = ps2::frame_generation_log() ? "Frame generation writes each step and refresh to the log" : "Frame generation's log lines off";
+            break;
+        }
+        if (row < g_recomp_row_section.size() && g_recomp_row_section[row] == kSavePicturesRow) {
+            std::string dir = ps2::g_options.quick_dir.empty() ? std::string(".") : ps2::g_options.quick_dir;
+            const std::time_t now = std::time(nullptr);
+            char stamp[32];
+            std::strftime(stamp, sizeof stamp, "%Y%m%d-%H%M%S", std::localtime(&now));
+            const std::string base = dir + "/pictures-" + stamp;
+            ps2::dump_presents(base.c_str(), 6);
+            g_recomp_note = "The next 6 pictures go to " + base + ".N.ppm (close the menu to let them be made)";
+            break;
+        }
         if (row < g_recomp_row_section.size() && g_recomp_row_section[row] == kStepsRow) {
             // the game's, 20, 30, 60 (vblanks a step 3, 2, 1)
             static const int kOrder[] = {0, 3, 2, 1};
@@ -2862,6 +2899,16 @@ void menu_command(quickmenu::Command c, int step) {
             std::fprintf(stderr, "[menu] resolution %dx, now\n", use);
         }
         break;
+    case Command::frame_generation: {
+        g_keys.frame_generation = (g_keys.frame_generation + step + 3) % 3;
+        ps2::set_frame_generation(g_keys.frame_generation);
+        rewrite_keys_file([](const std::string &t) { return keymap::with_frame_generation(t, g_keys.frame_generation); }, "frame generation");
+        static const char *const kNotes[] = {"Frame generation: off (each picture shown three times, as on the PS2)",
+                                             "Frame generation: smooth (the camera between the last two game steps; a moment behind)",
+                                             "Frame generation: predict (the camera carried on past the last step; no delay)"};
+        set_notice(kNotes[g_keys.frame_generation]);
+        break;
+    }
     case Command::graphics_api: {
         g_keys.graphics_api = (g_keys.graphics_api + step + 3) % 3;
         rewrite_keys_file([](const std::string &t) { return keymap::with_graphics_api(t, g_keys.graphics_api); }, "graphics API");
@@ -3995,6 +4042,9 @@ bool open_window(bool fullscreen) {
         ps2::os::set_env("PS2_SCALE", std::to_string(g_keys.scale));
         std::fprintf(stderr, "[video] resolution %dx from %s (scale = %d)\n", g_keys.scale, g_keys_path.c_str(), g_keys.scale);
     }
+    // rawdanger-recomp (v0.10.5): frame generation (keys.ini frame_generation), unless PS2_FRAME_GEN is set
+    if (ps2::os::env("PS2_FRAME_GEN").empty()) ps2::set_frame_generation(g_keys.frame_generation);
+    else g_keys.frame_generation = ps2::frame_generation();
     // rawdanger-recomp (v0.10.4): the graphics API (keys.ini graphics_api), unless PS2_GPU_BACKEND is set. Vulkan or Direct3D 12 is
     // tried first and the other one when it cannot start. Auto: Windows' default (Direct3D 12, the faster painter on the PCs measured),
     // but Vulkan first when the resolution asked for is more than Direct3D 12 can hold (it binds 128 MB of one buffer: 4x at most).

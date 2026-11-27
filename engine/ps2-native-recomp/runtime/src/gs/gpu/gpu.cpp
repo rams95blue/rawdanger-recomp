@@ -46,6 +46,7 @@
 extern const char kGsShader[];
 extern const char kBlitShader[];
 extern const char kSmaaShader[];
+extern const char kInterpShader[];
 
 namespace ps2::gs {
 void swizzle_tables(std::vector<std::uint32_t> &out);
@@ -58,8 +59,8 @@ std::vector<unsigned char> smaa_tables();  // smaa_tables.cpp (rawdanger-recomp)
 
 namespace {
 
-enum Pipeline { kUpload, kCopyRead, kCopyWrite, kLoadClut, kDisplay, kRaster, kResolve, kSnapshot, kDecode, kGameFilter, kGameAo, kPipelines };
-const char *const kEntryPoints[kPipelines] = {"upload", "copy_read", "copy_write", "load_clut", "display", "raster", "resolve", "snapshot", "decode", "game_filter", "game_ao"};
+enum Pipeline { kUpload, kCopyRead, kCopyWrite, kLoadClut, kDisplay, kRaster, kResolve, kSnapshot, kDecode, kGameFilter, kGameAo, kInterpDepth, kPipelines };
+const char *const kEntryPoints[kPipelines] = {"upload", "copy_read", "copy_write", "load_clut", "display", "raster", "resolve", "snapshot", "decode", "game_filter", "game_ao", "interp_depth"};
 
 constexpr std::uint32_t kParamStride = 256;
 constexpr std::uint32_t kClutSlots = 2048;
@@ -122,6 +123,44 @@ WGPUBindGroup g_smaa_group = nullptr;
 std::atomic<std::uint32_t> g_smaa_quality{3};   // rawdanger-recomp: SMAA preset, 1 low .. 4 ultra (ps2::set_smaa_quality)
 std::uint64_t g_smaa_words = 0;
 struct SmaaJob { bool on = false; std::uint32_t base = 0, width = 0, height = 0; } g_smaa_job;
+// rawdanger-recomp (v0.10.5): frame generation (interp.wgsl): the picture on screen moved to the camera of a moment between two
+// game steps, from its depth (copied when its 3D was finished) and the game's world-to-screen matrices of the two steps
+WGPUComputePipeline g_interp_clear = nullptr, g_interp_splat = nullptr, g_interp_resolve = nullptr, g_interp_fill = nullptr;
+WGPUBindGroupLayout g_interp_layout = nullptr;
+// The parameters go in a ring of slots: a present's queue write lands before its commands are submitted (the submit thread hands
+// them over later), so the next present must not write over the same buffer
+constexpr int kInterpSlots = 8;
+WGPUBuffer g_interp_work = nullptr, g_interp_params[kInterpSlots] = {}, g_interp_depth[2] = {nullptr, nullptr};
+WGPUBindGroup g_interp_group[kInterpSlots][2] = {};   // per slot, per depth snapshot
+int g_interp_slot = 0;
+std::uint64_t g_interp_words = 0;
+constexpr std::uint32_t kInterpParamBytes = 464 * 4;   // interp.wgsl Params
+constexpr std::uint32_t kInterpDepthWords = 1024u * 1024u;   // the game's picture, one value per game pixel (640 x 448 here)
+struct InterpJob { bool on = false; int buf = 0; std::uint32_t base = 0, width = 0, height = 0; float p[kInterpParamBytes / 4] = {}; } g_interp_job;
+namespace interp {
+// 0 off, 1 smooth (the picture shown with the camera between the last two steps: two thirds of a step later, always right),
+// 2 predict (the camera carried on past the last step: no delay, a little off where it turns)
+std::atomic<int> g_mode{[] { const char *v = std::getenv("PS2_FRAME_GEN"); return v ? std::clamp(std::atoi(v), 0, 2) : 0; }()};
+struct Pic { bool valid = false; int buf = 0; float m[16] = {}; float ofx = 0, ofy = 0; std::uint32_t w = 0, h = 0; int limbs = 0; float limb[12][8] = {}; };
+Pic g_cur, g_prev;
+bool g_captured = false;
+int g_pending = 0;
+Pic g_cap;
+std::uint32_t g_cap_zbp = 0, g_cap_zpsm = 0, g_cap_bw = 0, g_cap_draws = 0;
+int g_since = 1000, g_period = 3;
+std::uint64_t g_generated = 0, g_marks = 0;
+std::atomic<bool> g_log_on{std::getenv("PS2_FRAME_GEN_LOG") != nullptr};   // Settings > Debug: each step and refresh in the log
+inline bool log_on() { return g_log_on.load(std::memory_order_relaxed); }
+// Settings > Debug: 0 the picture, 1 the places nothing landed on in magenta, 2 the depth moved (bright near); PS2_FRAME_GEN_HOLES /
+// PS2_FRAME_GEN_DEPTH at the start
+std::atomic<int> g_view{std::getenv("PS2_FRAME_GEN_HOLES") ? 1 : std::getenv("PS2_FRAME_GEN_DEPTH") ? 2 : 0};
+}
+// PS2_PRESENT_DUMP / Settings > Debug > Save the next pictures: the presents to write (present())
+std::mutex g_dump_mutex;
+std::string g_dump_base;
+int g_dump_left = 0, g_dump_index = 0;
+bool g_dump_numbered = false;
+unsigned long long g_dump_at = 0;
 
 
 // The overlay (overlay.hpp): the quick menu's panel, drawn over the game's picture in the present pass with alpha blending. Its pixels
@@ -3005,6 +3044,209 @@ void encode_smaa(WGPUCommandEncoder enc) {
     wgpuCommandEncoderCopyBufferToBuffer(enc, g_smaa_work, n * 2 * 4, g_scratch, static_cast<std::uint64_t>(job.base) * 4, n * 4);
 }
 
+
+// rawdanger-recomp (v0.10.5): frame generation's four passes over the picture just made (g_interp_job), after SMAA, the result
+// copied back over it in the scratch buffer.
+void encode_interp(WGPUCommandEncoder enc) {
+    const InterpJob job = g_interp_job;
+    g_interp_job.on = false;
+    if (!job.on || !g_interp_splat || job.width == 0 || job.height == 0 || !g_interp_depth[job.buf & 1]) return;
+    const std::uint64_t n = static_cast<std::uint64_t>(job.width) * job.height;
+    if (n * 3 > g_interp_words || !g_interp_group[0][0]) {
+        if (g_interp_work && n * 3 > g_interp_words) wgpuBufferRelease(g_interp_work), g_interp_work = nullptr;
+        for (auto &slot : g_interp_group)
+            for (WGPUBindGroup &g : slot)
+                if (g) wgpuBindGroupRelease(g), g = nullptr;
+        g_interp_words = std::max<std::uint64_t>(n * 3, g_interp_words);
+        if (!g_interp_work) g_interp_work = make_buffer(g_interp_words * 4, WGPUBufferUsage_Storage | WGPUBufferUsage_CopySrc);
+        for (int slot = 0; slot < kInterpSlots; ++slot)
+        for (int i = 0; i < 2; ++i) {
+            if (!g_interp_depth[i]) g_interp_depth[i] = make_buffer(kInterpDepthWords * 4ull, WGPUBufferUsage_Storage | WGPUBufferUsage_CopyDst | WGPUBufferUsage_CopySrc);
+            WGPUBindGroupEntry be[4] = {WGPU_BIND_GROUP_ENTRY_INIT, WGPU_BIND_GROUP_ENTRY_INIT, WGPU_BIND_GROUP_ENTRY_INIT, WGPU_BIND_GROUP_ENTRY_INIT};
+            be[0].binding = 0; be[0].buffer = g_scratch; be[0].size = WGPU_WHOLE_SIZE;
+            be[1].binding = 1; be[1].buffer = g_interp_work; be[1].size = WGPU_WHOLE_SIZE;
+            be[2].binding = 2; be[2].buffer = g_interp_depth[i]; be[2].size = WGPU_WHOLE_SIZE;
+            be[3].binding = 3; be[3].buffer = g_interp_params[slot]; be[3].size = kInterpParamBytes;
+            WGPUBindGroupDescriptor bd = WGPU_BIND_GROUP_DESCRIPTOR_INIT;
+            bd.layout = g_interp_layout;
+            bd.entryCount = 4;
+            bd.entries = be;
+            g_interp_group[slot][i] = wgpuDeviceCreateBindGroup(g_device, &bd);
+        }
+    }
+    const int slot = g_interp_slot;
+    g_interp_slot = (g_interp_slot + 1) % kInterpSlots;
+    wgpuQueueWriteBuffer(g_queue, g_interp_params[slot], 0, job.p, kInterpParamBytes);
+    WGPUComputePassDescriptor cd = WGPU_COMPUTE_PASS_DESCRIPTOR_INIT;
+    WGPUComputePassEncoder pass = wgpuCommandEncoderBeginComputePass(enc, &cd);
+    wgpuComputePassEncoderSetBindGroup(pass, 0, g_interp_group[slot][job.buf & 1], 0, nullptr);
+    const std::uint32_t groups = static_cast<std::uint32_t>((n + 63) / 64);
+    wgpuComputePassEncoderSetPipeline(pass, g_interp_clear);
+    wgpuComputePassEncoderDispatchWorkgroups(pass, std::min(groups, 1024u), (groups + 1023) / 1024, 1);
+    const std::uint32_t gx = (job.width + 7) / 8, gy = (job.height + 7) / 8;
+    for (WGPUComputePipeline step : {g_interp_splat, g_interp_resolve, g_interp_fill}) {
+        wgpuComputePassEncoderSetPipeline(pass, step);
+        wgpuComputePassEncoderDispatchWorkgroups(pass, gx, gy, 1);
+    }
+    wgpuComputePassEncoderEnd(pass);
+    wgpuComputePassEncoderRelease(pass);
+    wgpuCommandEncoderCopyBufferToBuffer(enc, g_interp_work, n * 2 * 4, g_scratch, static_cast<std::uint64_t>(job.base) * 4, n * 4);
+}
+
+bool make_interp() {
+    WGPUShaderSourceWGSL source = WGPU_SHADER_SOURCE_WGSL_INIT;
+    source.code = view(kInterpShader);
+    WGPUShaderModuleDescriptor md = WGPU_SHADER_MODULE_DESCRIPTOR_INIT;
+    md.nextInChain = &source.chain;
+    WGPUShaderModule module = wgpuDeviceCreateShaderModule(g_device, &md);
+    if (!module) return false;
+    WGPUBindGroupLayoutEntry le[4] = {WGPU_BIND_GROUP_LAYOUT_ENTRY_INIT, WGPU_BIND_GROUP_LAYOUT_ENTRY_INIT, WGPU_BIND_GROUP_LAYOUT_ENTRY_INIT, WGPU_BIND_GROUP_LAYOUT_ENTRY_INIT};
+    for (int i = 0; i < 4; ++i) {
+        le[i].binding = static_cast<std::uint32_t>(i);
+        le[i].visibility = WGPUShaderStage_Compute;
+    }
+    le[0].buffer.type = WGPUBufferBindingType_ReadOnlyStorage;
+    le[1].buffer.type = WGPUBufferBindingType_Storage;
+    le[2].buffer.type = WGPUBufferBindingType_ReadOnlyStorage;
+    le[3].buffer.type = WGPUBufferBindingType_Uniform;
+    WGPUBindGroupLayoutDescriptor ld = WGPU_BIND_GROUP_LAYOUT_DESCRIPTOR_INIT;
+    ld.entryCount = 4;
+    ld.entries = le;
+    g_interp_layout = wgpuDeviceCreateBindGroupLayout(g_device, &ld);
+    WGPUPipelineLayoutDescriptor pld = WGPU_PIPELINE_LAYOUT_DESCRIPTOR_INIT;
+    pld.bindGroupLayoutCount = 1;
+    pld.bindGroupLayouts = &g_interp_layout;
+    WGPUPipelineLayout layout = wgpuDeviceCreatePipelineLayout(g_device, &pld);
+    WGPUComputePipeline *slots[4] = {&g_interp_clear, &g_interp_splat, &g_interp_resolve, &g_interp_fill};
+    const char *entries[4] = {"clear", "splat", "resolve", "fill"};
+    for (int i = 0; i < 4; ++i) {
+        WGPUComputePipelineDescriptor cd = WGPU_COMPUTE_PIPELINE_DESCRIPTOR_INIT;
+        cd.layout = layout;
+        cd.compute.module = module;
+        cd.compute.entryPoint = view(entries[i]);
+        *slots[i] = wgpuDeviceCreateComputePipeline(g_device, &cd);
+    }
+    wgpuPipelineLayoutRelease(layout);
+    wgpuShaderModuleRelease(module);
+    for (WGPUBuffer &b : g_interp_params) b = make_buffer(kInterpParamBytes, WGPUBufferUsage_Uniform | WGPUBufferUsage_CopyDst);
+    const bool ok = g_interp_clear && g_interp_splat && g_interp_resolve && g_interp_fill;
+    std::fprintf(stderr, "[gpu] frame generation %s\n", ok ? "ready" : "could not be made, the option does nothing");
+    return ok;
+}
+
+// 4 x 4 inverse (row-major); false when it has none
+bool invert4(const float *m, double *out) {
+    double a[4][8];
+    for (int i = 0; i < 4; ++i)
+        for (int j = 0; j < 8; ++j) a[i][j] = j < 4 ? m[i * 4 + j] : (j - 4 == i ? 1.0 : 0.0);
+    for (int c = 0; c < 4; ++c) {
+        int best = c;
+        for (int r = c + 1; r < 4; ++r)
+            if (std::fabs(a[r][c]) > std::fabs(a[best][c])) best = r;
+        if (std::fabs(a[best][c]) < 1e-12) return false;
+        if (best != c) for (int j = 0; j < 8; ++j) std::swap(a[c][j], a[best][j]);
+        const double d = a[c][c];
+        for (int j = 0; j < 8; ++j) a[c][j] /= d;
+        for (int r = 0; r < 4; ++r) {
+            if (r == c) continue;
+            const double f = a[r][c];
+            if (f != 0.0) for (int j = 0; j < 8; ++j) a[r][j] -= f * a[c][j];
+        }
+    }
+    for (int i = 0; i < 4; ++i)
+        for (int j = 0; j < 4; ++j) out[i * 4 + j] = a[i][j + 4];
+    return true;
+}
+
+// The job for this present: which part of the step this refresh shows, the camera of that moment, T
+void plan_interp(std::uint32_t base, std::uint32_t width, std::uint32_t height, std::uint32_t game_w, std::uint32_t game_h) {
+    using namespace interp;
+    const int k = g_since++;
+    if (interp::log_on()) std::fprintf(stderr, "[frame gen] present (vblank %llu), refresh %d since the step\n", static_cast<unsigned long long>(frame_count()), k);
+    const int mode = interp::g_mode.load(std::memory_order_relaxed);
+    if (!mode || !g_interp_splat || !g_cur.valid || !g_prev.valid || game_w != g_cur.w || game_h != g_cur.h || k >= g_period || g_period < 2) return;
+    // smooth: refresh k of the step shows the camera (k + 1) / period of the way from the step before (the last one: the step itself);
+    // predict: the step itself first, then carried on by k / period of the last step's move
+    float f = mode == 1 ? static_cast<float>(k + 1) / static_cast<float>(g_period) : 1.0f + static_cast<float>(k) / static_cast<float>(g_period);
+    static const char *const force = std::getenv("PS2_FRAME_GEN_AT");   // test: every refresh at this point of the step (0: the step before)
+    if (force && *force) {
+        const float at = static_cast<float>(std::atof(force));
+        if (k + 1 >= g_period) return;
+        f = at;
+    }
+    if (f == 1.0f) return;
+    float mf[16];
+    for (int i = 0; i < 16; ++i) mf[i] = g_prev.m[i] + (g_cur.m[i] - g_prev.m[i]) * f;
+    double inv[16];
+    if (!invert4(g_cur.m, inv)) return;
+    InterpJob &j = g_interp_job;
+    j = InterpJob{};
+    for (int i = 0; i < 16; ++i) j.p[i] = static_cast<float>(inv[i]), j.p[16 + i] = mf[i];
+    std::uint32_t *u = reinterpret_cast<std::uint32_t *>(j.p);
+    u[32] = width, u[33] = height, u[34] = g_scale, u[35] = base;
+    j.p[36] = g_cur.ofx, j.p[37] = g_cur.ofy, j.p[38] = static_cast<float>(game_w), j.p[39] = static_cast<float>(game_h);
+    float boxes[32 * 4];
+    const unsigned nb = std::min(ps2::gs::ui_boxes(boxes), 32u);
+    u[40] = nb, u[41] = g_cur.w, u[42] = static_cast<std::uint32_t>(g_cur.limbs);
+    j.p[44] = f - 1.0f;
+    const int view = interp::g_view.load(std::memory_order_relaxed);
+    j.p[45] = view == 2 ? 1.0f : 0.0f;   // debug: the depth moved instead of the colours
+    j.p[46] = view == 1 ? 1.0f : 0.0f;   // debug: the places nothing landed on, magenta
+    for (unsigned b = 0; b < nb; ++b) {
+        j.p[48 + b * 4 + 0] = boxes[b * 4 + 0] * static_cast<float>(game_w), j.p[48 + b * 4 + 1] = boxes[b * 4 + 1] * static_cast<float>(game_h);
+        j.p[48 + b * 4 + 2] = boxes[b * 4 + 2] * static_cast<float>(game_w), j.p[48 + b * 4 + 3] = boxes[b * 4 + 3] * static_cast<float>(game_h);
+    }
+    // The hero moves as one piece, with the torso (limb 0): each limb moved on its own tore the picture apart where the pose
+    // changes (the arms against the body); the pose itself changes at the steps, as on the PS2.
+    float root[3] = {0, 0, 0};
+    for (int l = 0; l < g_cur.limbs; ++l)
+        if (g_cur.limb[l][0] == 0.0f)
+            for (int q = 0; q < g_prev.limbs; ++q)
+                if (g_prev.limb[q][0] == 0.0f)
+                    for (int k = 0; k < 3; ++k) {
+                        const float d = (g_cur.limb[l][1 + k] + g_cur.limb[l][4 + k] - g_prev.limb[q][1 + k] - g_prev.limb[q][4 + k]) * 0.5f;
+                        root[k] = std::fabs(d) < 2.0f ? d : 0.0f;   // a jump (a new place, a cut): not a move
+                    }
+    for (int l = 0; l < g_cur.limbs; ++l) {   // the hero's limbs (which pixels are the hero's) and the move
+        const float *c = g_cur.limb[l];
+        for (int k = 0; k < 3; ++k) {
+            j.p[176 + l * 4 + k] = c[1 + k], j.p[224 + l * 4 + k] = c[4 + k];
+            j.p[272 + l * 4 + k] = root[k], j.p[320 + l * 4 + k] = root[k];
+        }
+        j.p[176 + l * 4 + 3] = c[7];
+        // on the screen (game pixels), with the matrix the picture was drawn with
+        const float *M = g_cur.m;
+        const auto project = [&](float x, float y, float z, float out[3]) {
+            const float px = x * M[0] + y * M[4] + z * M[8] + M[12], py = x * M[1] + y * M[5] + z * M[9] + M[13];
+            const float pz = x * M[2] + y * M[6] + z * M[10] + M[14], pw = x * M[3] + y * M[7] + z * M[11] + M[15];
+            if (!(pw > 1e-4f)) return false;
+            out[0] = px / pw - g_cur.ofx, out[1] = py / pw - g_cur.ofy, out[2] = pz / pw;
+            return true;
+        };
+        float sa[3], sb[3], sr[3];
+        if (project(c[1], c[2], c[3], sa) && project(c[4], c[5], c[6], sb) && project(c[1] + c[7], c[2], c[3], sr)) {
+            float sr2[3];
+            const float r1 = std::hypot(sr[0] - sa[0], sr[1] - sa[1]);
+            const float r2 = project(c[1], c[2], c[3] + c[7], sr2) ? std::hypot(sr2[0] - sa[0], sr2[1] - sa[1]) : r1;
+            j.p[368 + l * 4 + 0] = sa[0], j.p[368 + l * 4 + 1] = sa[1], j.p[368 + l * 4 + 2] = sb[0], j.p[368 + l * 4 + 3] = sb[1];
+            j.p[416 + l * 4 + 0] = std::max(r1, r2), j.p[416 + l * 4 + 1] = sa[2], j.p[416 + l * 4 + 2] = sb[2], j.p[416 + l * 4 + 3] = c[0];
+        } else {
+            j.p[416 + l * 4 + 0] = -1.0f;   // not on the screen: no pixel is on it
+        }
+    }
+    j.on = true, j.buf = g_cur.buf, j.base = base, j.width = width, j.height = height;
+    ++g_generated;
+    if (interp::log_on()) {
+        // how far the screen's middle (at a background's depth) moves in this made picture
+        const double sx = game_w * 0.5 + g_cur.ofx, sy = game_h * 0.5 + g_cur.ofy, zz = 8000.0;
+        double wp[4];
+        for (int c = 0; c < 4; ++c) wp[c] = sx * inv[c] + sy * inv[4 + c] + zz * inv[8 + c] + inv[12 + c];
+        const double x = wp[0] / wp[3], y = wp[1] / wp[3], z = wp[2] / wp[3];
+        const double px = x * mf[0] + y * mf[4] + z * mf[8] + mf[12], py = x * mf[1] + y * mf[5] + z * mf[9] + mf[13], pw = x * mf[3] + y * mf[7] + z * mf[11] + mf[15];
+        std::fprintf(stderr, "[frame gen] refresh %d of %d: camera at %.2f of the step, the middle moves %.1f %.1f pixels\n", k, g_period, f, px / pw - sx, py / pw - sy);
+    }
+}
+
 bool make_smaa() {
     WGPUShaderSourceWGSL source = WGPU_SHADER_SOURCE_WGSL_INIT;
     source.code = view(kSmaaShader);
@@ -3174,6 +3416,7 @@ void submit(WGPUTextureView present_view = nullptr) {
     }
     if (present_view) {
         encode_smaa(enc);  // rawdanger-recomp: when asked for, the antialiasing of the picture before it is shown
+        encode_interp(enc);  // rawdanger-recomp (v0.10.5): frame generation, the camera between two game steps
         wt::Scope s(wt::kRenderPass);
         WGPURenderPassColorAttachment color = WGPU_RENDER_PASS_COLOR_ATTACHMENT_INIT;
         color.view = present_view;
@@ -4956,6 +5199,125 @@ void game_ao(const std::uint32_t *p) {
     dispatch_linear(kGameAo, static_cast<std::uint32_t>(w * h), static_cast<std::uint32_t>(g_param_records.size() - 1));   // v0.10.3: one run a game pixel (each does its samples)
 }
 
+namespace { void copy_buffer(WGPUBuffer from, std::uint64_t from_offset, WGPUBuffer to, std::uint64_t to_offset, std::uint64_t bytes); }
+// rawdanger-recomp (v0.10.5): frame generation. The 3D of a picture is finished (gs.cpp, where the AO goes): its depth, one value
+// per game pixel, copied for the presents to come.
+namespace {
+void interp_copy_depth() {
+    using namespace interp;
+    const std::uint32_t w = g_cap.w, h = g_cap.h;
+    g_why = kWhyCopy;
+    flush_all();
+    g_why = kWhyFlush;
+    if (g_live) {
+        const Range depth = pages(g_cap_zbp, g_cap_bw, g_cap_zpsm, 0, 0, static_cast<int>(w) - 1, static_cast<int>(h) - 1);
+        hw::live_position(static_cast<std::uint32_t>(g_commands.size()));
+        hw::live_reader(depth.lo, depth.hi);
+    }
+    std::array<std::uint32_t, kParamStride / 4> record{};
+    record[0] = g_cap_zbp, record[1] = g_cap_bw, record[2] = w, record[3] = h, record[4] = g_cap_zpsm, record[5] = 0;
+    g_param_records.push_back(record);
+    dispatch_linear(kInterpDepth, w * h, static_cast<std::uint32_t>(g_param_records.size() - 1));
+    WGPUBuffer &b = g_interp_depth[g_pending & 1];
+    if (!b) b = make_buffer(kInterpDepthWords * 4ull, WGPUBufferUsage_Storage | WGPUBufferUsage_CopyDst | WGPUBufferUsage_CopySrc);
+    copy_buffer(g_scratch, 0, b, 0, static_cast<std::uint64_t>(w) * h * 4);
+    if (log_on()) std::fprintf(stderr, "[frame gen] depth copied (%ux%u)\n", w, h);
+}
+}
+
+void interp_capture(std::uint32_t zbp, std::uint32_t zpsm, std::uint32_t bw, std::uint32_t w, std::uint32_t h, float ofx, float ofy, std::uint32_t draws) {
+    if (!interp::g_mode.load(std::memory_order_relaxed) || !g_interp_splat || !w || !h || w * h > kInterpDepthWords) return;
+    // copied now: by the time the step's mark comes the game may already have cleared the depth for the next picture (it does with
+    // the threads on). The game reads its picture more than once a step: at the start (a copy of the last picture, the depth just
+    // cleared), after its 3D, after the rain (whose streaks write their depth): the one after the most drawing with the depth
+    // test is the scene's.
+    if (interp::g_captured && draws <= interp::g_cap_draws) return;
+    interp::g_captured = true;
+    interp::g_cap_draws = draws;
+    interp::g_cap.ofx = ofx, interp::g_cap.ofy = ofy, interp::g_cap.w = w, interp::g_cap.h = h;
+    interp::g_cap_zbp = zbp, interp::g_cap_zpsm = zpsm, interp::g_cap_bw = bw;
+    interp_copy_depth();
+}
+
+
+// A game step began (system.cpp, the camera's frame): the pictures drawn before it were drawn with the matrix m. The picture just
+// captured becomes the one on screen; the one before it gives the camera to move from.
+void interp_mark(const float *data, int n) {
+    using namespace interp;
+    const float *m = data;
+    ++g_marks;
+    if (g_captured) {
+        const int period = g_since;
+        g_prev = g_cur;
+        g_cur = g_cap;
+        g_cur.valid = true;
+        g_cur.buf = g_pending & 1;
+        std::memcpy(g_cur.m, m, sizeof g_cur.m);
+        g_cur.limbs = 0;
+        if (n >= 17) {
+            const int limbs = std::clamp(static_cast<int>(data[16]), 0, std::min(12, (n - 17) / 8));
+            for (int i = 0; i < limbs; ++i) std::memcpy(g_cur.limb[i], data + 17 + i * 8, sizeof g_cur.limb[i]);
+            g_cur.limbs = limbs;
+        }
+        g_pending ^= 1;
+        if (g_prev.valid && period >= 1 && period <= 6) g_period = period;   // refreshes a step takes (3 at 20 a second, 2 at 30)
+        // a cut (a new shot, a load, the camera put back): what the screen's middle shows, near and far, moved more than a
+        // quarter of the picture in one step: no picture is made between the two
+        if (g_prev.valid) {
+            double inv[16];
+            bool cut = !invert4(g_cur.m, inv);
+            for (float zz : {4000.0f, 16000.0f, 64000.0f}) {
+                if (cut) break;
+                const double sx = g_cur.w * 0.5 + g_cur.ofx, sy = g_cur.h * 0.5 + g_cur.ofy;
+                double wpt[4];
+                for (int c = 0; c < 4; ++c) wpt[c] = sx * inv[c] + sy * inv[4 + c] + zz * inv[8 + c] + inv[12 + c];
+                if (std::fabs(wpt[3]) < 1e-12) { cut = true; break; }
+                const double x = wpt[0] / wpt[3], y = wpt[1] / wpt[3], z = wpt[2] / wpt[3];
+                const float *M = g_prev.m;
+                const double px = x * M[0] + y * M[4] + z * M[8] + M[12], py = x * M[1] + y * M[5] + z * M[9] + M[13], pw = x * M[3] + y * M[7] + z * M[11] + M[15];
+                if (!(pw > 1e-6) || std::hypot(px / pw - sx, py / pw - sy) > g_cur.w * 0.25) cut = true;
+            }
+            if (cut) {
+                g_prev.valid = false;
+                if (interp::log_on()) std::fprintf(stderr, "[frame gen] a cut: no picture made before this step\n");
+            }
+        }
+    } else {
+        g_cur.valid = g_prev.valid = false;   // no 3D this step (a menu, a film): nothing to move
+    }
+    g_captured = false;
+    g_cap_draws = 0;
+    g_since = 0;
+    if (interp::log_on()) {
+        std::fprintf(stderr, "[frame gen] step: %s, a step takes %d refreshes, %d limbs\n", g_cur.valid ? "picture taken" : "no 3D", g_period, g_cur.limbs);
+        if (g_cur.valid && g_cur.limbs) {
+            const float *a = g_cur.limb[0] + 1;
+            const float *M = g_cur.m;
+            const float px = a[0] * M[0] + a[1] * M[4] + a[2] * M[8] + M[12], py = a[0] * M[1] + a[1] * M[5] + a[2] * M[9] + M[13];
+            const float pz = a[0] * M[2] + a[1] * M[6] + a[2] * M[10] + M[14], pw = a[0] * M[3] + a[1] * M[7] + a[2] * M[11] + M[15];
+            std::fprintf(stderr, "[frame gen]   M");
+            for (int i = 0; i < 16; ++i) std::fprintf(stderr, " %.9g", M[i]);
+            std::fprintf(stderr, "\n");
+            std::fprintf(stderr, "[frame gen]   limb 0 at %.3f %.3f %.3f: screen %.1f %.1f depth %.0f (game pixel %.1f %.1f)\n", a[0], a[1], a[2], px / pw, py / pw, pz / pw,
+                         px / pw - g_cur.ofx, py / pw - g_cur.ofy);
+        }
+    }
+}
+
+void set_frame_generation(int mode) {
+    interp::g_mode.store(std::clamp(mode, 0, 2), std::memory_order_relaxed);
+    if (!mode) interp::g_cur.valid = interp::g_prev.valid = false;
+}
+int frame_generation() { return interp::g_mode.load(std::memory_order_relaxed); }
+void set_frame_generation_view(int view) { interp::g_view.store(std::clamp(view, 0, 2), std::memory_order_relaxed); }
+int frame_generation_view() { return interp::g_view.load(std::memory_order_relaxed); }
+void set_frame_generation_log(bool on) { interp::g_log_on.store(on, std::memory_order_relaxed); }
+bool frame_generation_log() { return interp::g_log_on.load(std::memory_order_relaxed); }
+void dump_presents(const std::string &base, int count) {
+    std::lock_guard<std::mutex> hold(g_dump_mutex);
+    g_dump_base = base, g_dump_left = std::max(1, count), g_dump_index = 0, g_dump_numbered = true, g_dump_at = 0;
+}
+
 void load_clut(std::uint64_t tex0, std::uint64_t texclut) {
     flush_image();
     if (g_clut_loads + 2 >= kClutSlots) {
@@ -5309,6 +5671,9 @@ void apply_scale_request() {
     g_group = nullptr;   // made again at the next batch, with the new buffers
     if (g_smaa_group) wgpuBindGroupRelease(g_smaa_group);   // SMAA reads the scratch buffer too: made again at its next picture
     g_smaa_group = nullptr;
+    for (auto &slot : g_interp_group)   // so does frame generation
+        for (WGPUBindGroup &g : slot)
+            if (g) wgpuBindGroupRelease(g), g = nullptr;
     if (g_blit && g_blit_group) {
         // the picture shown on the screen is read from the scratch buffer: its group, with the new one
         WGPUBindGroupLayout layout = wgpuRenderPipelineGetBindGroupLayout(g_blit, 0);
@@ -5490,6 +5855,7 @@ bool attach_surface(const SurfaceTarget &target) {
     g_blit_params = make_buffer(32, WGPUBufferUsage_Uniform | WGPUBufferUsage_CopyDst);
     g_lens_params = make_buffer(kLensBytes, WGPUBufferUsage_Uniform | WGPUBufferUsage_CopyDst);
     make_smaa();
+    make_interp();
     WGPUBindGroupEntry be[3] = {WGPU_BIND_GROUP_ENTRY_INIT, WGPU_BIND_GROUP_ENTRY_INIT, WGPU_BIND_GROUP_ENTRY_INIT};
     be[0].binding = 0;
     be[0].buffer = g_scratch;
@@ -5651,6 +6017,7 @@ bool present(const DisplaySource &src) {
     const float sw = static_cast<float>(g_surface_width), sh = static_cast<float>(g_surface_height);
     g_view_rows = src.height * (src.halved ? 2u : 1u);
     if ((ps2::video_options() & 16u) != 0u) g_smaa_job = SmaaJob{true, current, src.width * g_scale, src.height * g_scale};
+    plan_interp(current, src.width * g_scale, src.height * g_scale, src.width, src.height * (src.halved ? 2u : 1u));
     float vw, vh;
     picture_view(sw, sh, vw, vh);
     write_lens();
@@ -5693,17 +6060,29 @@ bool present(const DisplaySource &src) {
     // rawdanger-recomp (v0.10.4): PS2_PRESENT_DUMP=<frame>,<file.ppm> writes the picture as the window gets it (after SMAA, before the
     // enlargement to the window) at that vblank: the anti-aliasing compared on the same frame (tests, reports)
     {
-        static unsigned long long dump_at = 0;
-        static std::string dump_file;
-        static const bool dump_set = [] {
+        static const bool dump_env = [] {
+            // v0.10.5: <frame>,<file.ppm>[,<count>]: that many presents in a row, as <file>.0.ppm, <file>.1.ppm, ... (frame generation)
             const std::string v = os::env("PS2_PRESENT_DUMP");
             const std::size_t comma = v.find(',');
             if (comma == std::string::npos) return false;
-            dump_at = std::strtoull(v.c_str(), nullptr, 10), dump_file = v.substr(comma + 1);
-            return dump_at > 0 && !dump_file.empty();
+            std::lock_guard<std::mutex> hold(g_dump_mutex);
+            g_dump_at = std::strtoull(v.c_str(), nullptr, 10), g_dump_base = v.substr(comma + 1), g_dump_left = 1;
+            const std::size_t second = g_dump_base.find(',');
+            if (second != std::string::npos) g_dump_left = std::max(1, std::atoi(g_dump_base.c_str() + second + 1)), g_dump_base.resize(second), g_dump_numbered = true;
+            return true;
         }();
-        if (dump_set && frame_count() >= dump_at) {
-            dump_at = ~0ull;
+        (void)dump_env;
+        std::string dump_file;
+        {
+            std::lock_guard<std::mutex> hold(g_dump_mutex);
+            if (g_dump_left > 0 && !g_dump_base.empty() && frame_count() >= g_dump_at) {
+                dump_file = g_dump_numbered ? g_dump_base + "." + std::to_string(g_dump_index) + ".ppm" : g_dump_base;
+                ++g_dump_index;
+                --g_dump_left;
+            }
+        }
+        if (!dump_file.empty()) {
+            post::drain();   // this present's work handed to the submit thread is on the queue before it is read back
             const std::uint32_t w = blit[0], h = blit[1];
             std::vector<std::uint32_t> px(static_cast<std::size_t>(w) * h);
             read_back(g_scratch, px.size() * 4ull, px.data(), static_cast<std::uint64_t>(current) * 4);
@@ -5716,6 +6095,38 @@ bool present(const DisplaySource &src) {
                 std::fclose(f);
                 std::fprintf(stderr, "[present] picture of vblank %llu written to %s (%ux%u, SMAA %s)\n", static_cast<unsigned long long>(frame_count()), dump_file.c_str(), w, h,
                              (ps2::video_options() & 16u) ? "on" : "off");
+            }
+            if (g_interp_work && g_interp_words >= px.size() * 3) {   // frame generation's keys: holes red, the HUD blue
+                std::vector<std::uint32_t> keys(px.size());
+                read_back(g_interp_work, keys.size() * 4ull, keys.data(), 0);
+                if (std::FILE *f = os::open((dump_file + ".keys.ppm").c_str(), "wb")) {
+                    std::fprintf(f, "P6\n%u %u\n255\n", w, h);
+                    for (std::uint32_t k : keys) {
+                        const unsigned char rgb[3] = {static_cast<unsigned char>(k == 0 ? 255 : 0), static_cast<unsigned char>(k && k != ~0u ? std::min<std::uint32_t>(255, (k >> 14)) : 0),
+                                                      static_cast<unsigned char>(k == ~0u ? 255 : 0)};
+                        std::fwrite(rgb, 1, 3, f);
+                    }
+                    std::fclose(f);
+                }
+            }
+            if (interp::g_cur.valid && g_interp_depth[interp::g_cur.buf & 1]) {   // v0.10.5: frame generation's depth of the picture
+                const std::uint32_t gw = interp::g_cur.w, gh = interp::g_cur.h;
+                std::vector<std::uint32_t> z(static_cast<std::size_t>(gw) * gh);
+                read_back(g_interp_depth[interp::g_cur.buf & 1], z.size() * 4ull, z.data(), 0);
+                if (std::FILE *raw = os::open((dump_file + ".depth.u32").c_str(), "wb")) {
+                    std::fwrite(z.data(), 4, z.size(), raw);
+                    std::fclose(raw);
+                }
+                if (std::FILE *f = os::open((dump_file + ".depth.pgm").c_str(), "wb")) {
+                    std::uint32_t lo = ~0u, hi = 0;
+                    for (std::uint32_t v : z) if (v) lo = std::min(lo, v), hi = std::max(hi, v);
+                    std::fprintf(f, "P5\n%u %u\n255\n", gw, gh);
+                    for (std::uint32_t v : z) {
+                        const unsigned char g = v == 0 || hi <= lo ? 0 : static_cast<unsigned char>(20 + 235.0 * std::sqrt(static_cast<double>(v - lo) / (hi - lo)));
+                        std::fwrite(&g, 1, 1, f);
+                    }
+                    std::fclose(f);
+                }
             }
             if ((ps2::video_options() & 16u) && g_smaa_work && g_smaa_words >= px.size() * 3) {   // SMAA's edges and weights beside it
                 for (int part = 0; part < 2; ++part) {

@@ -226,6 +226,10 @@ std::string with_window_size(const std::string &file_text, int w, int h) {
 std::string with_menu_skin(const std::string &file_text, int skin) { return with_line(file_text, "menuskin", std::string("menu_skin = ") + (skin == 2 ? "game" : skin == 1 ? "japanese" : "hazard")); }
 std::string with_integer_scale(const std::string &file_text, int on) { return with_line(file_text, "integerscale", "integer_scale = " + std::to_string(on ? 1 : 0)); }
 std::string with_lens_rain(const std::string &file_text, int level) { return with_line(file_text, "rainonlens", std::string("rain_on_lens = ") + (level ? "on" : "off")); }
+std::string with_frame_generation(const std::string &file_text, int mode) {
+    static const char *const kNames[3] = {"off", "smooth", "predict"};
+    return with_line(file_text, "framegeneration", std::string("frame_generation = ") + kNames[std::clamp(mode, 0, 2)]);
+}
 std::string with_graphics_api(const std::string &file_text, int api) {
     static const char *const kNames[3] = {"auto", "vulkan", "dx12"};
     return with_line(file_text, "graphicsapi", std::string("graphics_api = ") + kNames[std::clamp(api, 0, 2)]);
@@ -394,6 +398,14 @@ void parse(const std::string &text, Config &config, std::vector<std::string> &pr
         if (name == "pace") {
             if (ps2::pace::parse(value)) config.pace = value;
             else bad("pace is 30, 20, 15, 60 or off, ignored");
+            continue;
+        }
+        if (name == "framegeneration") {
+            const std::string v = squash(value);
+            if (v == "off" || v == "0") config.frame_generation = 0;
+            else if (v == "smooth" || v == "on" || v == "1") config.frame_generation = 1;
+            else if (v == "predict" || v == "2") config.frame_generation = 2;
+            else bad("frame_generation is off, smooth or predict, ignored");
             continue;
         }
         if (name == "graphicsapi") {

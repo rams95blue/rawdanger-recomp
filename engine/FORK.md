@@ -179,6 +179,12 @@
   degrees in a bone's local turn goes half the way each step; the spine and chest get breathing standing still, a hunch when
   wet, shivering when cold and a lean into turns, turned in the world after they are built (the head and arms follow).
   Settings > Controls > Livelier hero (keys.ini anim_layers, on); Settings > Debug: the layers x4.
+- **0049-rd-frame-generation** (rawdanger-recomp v0.10.5): frame generation (new interp.wgsl): the picture on screen moved to
+  the camera of a moment between the last two game steps (smooth) or carried past the last one (predict), so the camera moves at
+  60 pictures a second while the game steps 20 or 30 times. From the picture's depth (copied when its 3D is finished) and the
+  game's world-to-screen matrix of each step, sent with the hero's limbs by host call 203 in order with the drawing (queue
+  `kInterpMark`). keys.ini `frame_generation = off | smooth | predict`, Settings > Display, the PC options row; Settings > Debug:
+  the made pictures' test views, its log, the next pictures saved (`PS2_PRESENT_DUMP=<vblank>,<base>[,<count>]`).
 - **0048-rd-vulkan-scale-smaa-lookup-fov** (rawdanger-recomp v0.10.4): Settings > Display > Graphics API (keys.ini
   `graphics_api = auto | vulkan | dx12`; `PS2_GPU_BACKEND=vulkan-first | dx12-first` tries that API first and the other when it
   cannot start; auto keeps Direct3D 12 on Windows but takes Vulkan first above 4x); the inner resolution held to what the device

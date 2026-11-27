@@ -125,3 +125,40 @@ overlays (the law extrapolated, as for the program).
   particles and anything the game places without a matrix stay at the step's place, and matching each matrix to its previous
   step needs a stable key per object (the VU1 program and its data address work for most). Days of work; the first test is the
   camera alone (everything blended only by the camera), which already makes turning smooth.
+
+## v0.10.5: frame generation (the camera between two steps)
+
+Settings > Display > **Frame generation** (keys.ini `frame_generation = off | smooth | predict`; also a row in the game's PC
+options). The game still steps 20 times a second (or 30 with the 30 FPS build); the engine makes the pictures in between, so
+turning the camera, orbiting the hero and walking scroll at 60 pictures a second.
+
+How (engine patch 0049, runtime/src/gs/gpu/interp.wgsl):
+
+- **The matrix is exact.** Logged vertices and matrices showed that the GS's x and y (in pixels with the window offset), its depth
+  and its Q are the game's world-to-screen matrix (0x5FD690) applied to the world point: x/w, y/w, z/w and 1/w, to 1 part in 10⁴.
+  So a pixel with its depth goes back to the world through the inverse of the matrix it was drawn with, and onto the screen of
+  any other camera. One 4 x 4 matrix per picture, no guessing.
+- **Which matrix goes with which picture**: host call 203 (the camera's frame, at the start of each step) sends the matrix still in
+  0x5FD690, the one the pictures before it were drawn with, in order with the drawing (a queue message; with the threads on it
+  passes the vector-unit thread like the drawing does). With it go the hero's twelve limbs in the world.
+- **The depth**: copied (one value per game pixel) where the AO goes, when the 3D is finished. The game reads its picture several
+  times a step (a copy of the last picture at the start, with the depth just cleared; after its 3D; after the rain, whose streaks
+  write their depth): the copy after the most drawing with the depth test is kept.
+- **Each refresh**: smooth shows refresh k of a step with the camera (k + 1) / 3 of the way from the step before (the last one is the
+  game's own picture); predict shows the game's picture first, then the camera carried on by 1/3 and 2/3 of the last step's move.
+  The matrices are blended element by element (fine for the few degrees of one step).
+- **The pass**: every sample is moved (2 x 2 splats, the nearest wins: no cracks where the picture stretches), the HUD's boxes stay
+  where they are (the 2D drawn after the post passes, as for the lens rain), the hero moves with her torso (as one piece: moving
+  each limb on its own tore the picture where the pose changes; the pose itself changes at the steps), the hair (drawn without
+  depth) takes the head's depth, background samples right beside something nearer (blended edges, glow) and the rain's thin
+  streaks are left out, and a gap (what was behind something that moved aside) is filled from the farthest landed neighbour to
+  its left or right. A cut (the screen's middle moving more than a quarter of the picture in one step) makes no pictures.
+- **Measured** (a rainy street, the camera turning at full speed: 45 game pixels a step): the background moves by 15 pixels a
+  refresh instead of 45 every third; warping a picture to the step before's camera matches that step's own picture (mean
+  difference 5.8 against 8.1 unmoved, the rest is the rain and the gaps).
+
+What it does not do (yet): other characters, cars and things the game moves are shown where they were at the step (they keep
+the 20-a-second motion, as before); the hero's animation stays at 20 a second; gaps beside the hero show stretched background for
+a sixtieth of a second when the camera turns fast; films and menus (no camera step) are shown as the game draws them. Above 60
+pictures a second (a 120 / 144 Hz screen) is the next step: the same pass at any moment, timed by the clock instead of the
+refresh.
