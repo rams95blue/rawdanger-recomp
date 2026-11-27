@@ -1,0 +1,759 @@
+From 333c45ac485681f718f381f85775d3a03ae2f75d Mon Sep 17 00:00:00 2001
+From: rawdanger-recomp <rawdanger-recomp@users.noreply.github.com>
+Date: Fri, 27 Nov 2026 16:13:10 +0000
+Subject: [PATCH] rd: frame generation moves things that are not characters
+ (v0.10.8)
+
+Each step keeps the depth-writing 3D batches, brought into the world with the step's
+matrix, matched with the same batch a step before; a rigid move (Horn's fit) becomes a
+thing (box + matrix back) in the bones buffer, and interp.wgsl moves the pixels inside
+it to the moment shown. Rain, sprites, corners at the eye and things cut at the picture's
+edge are left out. Settings > Debug: switch, view, log; PS2_FRAME_GEN_OBJECTS[_VIEW|_LOG|_TEST].
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01QNLFPekqhcU2dj7B3Utmea
+---
+ host/window.cpp                |  25 ++-
+ runtime/include/ps2/video.hpp  |   6 +
+ runtime/src/gs/gpu/gpu.cpp     |  44 +++-
+ runtime/src/gs/gpu/gpu.hpp     |   3 +
+ runtime/src/gs/gpu/interp.wgsl |  50 ++++-
+ runtime/src/gs/gs.cpp          | 389 ++++++++++++++++++++++++++++++++-
+ 6 files changed, 497 insertions(+), 20 deletions(-)
+
+diff --git a/host/window.cpp b/host/window.cpp
+index 9442e94..fb9ee6e 100644
+--- a/host/window.cpp
++++ b/host/window.cpp
+@@ -252,7 +252,8 @@ constexpr std::size_t kDebugRow = static_cast<std::size_t>(-2), kMapSelRow = sta
+                       kViewRow = static_cast<std::size_t>(-12), kStatsRow = static_cast<std::size_t>(-13), kAnimGainRow = static_cast<std::size_t>(-14),
+                       kStepsRow = static_cast<std::size_t>(-15),
+                       // v0.10.5: frame generation's test views, its log, and the next pictures saved as shown
+-                      kFrameViewRow = static_cast<std::size_t>(-16), kFrameLogRow = static_cast<std::size_t>(-17), kSavePicturesRow = static_cast<std::size_t>(-18);
++                      kFrameViewRow = static_cast<std::size_t>(-16), kFrameLogRow = static_cast<std::size_t>(-17), kSavePicturesRow = static_cast<std::size_t>(-18),
++                      kFrameObjectsRow = static_cast<std::size_t>(-19), kFrameObjectsListRow = static_cast<std::size_t>(-20);
+ // rawdanger-recomp (v0.9.2): the hero's two bars. PS2_DEBUG_HERO="TABLE,PLAYER,COUNT,NOW1,MOST1,NOW2,MOST2" (hex: the table of the
+ // characters' addresses, the word with the player's number, how many the table has, and two pairs of offsets: a value and its
+ // most). Raw Danger: 0x5EAC80, 0x48F3E4, 235; health (+0x368 of +0x36C, 100) and body temperature (+0x370 of +0x374, 30000: it
+@@ -1639,9 +1640,12 @@ void menu_paint(bool show_again) {
+                 debug_row(kViewRow, "Picture shown", kViews[std::clamp(ps2::debug_view(), 0, 3)]);
+                 debug_row(kStatsRow, "Stats on screen (FPS, CPU, GPU, scene)", g_stats_on ? "<  on  >" : "<  off >");
+                 {
+-                    static const char *const kFrameViews[] = {"<  the picture  >", "<  gaps in magenta  >", "<  depth moved  >", "<  bones (a colour each)  >"};
+-                    debug_row(kFrameViewRow, "Frame generation: what the made pictures show", kFrameViews[std::clamp(ps2::frame_generation_view(), 0, 3)]);
++                    static const char *const kFrameViews[] = {"<  the picture  >", "<  gaps in magenta  >", "<  depth moved  >", "<  bones (a colour each)  >",
++                                                              "<  moving things (a colour each)  >"};
++                    debug_row(kFrameViewRow, "Frame generation: what the made pictures show", kFrameViews[std::clamp(ps2::frame_generation_view(), 0, 4)]);
+                     debug_row(kFrameLogRow, "Frame generation: each step in the log", ps2::frame_generation_log() ? "<  on  >" : "<  off >");
++                    debug_row(kFrameObjectsRow, "Frame generation: move the things that moved (not characters)", ps2::frame_generation_objects() ? "<  on  >" : "<  off >");
++                    debug_row(kFrameObjectsListRow, "Frame generation: each moved thing in the log", ps2::frame_generation_objects_list() ? "<  on  >" : "<  off >");
+                     debug_row(kSavePicturesRow, "Save the next 6 pictures as shown (with SMAA's and frame generation's maps; for reports)", "now");
+                 }
+                 if (debug_info().set) debug_row(kInfoRow, "Where am I (scene, camera, place, wetness: for reports)", "show");
+@@ -2763,12 +2767,23 @@ void menu_command(quickmenu::Command c, int step) {
+         if (row < g_recomp_row_section.size() && g_recomp_row_section[row] == kFrameViewRow) {
+             static const char *const kNotes[] = {"Made pictures: the picture", "Made pictures: the places nothing landed on, in magenta (filled from the background)",
+                                                  "Made pictures: the depth moved instead of the colours (near bright)",
+-                                                 "Made pictures: the pixels moved with a character's bone, a colour per bone"};
+-            const int k = (ps2::frame_generation_view() + (step < 0 ? 3 : 1)) % 4;
++                                                 "Made pictures: the pixels moved with a character's bone, a colour per bone",
++                                                 "Made pictures: the pixels moved with a thing that moved (car, debris, door), a colour per thing"};
++            const int k = (ps2::frame_generation_view() + (step < 0 ? 4 : 1)) % 5;
+             ps2::set_frame_generation_view(k);
+             g_recomp_note = kNotes[k];
+             break;
+         }
++        if (row < g_recomp_row_section.size() && g_recomp_row_section[row] == kFrameObjectsListRow) {
++            ps2::set_frame_generation_objects_list(!ps2::frame_generation_objects_list());
++            g_recomp_note = ps2::frame_generation_objects_list() ? "Each thing found to have moved goes in the log (where, how far, how far off a rigid move)" : "Moved things are no longer listed in the log";
++            break;
++        }
++        if (row < g_recomp_row_section.size() && g_recomp_row_section[row] == kFrameObjectsRow) {
++            ps2::set_frame_generation_objects(!ps2::frame_generation_objects());
++            g_recomp_note = ps2::frame_generation_objects() ? "Frame generation moves the things that moved between two steps" : "Frame generation leaves the things that moved where they were drawn (to compare)";
++            break;
++        }
+         if (row < g_recomp_row_section.size() && g_recomp_row_section[row] == kFrameLogRow) {
+             ps2::set_frame_generation_log(!ps2::frame_generation_log());
+             g_recomp_note = ps2::frame_generation_log() ? "Frame generation writes each step and refresh to the log" : "Frame generation's log lines off";
+diff --git a/runtime/include/ps2/video.hpp b/runtime/include/ps2/video.hpp
+index 410fbf1..2fd9a8f 100644
+--- a/runtime/include/ps2/video.hpp
++++ b/runtime/include/ps2/video.hpp
+@@ -56,6 +56,12 @@ void dump_presents(const char *base, int count);
+ // with the camera of the moment by the clock (present_paced, from the window's loop; set_paced_threads: the window runs the game on
+ // its own threads, the only case where it can keep a pace). paced_counts: pictures shown and game pictures taken so far.
+ void set_fps_limit(int fps);
++// v0.10.8, Settings > Debug: frame generation moves the things that moved (cars, debris, doors; on by default)
++void set_frame_generation_objects(bool on);
++bool frame_generation_objects();
++// Settings > Debug: each thing found to have moved, one line in the log (where, how far, how far off a rigid move)
++void set_frame_generation_objects_list(bool on);
++bool frame_generation_objects_list();
+ int fps_limit();
+ void set_paced_threads(bool on);
+ bool paced_presents();
+diff --git a/runtime/src/gs/gpu/gpu.cpp b/runtime/src/gs/gpu/gpu.cpp
+index 01aac4d..3002606 100644
+--- a/runtime/src/gs/gpu/gpu.cpp
++++ b/runtime/src/gs/gpu/gpu.cpp
+@@ -156,9 +156,13 @@ namespace interp {
+ // 2 predict (the camera carried on past the last step: no delay, a little off where it turns)
+ std::atomic<int> g_mode{[] { const char *v = std::getenv("PS2_FRAME_GEN"); return v ? std::clamp(std::atoi(v), 0, 2) : 0; }()};
+ struct Pic { bool valid = false; int buf = 0; float m[16] = {}; float ofx = 0, ofy = 0; std::uint32_t w = 0, h = 0; int limbs = 0; float limb[12][8] = {};
+-             std::vector<float> bones; int nbones = 0; };   // v0.10.6: every character's bones (system.cpp all_bones_world, 21 floats each)
+-constexpr int kBoneFloats = 21, kMaxChars = 64, kMaxBones = 2048;
+-constexpr std::uint32_t kBoneBufFloats = 4 + kMaxChars * 8 + kMaxBones * 24;
++             std::vector<float> bones; int nbones = 0;      // v0.10.6: every character's bones (system.cpp all_bones_world, 21 floats each)
++             std::vector<float> objects; int nobjects = 0; };   // v0.10.8: the things that moved (gs.cpp motion, 24 floats each)
++constexpr int kBoneFloats = 21, kMaxChars = 64, kMaxBones = 2048, kMaxObjects = 128;
++constexpr std::uint32_t kObjectsAt = 4 + kMaxChars * 8 + kMaxBones * 24;   // floats (vec4 12417 in interp.wgsl)
++constexpr std::uint32_t kBoneBufFloats = kObjectsAt + kMaxObjects * 24;
++std::uint64_t g_object_stats[4] = {};   // the last step's batches, matched, moved, objects (the log)
++std::atomic<bool> g_objects_on{[] { const char *v = std::getenv("PS2_FRAME_GEN_OBJECTS"); return !(v && *v == '0'); }()};   // Settings > Debug
+ Pic g_cur, g_prev;
+ bool g_captured = false;
+ int g_pending = 0;
+@@ -174,7 +178,7 @@ std::atomic<bool> g_log_on{std::getenv("PS2_FRAME_GEN_LOG") != nullptr};   // Se
+ inline bool log_on() { return g_log_on.load(std::memory_order_relaxed); }
+ // Settings > Debug: 0 the picture, 1 the places nothing landed on in magenta, 2 the depth moved (bright near); PS2_FRAME_GEN_HOLES /
+ // PS2_FRAME_GEN_DEPTH at the start
+-std::atomic<int> g_view{std::getenv("PS2_FRAME_GEN_HOLES") ? 1 : std::getenv("PS2_FRAME_GEN_DEPTH") ? 2 : std::getenv("PS2_FRAME_GEN_BONES_VIEW") ? 3 : 0};
++std::atomic<int> g_view{std::getenv("PS2_FRAME_GEN_HOLES") ? 1 : std::getenv("PS2_FRAME_GEN_DEPTH") ? 2 : std::getenv("PS2_FRAME_GEN_BONES_VIEW") ? 3 : std::getenv("PS2_FRAME_GEN_OBJECTS_VIEW") ? 4 : 0};
+ }
+ // PS2_PRESENT_DUMP / Settings > Debug > Save the next pictures: the presents to write (present())
+ std::mutex g_dump_mutex;
+@@ -3250,7 +3254,7 @@ void plan_interp(std::uint32_t base, std::uint32_t width, std::uint32_t height,
+     const int view = interp::g_view.load(std::memory_order_relaxed);
+     j.p[45] = view == 2 ? 1.0f : 0.0f;   // debug: the depth moved instead of the colours
+     j.p[46] = view == 1 ? 1.0f : 0.0f;   // debug: the places nothing landed on, magenta
+-    j.p[47] = view == 3 ? 1.0f : 0.0f;   // debug: the pixels moved with a bone, a colour per bone
++    j.p[47] = view == 3 ? 1.0f : view == 4 ? -1.0f : 0.0f;   // debug: the pixels moved with a bone (3) or a thing (4), a colour each
+     for (unsigned b = 0; b < nb; ++b) {
+         j.p[48 + b * 4 + 0] = boxes[b * 4 + 0] * static_cast<float>(game_w), j.p[48 + b * 4 + 1] = boxes[b * 4 + 1] * static_cast<float>(game_h);
+         j.p[48 + b * 4 + 2] = boxes[b * 4 + 2] * static_cast<float>(game_w), j.p[48 + b * 4 + 3] = boxes[b * 4 + 3] * static_cast<float>(game_h);
+@@ -3297,7 +3301,7 @@ void plan_interp(std::uint32_t base, std::uint32_t width, std::uint32_t height,
+     // the matrix that takes a point on it from the step drawn to the moment shown: (the drawn bone's matrix)^-1 x (the bone's matrix
+     // blended between the two steps), rows, the place in the fourth. A bone with no match in the step before, or that jumped (a new
+     // place, a cut), keeps its place.
+-    if (cur.nbones > 0) {
++    if (cur.nbones > 0 || cur.nobjects > 0) {
+         std::vector<float> &out = j.bones;
+         out.assign(4 + kMaxChars * 8, 0.0f);
+         out.reserve(out.size() + static_cast<std::size_t>(std::min(cur.nbones, kMaxBones)) * 24);
+@@ -3374,6 +3378,13 @@ void plan_interp(std::uint32_t base, std::uint32_t width, std::uint32_t height,
+             c[3] = most + 0.5f;
+         }
+         out[0] = static_cast<float>(chars), out[1] = static_cast<float>(bones);
++        // v0.10.8: the things that moved: after the bones' room, 24 floats each (the box's corners, the matrix back a step)
++        const int nobj = std::min(cur.nobjects, kMaxObjects);
++        if (nobj > 0) {
++            out.resize(kObjectsAt + static_cast<std::size_t>(nobj) * 24, 0.0f);
++            std::memcpy(&out[kObjectsAt], cur.objects.data(), static_cast<std::size_t>(nobj) * 24 * 4);
++        }
++        out[2] = static_cast<float>(nobj);
+     }
+     j.on = true, j.buf = cur.buf, j.base = base, j.width = width, j.height = height;
+     ++g_generated;
+@@ -5465,6 +5476,25 @@ void interp_mark(const float *data, int n) {
+     }
+ }
+ 
++// v0.10.8: the things that moved in the step just marked (gs.cpp motion), for its picture
++void interp_objects(const float *data, int n, const std::uint64_t *stats) {
++    using namespace interp;
++    if (stats) std::memcpy(g_object_stats, stats, sizeof g_object_stats);
++    g_cur.objects.clear();
++    g_cur.nobjects = 0;
++    if (n >= 1 && g_cur.valid && g_objects_on.load(std::memory_order_relaxed)) {
++        const int count = std::clamp(static_cast<int>(data[0]), 0, std::min(kMaxObjects, (n - 1) / 24));
++        g_cur.objects.assign(data + 1, data + 1 + count * 24);
++        g_cur.nobjects = count;
++    }
++    if (log_on() && stats)
++        std::fprintf(stderr, "[frame gen] things: %llu batches drawn, %llu matched with the step before, %llu moved, %d objects\n",
++                     static_cast<unsigned long long>(stats[0]), static_cast<unsigned long long>(stats[1]), static_cast<unsigned long long>(stats[2]), g_cur.nobjects);
++}
++
++void set_frame_generation_objects(bool on) { interp::g_objects_on.store(on, std::memory_order_relaxed); }
++bool frame_generation_objects() { return interp::g_objects_on.load(std::memory_order_relaxed); }
++
+ void set_frame_generation(int mode) {
+     interp::g_mode.store(std::clamp(mode, 0, 2), std::memory_order_relaxed);
+     if (!mode) interp::g_cur.valid = interp::g_prev.valid = false;
+@@ -5476,7 +5506,7 @@ int fps_limit() { return paced::g_limit.load(std::memory_order_relaxed); }
+ void set_paced_threads(bool on) { paced::g_threads.store(on, std::memory_order_relaxed); }
+ bool paced() { return paced_on(); }
+ void paced_counts(std::uint64_t &made, std::uint64_t &taken) { made = paced::g_made, taken = paced::g_taken; }
+-void set_frame_generation_view(int view) { interp::g_view.store(std::clamp(view, 0, 3), std::memory_order_relaxed); }
++void set_frame_generation_view(int view) { interp::g_view.store(std::clamp(view, 0, 4), std::memory_order_relaxed); }
+ int frame_generation_view() { return interp::g_view.load(std::memory_order_relaxed); }
+ void set_frame_generation_log(bool on) { interp::g_log_on.store(on, std::memory_order_relaxed); }
+ bool frame_generation_log() { return interp::g_log_on.load(std::memory_order_relaxed); }
+diff --git a/runtime/src/gs/gpu/gpu.hpp b/runtime/src/gs/gpu/gpu.hpp
+index abf476e..6fe0aca 100644
+--- a/runtime/src/gs/gpu/gpu.hpp
++++ b/runtime/src/gs/gpu/gpu.hpp
+@@ -36,6 +36,9 @@ void game_filter(const std::uint32_t *p, std::uint32_t n);
+ // rawdanger-recomp (v0.10.5): frame generation (interp.wgsl)
+ void interp_capture(std::uint32_t zbp, std::uint32_t zpsm, std::uint32_t bw, std::uint32_t w, std::uint32_t h, float ofx, float ofy, std::uint32_t draws);
+ void interp_mark(const float *data, int n);
++void interp_objects(const float *data, int n, const std::uint64_t *stats);
++void set_frame_generation_objects(bool on);
++bool frame_generation_objects();
+ void set_frame_generation(int mode);
+ int frame_generation();
+ void set_frame_generation_view(int view);
+diff --git a/runtime/src/gs/gpu/interp.wgsl b/runtime/src/gs/gpu/interp.wgsl
+index 5f4bfd5..c3f1d62 100644
+--- a/runtime/src/gs/gpu/interp.wgsl
++++ b/runtime/src/gs/gpu/interp.wgsl
+@@ -36,6 +36,28 @@ struct Params {
+ // own, and the four rows of the matrix that takes a point on the bone from the step drawn to the moment shown
+ @group(0) @binding(4) var<storage, read> bones: array<vec4<f32>>;
+ 
++// v0.10.8: the things that moved (cars, debris, doors): from vec4 12417, six each: the box's corners in the world (as drawn), then
++// the four rows of the matrix that takes a point of it back to where it was a step before. bones[0].z: how many.
++const kObjects = 12417u;
++fn object_at(p: vec3<f32>) -> i32 {
++    let n = min(u32(bones[0].z), 128u);
++    var found = -1;
++    var smallest = 1e30;
++    for (var o = 0u; o < n; o = o + 1u) {
++        let lo = bones[kObjects + o * 6u].xyz - vec3<f32>(0.05);
++        let hi = bones[kObjects + o * 6u + 1u].xyz + vec3<f32>(0.05);
++        if (all(p >= lo) && all(p <= hi)) {
++            let size = hi - lo;
++            let volume = size.x * size.y * size.z;
++            if (volume < smallest) {
++                smallest = volume;
++                found = i32(o);
++            }
++        }
++    }
++    return found;
++}
++
+ // the bone a world point is on (the nearest segment within 35 cm, of a character whose sphere holds it), -1 if none
+ fn bone_at(p: vec3<f32>) -> i32 {
+     let chars = min(u32(bones[0].x), 64u);
+@@ -95,6 +117,7 @@ fn zat(x: i32, y: i32) -> u32 {
+ struct Landing {
+     ok: bool,
+     bone: i32,    // the bone it moved with, -1 none (the debug view)
++    object: i32,  // the thing it moved with, -1 none (the debug view)
+     x: i32,       // the top left of the 2 x 2 samples it covers
+     y: i32,
+     key: u32,
+@@ -105,6 +128,7 @@ fn land(x: u32, y: u32) -> Landing {
+     var r: Landing;
+     r.ok = false;
+     r.bone = -1;
++    r.object = -1;
+     let w = params.size.x;
+     let h = params.size.y;
+     let s = f32(params.size.z);
+@@ -150,9 +174,11 @@ fn land(x: u32, y: u32) -> Landing {
+     let px = gx + params.off.x;
+     let py = gy + params.off.y;
+     let hw = px * params.inv[0] + py * params.inv[1] + zf * params.inv[2] + params.inv[3];
+-    if (abs(hw.w) < 1e-20) {
+-        return r;
+-    }
++    var q = vec4<f32>(0.0);
++    if (abs(hw.w) < 1e-6 * max(length(hw.xyz), 1e-30)) {
++        // v0.10.8: as far as can be (a depth of 0: the sky, a cleared far plane): a direction, turned with the camera only
++        q = hw.x * params.mf[0] + hw.y * params.mf[1] + hw.z * params.mf[2] + hw.w * params.mf[3];
++    } else {
+     var p = hw.xyz / hw.w;
+     // v0.10.6: on a character: moved with its bone, turn and all, to the moment shown
+     if (u32(bones[0].y) > 0u) {
+@@ -178,7 +204,18 @@ fn land(x: u32, y: u32) -> Landing {
+         }
+     }
+     p = p + moved * params.motion.x;
+-    let q = p.x * params.mf[0] + p.y * params.mf[1] + p.z * params.mf[2] + params.mf[3];
++    // v0.10.8: not on a character: on a thing that moved, back along its move to the moment shown
++    if (r.bone < 0 && u32(bones[0].z) > 0u) {
++        let o = object_at(p);
++        r.object = o;
++        if (o >= 0) {
++            let at = kObjects + u32(o) * 6u;
++            let back = p.x * bones[at + 2u].xyz + p.y * bones[at + 3u].xyz + p.z * bones[at + 4u].xyz + bones[at + 5u].xyz;
++            p = p + (back - p) * (-params.motion.x);
++        }
++    }
++    q = p.x * params.mf[0] + p.y * params.mf[1] + p.z * params.mf[2] + params.mf[3];
++    }
+     if (!(q.w > 1e-6)) {
+         return r;
+     }
+@@ -245,8 +282,9 @@ fn resolve(@builtin(global_invocation_id) gid: vec3<u32>) {
+         let g = min(l.key * 2u, 255u);
+         colour = g | (g << 8u) | (g << 16u);
+     }
+-    if (params.motion.w > 0.5 && l.bone >= 0) {   // debug: the pixels moved with a bone, a colour per bone over the picture
+-        let hsh = u32(l.bone) * 2654435761u;
++    let tinted = select(l.bone, l.object + 4096, l.object >= 0);
++    if ((params.motion.w > 0.5 && l.bone >= 0) || (params.motion.w < -0.5 && l.object >= 0)) {   // debug: a colour per bone or per thing
++        let hsh = u32(tinted) * 2654435761u;
+         let tint = vec3<u32>((hsh >> 8u) & 255u, (hsh >> 16u) & 255u, (hsh >> 24u) & 255u);
+         let c = vec3<u32>(colour & 255u, (colour >> 8u) & 255u, (colour >> 16u) & 255u);
+         let m = (c + tint * 3u) / 4u;
+diff --git a/runtime/src/gs/gs.cpp b/runtime/src/gs/gs.cpp
+index 1b03493..d61b9d0 100644
+--- a/runtime/src/gs/gs.cpp
++++ b/runtime/src/gs/gs.cpp
+@@ -1,5 +1,9 @@
+ #include "gs.hpp"
+ 
++#include <cmath>
++#include <limits>
++#include <unordered_map>
++
+ #include "gif.hpp"
+ #include "queue.hpp"
+ #include "raster.hpp"
+@@ -27,10 +31,13 @@
+ #include <cstring>
+ #include <vector>
+ 
++namespace ps2 { bool frame_generation_log(); }   // (the frame generation log switch, Settings > Debug)
++
+ namespace ps2::vu { extern std::uint32_t g_trace_vu1_pc; void trace_dump(const char *path); }
+ 
+ namespace ps2::gs {
+ 
++void interp_step(const float *data, int n);   // rawdanger-recomp (v0.10.8): a step's mark with its moving things (below)
+ namespace trace {  // defined further down (PS2_TRACE_DRAWS)
+ extern std::uint64_t g_frame, g_number;
+ bool traced(std::uint64_t frame);
+@@ -1338,6 +1345,375 @@ bool step(const State &s, std::uint64_t attr) {
+ 
+ // Inlined into the PACKED run (write_packed_run): as a call of its own it cost the ship about 0.15 ms of the drawing thread a frame.
+ 
++
++// rawdanger-recomp (v0.10.8): frame generation of things that are not characters (cars, debris, doors). Each step the 3D drawn
++// into the 640-wide picture with the depth test is kept as batches (a batch: the vertices drawn with one set-up, keyed by its
++// texture, primitive and picture), their GS place (x, y in pixels, depth). At the step's mark they go back to the world through the
++// inverse of the step's matrix and are matched with the step before (the n-th batch of a key with the n-th, the same number of
++// vertices): a batch that moved (more than its places' own precision, less than 3 m) gives its turn and shift (Horn's method), and
++// batches next to each other that moved alike become one object: its box in the world and the matrix back to where it was.
++namespace motion {
++struct Batch { std::uint64_t key; std::uint32_t first, count; bool edge = false; };
++std::vector<Batch> g_batches;
++std::vector<float> g_places;   // x y depth per vertex
++std::uint64_t g_key = ~0ull;
++std::uint32_t g_gen = ~0u;
++std::vector<Batch> g_prev_batches;
++std::vector<float> g_prev_world;   // x y z per vertex (nan where it had no place)
++bool g_prev_valid = false;
++std::uint64_t g_stats[4] = {};    // last step: batches, matched, moved, objects
++std::atomic<bool> g_list{[] { const char *v = std::getenv("PS2_FRAME_GEN_OBJECTS_LOG"); return v && *v && *v != '0'; }()};   // Settings > Debug
++std::uint64_t g_why[5] = {};      // last step, not matched: no such batch before, no place (behind the camera), none near, on a character, a sprite
++
++[[gnu::noinline]] void note(const State &s, const Vertex &v) {
++    std::uint64_t attr = s.prim;
++    if (!(s.prmodecont & 1u)) attr = (s.prim & 7u) | (s.prmode & ~7ull);
++    const std::uint32_t prim = static_cast<std::uint32_t>(s.prim) & 7u;
++    if (prim < 3 || prim > 5) return;
++    const Context &c = s.ctx[(attr >> 9) & 1u];
++    if (!((c.test >> 16) & 1u) || ((c.test >> 17) & 3u) == 1u) return;   // no depth test, or "always" (a clear)
++    if ((c.zbuf >> 32) & 1u) return;   // no depth written: rain, splashes, smoke and glow (they change as they go; the things are solid)
++    if (((c.frame >> 16) & 0x3Fu) != 10u || ((c.frame >> 24) & 0x3Fu) != 0u) return;   // the 640-wide 32-bit picture only
++    const std::uint64_t key = (c.tex0 & 0x3FFFFFFFFull) ^ ((attr & 0x7FFull) << 40) ^ ((c.frame & 0x1FFull) << 51);
++    if (key != g_key || g_setup_generation != g_gen || g_batches.empty()) {
++        g_key = key, g_gen = g_setup_generation;
++        g_batches.push_back({key, static_cast<std::uint32_t>(g_places.size() / 3), 0});
++    }
++    // on or past the picture's edge: the game cuts what crosses it there, and those corners are not points of the thing
++    const float ofx = static_cast<float>(c.xyoffset & 0xFFFFu) / 16.0f, ofy = static_cast<float>((c.xyoffset >> 32) & 0xFFFFu) / 16.0f;
++    const float px = static_cast<float>(v.x) / 16.0f - ofx, py = static_cast<float>(v.y) / 16.0f - ofy;
++    if (px < 1.0f || px > 639.0f || py < 1.0f || py > 447.0f) g_batches.back().edge = true;
++    g_places.push_back(static_cast<float>(v.x) / 16.0f);
++    g_places.push_back(static_cast<float>(v.y) / 16.0f);
++    g_places.push_back(static_cast<float>(v.z));
++    ++g_batches.back().count;
++}
++
++bool invert(const float *m, double *out) {
++    double a[4][8];
++    for (int i = 0; i < 4; ++i)
++        for (int j = 0; j < 8; ++j) a[i][j] = j < 4 ? m[i * 4 + j] : (j - 4 == i ? 1.0 : 0.0);
++    for (int c = 0; c < 4; ++c) {
++        int best = c;
++        for (int r = c + 1; r < 4; ++r)
++            if (std::fabs(a[r][c]) > std::fabs(a[best][c])) best = r;
++        if (std::fabs(a[best][c]) < 1e-12) return false;
++        if (best != c) for (int j = 0; j < 8; ++j) std::swap(a[c][j], a[best][j]);
++        const double d = a[c][c];
++        for (int j = 0; j < 8; ++j) a[c][j] /= d;
++        for (int r = 0; r < 4; ++r) {
++            if (r == c) continue;
++            const double f = a[r][c];
++            if (f != 0.0) for (int j = 0; j < 8; ++j) a[r][j] -= f * a[c][j];
++        }
++    }
++    for (int i = 0; i < 4; ++i)
++        for (int j = 0; j < 4; ++j) out[i * 4 + j] = a[i][j + 4];
++    return true;
++}
++
++// the rotation R (row-major, applied as R * column vector) that best turns the points a (centred) onto b (centred): Horn's quaternion
++void rotation_fit(const std::vector<double> &a, const std::vector<double> &b, double R[9]) {
++    double S[3][3] = {};
++    for (std::size_t i = 0; i + 2 < a.size(); i += 3)
++        for (int r = 0; r < 3; ++r)
++            for (int c = 0; c < 3; ++c) S[r][c] += a[i + r] * b[i + c];
++    const double N[4][4] = {
++        {S[0][0] + S[1][1] + S[2][2], S[1][2] - S[2][1], S[2][0] - S[0][2], S[0][1] - S[1][0]},
++        {S[1][2] - S[2][1], S[0][0] - S[1][1] - S[2][2], S[0][1] + S[1][0], S[2][0] + S[0][2]},
++        {S[2][0] - S[0][2], S[0][1] + S[1][0], -S[0][0] + S[1][1] - S[2][2], S[1][2] + S[2][1]},
++        {S[0][1] - S[1][0], S[2][0] + S[0][2], S[1][2] + S[2][1], -S[0][0] - S[1][1] + S[2][2]}};
++    double shift = 0.0;   // the largest eigenvector by power iteration (shifted to be the largest in size)
++    for (int i = 0; i < 4; ++i) {
++        double row = 0.0;
++        for (int j = 0; j < 4; ++j) row += std::fabs(N[i][j]);
++        shift = std::max(shift, row);
++    }
++    double q[4] = {1, 0, 0, 0};
++    for (int it = 0; it < 64; ++it) {
++        double n[4];
++        for (int i = 0; i < 4; ++i) {
++            n[i] = shift * q[i];
++            for (int j = 0; j < 4; ++j) n[i] += N[i][j] * q[j];
++        }
++        const double len = std::sqrt(n[0] * n[0] + n[1] * n[1] + n[2] * n[2] + n[3] * n[3]);
++        if (!(len > 1e-30)) break;
++        for (int i = 0; i < 4; ++i) q[i] = n[i] / len;
++    }
++    const double w = q[0], x = q[1], y = q[2], z = q[3];
++    R[0] = 1 - 2 * (y * y + z * z), R[1] = 2 * (x * y - w * z), R[2] = 2 * (x * z + w * y);
++    R[3] = 2 * (x * y + w * z), R[4] = 1 - 2 * (x * x + z * z), R[5] = 2 * (y * z - w * x);
++    R[6] = 2 * (x * z - w * y), R[7] = 2 * (y * z + w * x), R[8] = 1 - 2 * (x * x + y * y);
++}
++
++// The step's mark (m: its matrix): the objects that moved, appended to out as how many, then 24 floats each (the box's corners, then
++// the matrix, rows, that takes a point of the object back to where it was a step before)
++void on_mark(const float *m, int n_after, std::vector<float> &out) {
++    const std::size_t at = out.size();
++    out.push_back(0.0f);
++    double inv[16];
++    const bool ok = invert(m, inv);
++    std::vector<float> world(g_places.size(), std::numeric_limits<float>::quiet_NaN());
++    if (ok)
++        for (std::size_t i = 0; i + 2 < g_places.size(); i += 3) {
++            const double x = g_places[i], y = g_places[i + 1], z = g_places[i + 2];
++            double h[4];
++            for (int c = 0; c < 4; ++c) h[c] = x * inv[c] + y * inv[4 + c] + z * inv[8 + c] + inv[12 + c];
++            if (std::fabs(h[3]) < 1e-9) continue;
++            world[i] = static_cast<float>(h[0] / h[3]), world[i + 1] = static_cast<float>(h[1] / h[3]), world[i + 2] = static_cast<float>(h[2] / h[3]);
++        }
++    // the eye: where x, y and w all come to 0 (the matrix's rows applied to a row vector)
++    double eye[3] = {0, 0, 0};
++    {
++        const double a[3][3] = {{m[0], m[4], m[8]}, {m[1], m[5], m[9]}, {m[3], m[7], m[11]}}, r[3] = {-m[12], -m[13], -m[15]};
++        const double det = a[0][0] * (a[1][1] * a[2][2] - a[1][2] * a[2][1]) - a[0][1] * (a[1][0] * a[2][2] - a[1][2] * a[2][0]) + a[0][2] * (a[1][0] * a[2][1] - a[1][1] * a[2][0]);
++        if (std::fabs(det) > 1e-12)
++            for (int k = 0; k < 3; ++k) {
++                double b[3][3];
++                for (int i = 0; i < 3; ++i)
++                    for (int j = 0; j < 3; ++j) b[i][j] = j == k ? r[i] : a[i][j];
++                eye[k] = (b[0][0] * (b[1][1] * b[2][2] - b[1][2] * b[2][1]) - b[0][1] * (b[1][0] * b[2][2] - b[1][2] * b[2][0]) + b[0][2] * (b[1][0] * b[2][1] - b[1][1] * b[2][0])) / det;
++            }
++    }
++    std::uint64_t matched = 0, moved = 0;
++    struct Obj { double lo[3], hi[3], t[3], R[9]; };
++    std::vector<Obj> objs;
++    if (g_prev_valid && ok) {
++        // the characters (their bones' spheres): their batches move with the bones, not as things
++        std::vector<float> spheres;   // x y z radius
++        {
++            const int limbs = n_after > 16 ? static_cast<int>(m[16]) : 0;
++            const int at_bones = 17 + limbs * 8;
++            if (n_after > at_bones) {
++                const int nb = static_cast<int>(m[at_bones]);
++                float last = -1.0f;
++                std::vector<float> pts;
++                const auto flush = [&] {
++                    if (pts.empty()) return;
++                    // round the first bone (the root), out to the farthest bone within 2.5 m of it (a bone left at the world's
++                    // origin, unused, would make the sphere cover the whole place)
++                    const double c[3] = {pts[0], pts[1], pts[2]};
++                    double r = 0.0;
++                    for (std::size_t i = 0; i < pts.size(); i += 3) {
++                        const double d = std::hypot(pts[i] - c[0], pts[i + 1] - c[1], pts[i + 2] - c[2]);
++                        if (d < 2.5) r = std::max(r, d);
++                    }
++                    spheres.insert(spheres.end(), {static_cast<float>(c[0]), static_cast<float>(c[1]), static_cast<float>(c[2]), static_cast<float>(r + 0.4)});
++                    pts.clear();
++                };
++                for (int b = 0; b < nb && at_bones + 1 + (b + 1) * 21 <= n_after; ++b) {
++                    const float *r = m + at_bones + 1 + b * 21;
++                    if (r[1] != last) flush(), last = r[1];
++                    pts.insert(pts.end(), {r[17], r[18], r[19]});
++                }
++                flush();
++            }
++        }
++        const auto centroid = [](const std::vector<float> &w, const Batch &b, double c[3]) {
++            c[0] = c[1] = c[2] = 0.0;
++            std::uint32_t n = 0;
++            for (std::uint32_t v = 0; v < b.count; ++v) {
++                const float *q = &w[(b.first + v) * 3u];
++                if (!std::isfinite(q[0])) return false;
++                c[0] += q[0], c[1] += q[1], c[2] += q[2], ++n;
++            }
++            if (!n) return false;
++            for (int k = 0; k < 3; ++k) c[k] /= n;
++            return true;
++        };
++        struct Cand { std::uint32_t index; double c[3]; };
++        std::unordered_map<std::uint64_t, std::vector<Cand>> before;
++        for (std::uint32_t i = 0; i < g_prev_batches.size(); ++i) {
++            Cand cd{i, {}};
++            if (centroid(g_prev_world, g_prev_batches[i], cd.c)) before[g_prev_batches[i].key ^ (static_cast<std::uint64_t>(g_prev_batches[i].count) << 32)].push_back(cd);
++        }
++        std::unordered_map<std::uint64_t, std::uint32_t> seen;
++        for (const Batch &b : g_batches) {
++            const std::uint64_t k2 = b.key ^ (static_cast<std::uint64_t>(b.count) << 32);
++            const std::uint32_t nth = seen[k2]++;
++            if (b.count < 3) continue;
++            {   // one depth for all its places: a sprite set to face the screen (a light, a flare), turning with the camera
++                // or pressed to the edge of the drawing space (the game's clipper puts far-off corners there: not where they are)
++                bool flat = true, pressed = false;
++                for (std::uint32_t v = 0; v < b.count; ++v) {
++                    const float *q = &g_places[(b.first + v) * 3u];
++                    flat &= q[2] == g_places[b.first * 3u + 2];
++                    pressed |= q[0] <= 128.0f || q[0] >= 3968.0f || q[1] <= 128.0f || q[1] >= 3968.0f;
++                }
++                if (flat || pressed || b.edge) { ++g_why[4]; continue; }
++            }
++            const auto it = before.find(k2);
++            if (it == before.end()) { ++g_why[0]; continue; }
++            double cb0[3];
++            if (!centroid(world, b, cb0)) { ++g_why[1]; continue; }
++            // at the eye (drawn with its depth pressed to the nearest: it comes back to the camera's place, and goes with it)
++            {
++                bool at_eye = false;
++                for (std::uint32_t v = 0; v < b.count && !at_eye; ++v) {
++                    const float *q = &world[(b.first + v) * 3u];
++                    at_eye = std::hypot(q[0] - eye[0], q[1] - eye[1], q[2] - eye[2]) < 0.5;
++                }
++                if (at_eye) { ++g_why[1]; continue; }
++            }
++            // the same kind of batch (key, number of vertices) nearest to it a step before (around the same place in the order)
++            const std::vector<Cand> &list = it->second;
++            const std::size_t span = list.size() <= 512 ? list.size() : 256;   // all of them, or those round the same place in the order
++            const std::size_t from = list.size() <= 512 ? 0 : (nth > span ? nth - span : 0), to = list.size() <= 512 ? list.size() : std::min<std::size_t>(list.size(), nth + span + 1);
++            double best = 3.0;
++            const Cand *pick = nullptr;
++            for (std::size_t i = from; i < to; ++i) {
++                const double d = std::hypot(list[i].c[0] - cb0[0], list[i].c[1] - cb0[1], list[i].c[2] - cb0[2]);
++                if (d < best) best = d, pick = &list[i];
++            }
++            if (!pick) { ++g_why[2]; continue; }
++            bool on_character = false;
++            for (std::size_t i = 0; i + 4 <= spheres.size(); i += 4)
++                on_character |= std::hypot(cb0[0] - spheres[i], cb0[1] - spheres[i + 1], cb0[2] - spheres[i + 2]) < spheres[i + 3];
++            if (on_character) { ++g_why[3]; continue; }
++            const Batch &p = g_prev_batches[pick->index];
++            ++matched;
++            // how far its places moved, against how precise they are (a quarter pixel across, two depth steps along the view)
++            double most = 0.0, ca[3] = {}, cb[3] = {};
++            std::uint32_t used = 0;
++            bool bad = false;
++            for (std::uint32_t v = 0; v < b.count; ++v) {
++                const float *q = &world[(b.first + v) * 3u];
++                const float *o = &g_prev_world[(p.first + v) * 3u];
++                if (!std::isfinite(q[0]) || !std::isfinite(o[0])) { bad = true; break; }
++                const double d = std::hypot(q[0] - o[0], q[1] - o[1], q[2] - o[2]);
++                most = std::max(most, d);
++                for (int k = 0; k < 3; ++k) ca[k] += o[k], cb[k] += q[k];
++                ++used;
++            }
++            if (bad || !used) continue;
++            double precision = 0.0;
++            {
++                const std::uint32_t mid = b.first + b.count / 2;
++                const double x = g_places[mid * 3], y = g_places[mid * 3 + 1], z = g_places[mid * 3 + 2];
++                const auto un = [&](double xx, double yy, double zz, double o[3]) {
++                    double h[4];
++                    for (int c = 0; c < 4; ++c) h[c] = xx * inv[c] + yy * inv[4 + c] + zz * inv[8 + c] + inv[12 + c];
++                    for (int k = 0; k < 3; ++k) o[k] = h[k] / h[3];
++                };
++                double a0[3], a1[3], a2[3];
++                un(x, y, z, a0), un(x + 0.25, y, z, a1), un(x, y, std::max(1.0, z - 2.0), a2);
++                precision = std::hypot(a1[0] - a0[0], a1[1] - a0[1], a1[2] - a0[2]) + std::hypot(a2[0] - a0[0], a2[1] - a0[1], a2[2] - a0[2]);
++            }
++            if (most < 0.02 + 2.0 * precision || most > 3.0) continue;   // still (or a jump: a new place, a different thing)
++            {   // and moved on the screen: a step before's places, seen from where the camera is now, a game pixel or more away
++                double px = 0.0;
++                for (std::uint32_t v = 0; v < b.count; ++v) {
++                    const float *o = &g_prev_world[(p.first + v) * 3u];
++                    double h[4];
++                    for (int c = 0; c < 4; ++c) h[c] = o[0] * m[c] + o[1] * m[4 + c] + o[2] * m[8 + c] + m[12 + c];
++                    if (!(std::fabs(h[3]) > 1e-9)) { px = 0.0; break; }
++                    px = std::max(px, std::hypot(h[0] / h[3] - g_places[(b.first + v) * 3u], h[1] / h[3] - g_places[(b.first + v) * 3u + 1]));
++                }
++                if (px < 1.0) continue;
++            }
++            ++moved;
++            for (int k = 0; k < 3; ++k) ca[k] /= used, cb[k] /= used;
++            std::vector<double> pa, pb;
++            pa.reserve(used * 3), pb.reserve(used * 3);
++            Obj o{};
++            for (int k = 0; k < 3; ++k) o.lo[k] = 1e30, o.hi[k] = -1e30;
++            for (std::uint32_t v = 0; v < b.count; ++v) {
++                const float *q = &world[(b.first + v) * 3u];
++                const float *pr = &g_prev_world[(p.first + v) * 3u];
++                for (int k = 0; k < 3; ++k) {
++                    pa.push_back(pr[k] - ca[k]), pb.push_back(q[k] - cb[k]);
++                    o.lo[k] = std::min(o.lo[k], static_cast<double>(q[k])), o.hi[k] = std::max(o.hi[k], static_cast<double>(q[k]));
++                }
++            }
++            if (b.count >= 4) rotation_fit(pa, pb, o.R);
++            else o.R[0] = o.R[4] = o.R[8] = 1.0;
++            {   // a rigid move must explain it (not a bad match, not something bending)
++                double worst = 0.0;
++                for (std::size_t i = 0; i + 2 < pa.size(); i += 3) {
++                    for (int r = 0; r < 3; ++r) {
++                        const double e = o.R[r * 3] * pa[i] + o.R[r * 3 + 1] * pa[i + 1] + o.R[r * 3 + 2] * pa[i + 2] - pb[i + r];
++                        worst = std::max(worst, std::fabs(e));
++                    }
++                }
++                // (rain splashes, ripples and other effects change shape as they go: a tenth of the move off is too much)
++                if (worst > 0.01 + precision + 0.1 * most) { --moved; continue; }
++                if (g_list.load(std::memory_order_relaxed) && moved <= 40) {
++                    const double cam = std::hypot(cb[0] - eye[0], cb[1] - eye[1], cb[2] - eye[2]);
++                    float zlo = 1e30f, zhi = -1e30f, xlo = 1e30f, xhi = -1e30f, ylo = 1e30f, yhi = -1e30f;
++                    for (std::uint32_t v = 0; v < b.count; ++v) {
++                        const float *q = &g_places[(b.first + v) * 3u];
++                        xlo = std::min(xlo, q[0]), xhi = std::max(xhi, q[0]), ylo = std::min(ylo, q[1]), yhi = std::max(yhi, q[1]), zlo = std::min(zlo, q[2]), zhi = std::max(zhi, q[2]);
++                    }
++                    std::fprintf(stderr, "[frame gen] moved: key %016llx, %u places, at (%.2f %.2f %.2f) %.1f m away, %.3f m most, %.3f precision, %.3f off rigid, "
++                                 "screen %.0f..%.0f x %.0f..%.0f, depth %.0f..%.0f\n",
++                                 (unsigned long long)b.key, b.count, cb[0], cb[1], cb[2], cam, most, precision, worst, xlo, xhi, ylo, yhi, zlo, zhi);
++                }
++            }
++            // q = R (p - ca) + cb  ->  t = cb - R ca
++            for (int r = 0; r < 3; ++r) o.t[r] = cb[r] - (o.R[r * 3] * ca[0] + o.R[r * 3 + 1] * ca[1] + o.R[r * 3 + 2] * ca[2]);
++            // one object with the last one when it moved alike (a car drawn in many strips)
++            if (!objs.empty()) {
++                Obj &l = objs.back();
++                double dt = 0.0, dr = 0.0;
++                for (int k = 0; k < 3; ++k) dt += std::fabs(l.t[k] - o.t[k]);
++                for (int k = 0; k < 9; ++k) dr += std::fabs(l.R[k] - o.R[k]);
++                if (dt < 0.03 && dr < 0.02) {
++                    for (int k = 0; k < 3; ++k) l.lo[k] = std::min(l.lo[k], o.lo[k]), l.hi[k] = std::max(l.hi[k], o.hi[k]);
++                    continue;
++                }
++            }
++            if (objs.size() < 128) objs.push_back(o);
++        }
++    }
++    for (const Obj &o : objs) {
++        // back to a step before: p = R^T (q - t); as rows for a row vector q: G = [R (3x3 transposed twice), -t R]
++        float rec[24] = {};
++        for (int k = 0; k < 3; ++k) rec[k] = static_cast<float>(o.lo[k]), rec[4 + k] = static_cast<float>(o.hi[k]);
++        // row-vector form: p_j = sum_i q_i R[i][j] - sum_i t_i R[i][j]
++        for (int i = 0; i < 3; ++i)
++            for (int j = 0; j < 3; ++j) rec[8 + i * 4 + j] = static_cast<float>(o.R[i * 3 + j]);
++        for (int j = 0; j < 3; ++j) rec[8 + 12 + j] = static_cast<float>(-(o.t[0] * o.R[0 * 3 + j] + o.t[1] * o.R[1 * 3 + j] + o.t[2] * o.R[2 * 3 + j]));
++        rec[8 + 15] = 1.0f;
++        out.insert(out.end(), rec, rec + 24);
++    }
++    // PS2_FRAME_GEN_OBJECTS_TEST=metres (a check of the whole path): everything not on a character is taken to have come that far
++    // along x since the step before (one object as big as the world), so the in-between pictures show it sliding
++    static const double test_move = [] { const char *v = std::getenv("PS2_FRAME_GEN_OBJECTS_TEST"); return v ? std::atof(v) : 0.0; }();
++    if (test_move != 0.0 && ok) {
++        float rec[24] = {-1e5f, -1e5f, -1e5f, 0, 1e5f, 1e5f, 1e5f, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, static_cast<float>(-test_move), 0, 0, 1};
++        out.insert(out.end(), rec, rec + 24);
++        out[at] = static_cast<float>(objs.size() + 1);
++    } else
++    out[at] = static_cast<float>(objs.size());
++    g_stats[0] = g_batches.size(), g_stats[1] = matched, g_stats[2] = moved, g_stats[3] = objs.size();
++    if (ps2::frame_generation_log())
++        std::fprintf(stderr, "[frame gen] things not matched: %llu new, %llu without a place (behind or at the eye), %llu none near, %llu on a character, %llu sprites or at the edge\n", (unsigned long long)g_why[0],
++                     (unsigned long long)g_why[1], (unsigned long long)g_why[2], (unsigned long long)g_why[3], (unsigned long long)g_why[4]);
++    std::fill(std::begin(g_why), std::end(g_why), 0ull);
++    g_prev_batches.swap(g_batches);
++    g_prev_world.swap(world);
++    g_prev_valid = ok;
++    g_batches.clear();
++    g_places.clear();
++    g_key = ~0ull;
++}
++}
++
++// v0.10.8: a step's mark (on the drawing side, in order with the drawing): its moving things found, then all handed to frame
++// generation
++void interp_step(const float *data, int n) {
++#ifdef PS2_GPU
++    if (n < 16) return;
++    static std::vector<float> objects;
++    objects.clear();
++    motion::on_mark(data, n, objects);
++    gpu::interp_mark(data, n);
++    gpu::interp_objects(objects.data(), static_cast<int>(objects.size()), motion::g_stats);
++#else
++    (void)data, (void)n;
++#endif
++}
++
+ [[gnu::always_inline]] static inline void kick(bool draw) {
+     State &s = g_state;
+     const std::uint32_t prim = static_cast<std::uint32_t>(s.prim) & 7u;
+@@ -1419,6 +1795,7 @@ bool step(const State &s, std::uint64_t attr) {
+     std::memcpy(&v.t, &tbits, 4);
+     v.u = static_cast<std::uint32_t>(s.uv) & 0x3FFFu;
+     v.v = static_cast<std::uint32_t>(s.uv >> 16) & 0x3FFFu;
++    if (ui::g_for_frames.load(std::memory_order_relaxed)) [[unlikely]] motion::note(s, v);   // v0.10.8: frame generation's moving things
+     kick(draw);
+ }
+ 
+@@ -2413,7 +2790,7 @@ Rendered render_pending(const std::function<void(const DisplayRegs &)> &on_prese
+             static std::vector<float> m;
+             m.resize(std::min<std::uint32_t>(h.arg0, 1u << 20));   // (a big one goes through the heap: its size is in arg0)
+             if (!m.empty()) std::memcpy(m.data(), payload, m.size() * 4u);
+-            gpu::interp_mark(m.data(), static_cast<int>(m.size()));
++            interp_step(m.data(), static_cast<int>(m.size()));
+             break;
+         }
+ #endif
+@@ -2672,7 +3049,7 @@ void frame_step(const float *data, int n) {
+ #ifdef PS2_GPU
+     if (!ps2::gs::gpu::frame_generation() || n < 16) return;
+     if (ps2::gs::queue::active()) ps2::gs::queue::post(ps2::gs::queue::kInterpMark, static_cast<std::uint32_t>(n), 0, data, static_cast<std::uint32_t>(n) * 4u);
+-    else ps2::gs::gpu::interp_mark(data, n);
++    else ps2::gs::interp_step(data, n);
+ #else
+     (void)data, (void)n;
+ #endif
+@@ -2692,6 +3069,8 @@ int frame_generation() {
+ }
+ #ifdef PS2_GPU
+ void set_fps_limit(int fps) { ps2::gs::gpu::set_fps_limit(fps); }
++void set_frame_generation_objects(bool on) { ps2::gs::gpu::set_frame_generation_objects(on); }
++bool frame_generation_objects() { return ps2::gs::gpu::frame_generation_objects(); }
+ int fps_limit() { return ps2::gs::gpu::fps_limit(); }
+ void set_paced_threads(bool on) { ps2::gs::gpu::set_paced_threads(on); }
+ bool paced_presents() { return ps2::gs::gpu::paced(); }
+@@ -2702,8 +3081,14 @@ int frame_generation_view() { return ps2::gs::gpu::frame_generation_view(); }
+ void set_frame_generation_log(bool on) { ps2::gs::gpu::set_frame_generation_log(on); }
+ bool frame_generation_log() { return ps2::gs::gpu::frame_generation_log(); }
+ void dump_presents(const char *base, int count) { ps2::gs::gpu::dump_presents(base ? base : "", count); }
++void set_frame_generation_objects_list(bool on) { ps2::gs::motion::g_list.store(on, std::memory_order_relaxed); }
++bool frame_generation_objects_list() { return ps2::gs::motion::g_list.load(std::memory_order_relaxed); }
+ #else
++void set_frame_generation_objects_list(bool) {}
++bool frame_generation_objects_list() { return false; }
+ void set_fps_limit(int) {}
++void set_frame_generation_objects(bool) {}
++bool frame_generation_objects() { return false; }
+ int fps_limit() { return 60; }
+ void set_paced_threads(bool) {}
+ bool paced_presents() { return false; }
+-- 
+2.43.0
+

@@ -1,5 +1,9 @@
 #include "gs.hpp"
 
+#include <cmath>
+#include <limits>
+#include <unordered_map>
+
 #include "gif.hpp"
 #include "queue.hpp"
 #include "raster.hpp"
@@ -27,10 +31,13 @@
 #include <cstring>
 #include <vector>
 
+namespace ps2 { bool frame_generation_log(); }   // (the frame generation log switch, Settings > Debug)
+
 namespace ps2::vu { extern std::uint32_t g_trace_vu1_pc; void trace_dump(const char *path); }
 
 namespace ps2::gs {
 
+void interp_step(const float *data, int n);   // rawdanger-recomp (v0.10.8): a step's mark with its moving things (below)
 namespace trace {  // defined further down (PS2_TRACE_DRAWS)
 extern std::uint64_t g_frame, g_number;
 bool traced(std::uint64_t frame);
@@ -1338,6 +1345,375 @@ bool step(const State &s, std::uint64_t attr) {
 
 // Inlined into the PACKED run (write_packed_run): as a call of its own it cost the ship about 0.15 ms of the drawing thread a frame.
 
+
+// rawdanger-recomp (v0.10.8): frame generation of things that are not characters (cars, debris, doors). Each step the 3D drawn
+// into the 640-wide picture with the depth test is kept as batches (a batch: the vertices drawn with one set-up, keyed by its
+// texture, primitive and picture), their GS place (x, y in pixels, depth). At the step's mark they go back to the world through the
+// inverse of the step's matrix and are matched with the step before (the n-th batch of a key with the n-th, the same number of
+// vertices): a batch that moved (more than its places' own precision, less than 3 m) gives its turn and shift (Horn's method), and
+// batches next to each other that moved alike become one object: its box in the world and the matrix back to where it was.
+namespace motion {
+struct Batch { std::uint64_t key; std::uint32_t first, count; bool edge = false; };
+std::vector<Batch> g_batches;
+std::vector<float> g_places;   // x y depth per vertex
+std::uint64_t g_key = ~0ull;
+std::uint32_t g_gen = ~0u;
+std::vector<Batch> g_prev_batches;
+std::vector<float> g_prev_world;   // x y z per vertex (nan where it had no place)
+bool g_prev_valid = false;
+std::uint64_t g_stats[4] = {};    // last step: batches, matched, moved, objects
+std::atomic<bool> g_list{[] { const char *v = std::getenv("PS2_FRAME_GEN_OBJECTS_LOG"); return v && *v && *v != '0'; }()};   // Settings > Debug
+std::uint64_t g_why[5] = {};      // last step, not matched: no such batch before, no place (behind the camera), none near, on a character, a sprite
+
+[[gnu::noinline]] void note(const State &s, const Vertex &v) {
+    std::uint64_t attr = s.prim;
+    if (!(s.prmodecont & 1u)) attr = (s.prim & 7u) | (s.prmode & ~7ull);
+    const std::uint32_t prim = static_cast<std::uint32_t>(s.prim) & 7u;
+    if (prim < 3 || prim > 5) return;
+    const Context &c = s.ctx[(attr >> 9) & 1u];
+    if (!((c.test >> 16) & 1u) || ((c.test >> 17) & 3u) == 1u) return;   // no depth test, or "always" (a clear)
+    if ((c.zbuf >> 32) & 1u) return;   // no depth written: rain, splashes, smoke and glow (they change as they go; the things are solid)
+    if (((c.frame >> 16) & 0x3Fu) != 10u || ((c.frame >> 24) & 0x3Fu) != 0u) return;   // the 640-wide 32-bit picture only
+    const std::uint64_t key = (c.tex0 & 0x3FFFFFFFFull) ^ ((attr & 0x7FFull) << 40) ^ ((c.frame & 0x1FFull) << 51);
+    if (key != g_key || g_setup_generation != g_gen || g_batches.empty()) {
+        g_key = key, g_gen = g_setup_generation;
+        g_batches.push_back({key, static_cast<std::uint32_t>(g_places.size() / 3), 0});
+    }
+    // on or past the picture's edge: the game cuts what crosses it there, and those corners are not points of the thing
+    const float ofx = static_cast<float>(c.xyoffset & 0xFFFFu) / 16.0f, ofy = static_cast<float>((c.xyoffset >> 32) & 0xFFFFu) / 16.0f;
+    const float px = static_cast<float>(v.x) / 16.0f - ofx, py = static_cast<float>(v.y) / 16.0f - ofy;
+    if (px < 1.0f || px > 639.0f || py < 1.0f || py > 447.0f) g_batches.back().edge = true;
+    g_places.push_back(static_cast<float>(v.x) / 16.0f);
+    g_places.push_back(static_cast<float>(v.y) / 16.0f);
+    g_places.push_back(static_cast<float>(v.z));
+    ++g_batches.back().count;
+}
+
+bool invert(const float *m, double *out) {
+    double a[4][8];
+    for (int i = 0; i < 4; ++i)
+        for (int j = 0; j < 8; ++j) a[i][j] = j < 4 ? m[i * 4 + j] : (j - 4 == i ? 1.0 : 0.0);
+    for (int c = 0; c < 4; ++c) {
+        int best = c;
+        for (int r = c + 1; r < 4; ++r)
+            if (std::fabs(a[r][c]) > std::fabs(a[best][c])) best = r;
+        if (std::fabs(a[best][c]) < 1e-12) return false;
+        if (best != c) for (int j = 0; j < 8; ++j) std::swap(a[c][j], a[best][j]);
+        const double d = a[c][c];
+        for (int j = 0; j < 8; ++j) a[c][j] /= d;
+        for (int r = 0; r < 4; ++r) {
+            if (r == c) continue;
+            const double f = a[r][c];
+            if (f != 0.0) for (int j = 0; j < 8; ++j) a[r][j] -= f * a[c][j];
+        }
+    }
+    for (int i = 0; i < 4; ++i)
+        for (int j = 0; j < 4; ++j) out[i * 4 + j] = a[i][j + 4];
+    return true;
+}
+
+// the rotation R (row-major, applied as R * column vector) that best turns the points a (centred) onto b (centred): Horn's quaternion
+void rotation_fit(const std::vector<double> &a, const std::vector<double> &b, double R[9]) {
+    double S[3][3] = {};
+    for (std::size_t i = 0; i + 2 < a.size(); i += 3)
+        for (int r = 0; r < 3; ++r)
+            for (int c = 0; c < 3; ++c) S[r][c] += a[i + r] * b[i + c];
+    const double N[4][4] = {
+        {S[0][0] + S[1][1] + S[2][2], S[1][2] - S[2][1], S[2][0] - S[0][2], S[0][1] - S[1][0]},
+        {S[1][2] - S[2][1], S[0][0] - S[1][1] - S[2][2], S[0][1] + S[1][0], S[2][0] + S[0][2]},
+        {S[2][0] - S[0][2], S[0][1] + S[1][0], -S[0][0] + S[1][1] - S[2][2], S[1][2] + S[2][1]},
+        {S[0][1] - S[1][0], S[2][0] + S[0][2], S[1][2] + S[2][1], -S[0][0] - S[1][1] + S[2][2]}};
+    double shift = 0.0;   // the largest eigenvector by power iteration (shifted to be the largest in size)
+    for (int i = 0; i < 4; ++i) {
+        double row = 0.0;
+        for (int j = 0; j < 4; ++j) row += std::fabs(N[i][j]);
+        shift = std::max(shift, row);
+    }
+    double q[4] = {1, 0, 0, 0};
+    for (int it = 0; it < 64; ++it) {
+        double n[4];
+        for (int i = 0; i < 4; ++i) {
+            n[i] = shift * q[i];
+            for (int j = 0; j < 4; ++j) n[i] += N[i][j] * q[j];
+        }
+        const double len = std::sqrt(n[0] * n[0] + n[1] * n[1] + n[2] * n[2] + n[3] * n[3]);
+        if (!(len > 1e-30)) break;
+        for (int i = 0; i < 4; ++i) q[i] = n[i] / len;
+    }
+    const double w = q[0], x = q[1], y = q[2], z = q[3];
+    R[0] = 1 - 2 * (y * y + z * z), R[1] = 2 * (x * y - w * z), R[2] = 2 * (x * z + w * y);
+    R[3] = 2 * (x * y + w * z), R[4] = 1 - 2 * (x * x + z * z), R[5] = 2 * (y * z - w * x);
+    R[6] = 2 * (x * z - w * y), R[7] = 2 * (y * z + w * x), R[8] = 1 - 2 * (x * x + y * y);
+}
+
+// The step's mark (m: its matrix): the objects that moved, appended to out as how many, then 24 floats each (the box's corners, then
+// the matrix, rows, that takes a point of the object back to where it was a step before)
+void on_mark(const float *m, int n_after, std::vector<float> &out) {
+    const std::size_t at = out.size();
+    out.push_back(0.0f);
+    double inv[16];
+    const bool ok = invert(m, inv);
+    std::vector<float> world(g_places.size(), std::numeric_limits<float>::quiet_NaN());
+    if (ok)
+        for (std::size_t i = 0; i + 2 < g_places.size(); i += 3) {
+            const double x = g_places[i], y = g_places[i + 1], z = g_places[i + 2];
+            double h[4];
+            for (int c = 0; c < 4; ++c) h[c] = x * inv[c] + y * inv[4 + c] + z * inv[8 + c] + inv[12 + c];
+            if (std::fabs(h[3]) < 1e-9) continue;
+            world[i] = static_cast<float>(h[0] / h[3]), world[i + 1] = static_cast<float>(h[1] / h[3]), world[i + 2] = static_cast<float>(h[2] / h[3]);
+        }
+    // the eye: where x, y and w all come to 0 (the matrix's rows applied to a row vector)
+    double eye[3] = {0, 0, 0};
+    {
+        const double a[3][3] = {{m[0], m[4], m[8]}, {m[1], m[5], m[9]}, {m[3], m[7], m[11]}}, r[3] = {-m[12], -m[13], -m[15]};
+        const double det = a[0][0] * (a[1][1] * a[2][2] - a[1][2] * a[2][1]) - a[0][1] * (a[1][0] * a[2][2] - a[1][2] * a[2][0]) + a[0][2] * (a[1][0] * a[2][1] - a[1][1] * a[2][0]);
+        if (std::fabs(det) > 1e-12)
+            for (int k = 0; k < 3; ++k) {
+                double b[3][3];
+                for (int i = 0; i < 3; ++i)
+                    for (int j = 0; j < 3; ++j) b[i][j] = j == k ? r[i] : a[i][j];
+                eye[k] = (b[0][0] * (b[1][1] * b[2][2] - b[1][2] * b[2][1]) - b[0][1] * (b[1][0] * b[2][2] - b[1][2] * b[2][0]) + b[0][2] * (b[1][0] * b[2][1] - b[1][1] * b[2][0])) / det;
+            }
+    }
+    std::uint64_t matched = 0, moved = 0;
+    struct Obj { double lo[3], hi[3], t[3], R[9]; };
+    std::vector<Obj> objs;
+    if (g_prev_valid && ok) {
+        // the characters (their bones' spheres): their batches move with the bones, not as things
+        std::vector<float> spheres;   // x y z radius
+        {
+            const int limbs = n_after > 16 ? static_cast<int>(m[16]) : 0;
+            const int at_bones = 17 + limbs * 8;
+            if (n_after > at_bones) {
+                const int nb = static_cast<int>(m[at_bones]);
+                float last = -1.0f;
+                std::vector<float> pts;
+                const auto flush = [&] {
+                    if (pts.empty()) return;
+                    // round the first bone (the root), out to the farthest bone within 2.5 m of it (a bone left at the world's
+                    // origin, unused, would make the sphere cover the whole place)
+                    const double c[3] = {pts[0], pts[1], pts[2]};
+                    double r = 0.0;
+                    for (std::size_t i = 0; i < pts.size(); i += 3) {
+                        const double d = std::hypot(pts[i] - c[0], pts[i + 1] - c[1], pts[i + 2] - c[2]);
+                        if (d < 2.5) r = std::max(r, d);
+                    }
+                    spheres.insert(spheres.end(), {static_cast<float>(c[0]), static_cast<float>(c[1]), static_cast<float>(c[2]), static_cast<float>(r + 0.4)});
+                    pts.clear();
+                };
+                for (int b = 0; b < nb && at_bones + 1 + (b + 1) * 21 <= n_after; ++b) {
+                    const float *r = m + at_bones + 1 + b * 21;
+                    if (r[1] != last) flush(), last = r[1];
+                    pts.insert(pts.end(), {r[17], r[18], r[19]});
+                }
+                flush();
+            }
+        }
+        const auto centroid = [](const std::vector<float> &w, const Batch &b, double c[3]) {
+            c[0] = c[1] = c[2] = 0.0;
+            std::uint32_t n = 0;
+            for (std::uint32_t v = 0; v < b.count; ++v) {
+                const float *q = &w[(b.first + v) * 3u];
+                if (!std::isfinite(q[0])) return false;
+                c[0] += q[0], c[1] += q[1], c[2] += q[2], ++n;
+            }
+            if (!n) return false;
+            for (int k = 0; k < 3; ++k) c[k] /= n;
+            return true;
+        };
+        struct Cand { std::uint32_t index; double c[3]; };
+        std::unordered_map<std::uint64_t, std::vector<Cand>> before;
+        for (std::uint32_t i = 0; i < g_prev_batches.size(); ++i) {
+            Cand cd{i, {}};
+            if (centroid(g_prev_world, g_prev_batches[i], cd.c)) before[g_prev_batches[i].key ^ (static_cast<std::uint64_t>(g_prev_batches[i].count) << 32)].push_back(cd);
+        }
+        std::unordered_map<std::uint64_t, std::uint32_t> seen;
+        for (const Batch &b : g_batches) {
+            const std::uint64_t k2 = b.key ^ (static_cast<std::uint64_t>(b.count) << 32);
+            const std::uint32_t nth = seen[k2]++;
+            if (b.count < 3) continue;
+            {   // one depth for all its places: a sprite set to face the screen (a light, a flare), turning with the camera
+                // or pressed to the edge of the drawing space (the game's clipper puts far-off corners there: not where they are)
+                bool flat = true, pressed = false;
+                for (std::uint32_t v = 0; v < b.count; ++v) {
+                    const float *q = &g_places[(b.first + v) * 3u];
+                    flat &= q[2] == g_places[b.first * 3u + 2];
+                    pressed |= q[0] <= 128.0f || q[0] >= 3968.0f || q[1] <= 128.0f || q[1] >= 3968.0f;
+                }
+                if (flat || pressed || b.edge) { ++g_why[4]; continue; }
+            }
+            const auto it = before.find(k2);
+            if (it == before.end()) { ++g_why[0]; continue; }
+            double cb0[3];
+            if (!centroid(world, b, cb0)) { ++g_why[1]; continue; }
+            // at the eye (drawn with its depth pressed to the nearest: it comes back to the camera's place, and goes with it)
+            {
+                bool at_eye = false;
+                for (std::uint32_t v = 0; v < b.count && !at_eye; ++v) {
+                    const float *q = &world[(b.first + v) * 3u];
+                    at_eye = std::hypot(q[0] - eye[0], q[1] - eye[1], q[2] - eye[2]) < 0.5;
+                }
+                if (at_eye) { ++g_why[1]; continue; }
+            }
+            // the same kind of batch (key, number of vertices) nearest to it a step before (around the same place in the order)
+            const std::vector<Cand> &list = it->second;
+            const std::size_t span = list.size() <= 512 ? list.size() : 256;   // all of them, or those round the same place in the order
+            const std::size_t from = list.size() <= 512 ? 0 : (nth > span ? nth - span : 0), to = list.size() <= 512 ? list.size() : std::min<std::size_t>(list.size(), nth + span + 1);
+            double best = 3.0;
+            const Cand *pick = nullptr;
+            for (std::size_t i = from; i < to; ++i) {
+                const double d = std::hypot(list[i].c[0] - cb0[0], list[i].c[1] - cb0[1], list[i].c[2] - cb0[2]);
+                if (d < best) best = d, pick = &list[i];
+            }
+            if (!pick) { ++g_why[2]; continue; }
+            bool on_character = false;
+            for (std::size_t i = 0; i + 4 <= spheres.size(); i += 4)
+                on_character |= std::hypot(cb0[0] - spheres[i], cb0[1] - spheres[i + 1], cb0[2] - spheres[i + 2]) < spheres[i + 3];
+            if (on_character) { ++g_why[3]; continue; }
+            const Batch &p = g_prev_batches[pick->index];
+            ++matched;
+            // how far its places moved, against how precise they are (a quarter pixel across, two depth steps along the view)
+            double most = 0.0, ca[3] = {}, cb[3] = {};
+            std::uint32_t used = 0;
+            bool bad = false;
+            for (std::uint32_t v = 0; v < b.count; ++v) {
+                const float *q = &world[(b.first + v) * 3u];
+                const float *o = &g_prev_world[(p.first + v) * 3u];
+                if (!std::isfinite(q[0]) || !std::isfinite(o[0])) { bad = true; break; }
+                const double d = std::hypot(q[0] - o[0], q[1] - o[1], q[2] - o[2]);
+                most = std::max(most, d);
+                for (int k = 0; k < 3; ++k) ca[k] += o[k], cb[k] += q[k];
+                ++used;
+            }
+            if (bad || !used) continue;
+            double precision = 0.0;
+            {
+                const std::uint32_t mid = b.first + b.count / 2;
+                const double x = g_places[mid * 3], y = g_places[mid * 3 + 1], z = g_places[mid * 3 + 2];
+                const auto un = [&](double xx, double yy, double zz, double o[3]) {
+                    double h[4];
+                    for (int c = 0; c < 4; ++c) h[c] = xx * inv[c] + yy * inv[4 + c] + zz * inv[8 + c] + inv[12 + c];
+                    for (int k = 0; k < 3; ++k) o[k] = h[k] / h[3];
+                };
+                double a0[3], a1[3], a2[3];
+                un(x, y, z, a0), un(x + 0.25, y, z, a1), un(x, y, std::max(1.0, z - 2.0), a2);
+                precision = std::hypot(a1[0] - a0[0], a1[1] - a0[1], a1[2] - a0[2]) + std::hypot(a2[0] - a0[0], a2[1] - a0[1], a2[2] - a0[2]);
+            }
+            if (most < 0.02 + 2.0 * precision || most > 3.0) continue;   // still (or a jump: a new place, a different thing)
+            {   // and moved on the screen: a step before's places, seen from where the camera is now, a game pixel or more away
+                double px = 0.0;
+                for (std::uint32_t v = 0; v < b.count; ++v) {
+                    const float *o = &g_prev_world[(p.first + v) * 3u];
+                    double h[4];
+                    for (int c = 0; c < 4; ++c) h[c] = o[0] * m[c] + o[1] * m[4 + c] + o[2] * m[8 + c] + m[12 + c];
+                    if (!(std::fabs(h[3]) > 1e-9)) { px = 0.0; break; }
+                    px = std::max(px, std::hypot(h[0] / h[3] - g_places[(b.first + v) * 3u], h[1] / h[3] - g_places[(b.first + v) * 3u + 1]));
+                }
+                if (px < 1.0) continue;
+            }
+            ++moved;
+            for (int k = 0; k < 3; ++k) ca[k] /= used, cb[k] /= used;
+            std::vector<double> pa, pb;
+            pa.reserve(used * 3), pb.reserve(used * 3);
+            Obj o{};
+            for (int k = 0; k < 3; ++k) o.lo[k] = 1e30, o.hi[k] = -1e30;
+            for (std::uint32_t v = 0; v < b.count; ++v) {
+                const float *q = &world[(b.first + v) * 3u];
+                const float *pr = &g_prev_world[(p.first + v) * 3u];
+                for (int k = 0; k < 3; ++k) {
+                    pa.push_back(pr[k] - ca[k]), pb.push_back(q[k] - cb[k]);
+                    o.lo[k] = std::min(o.lo[k], static_cast<double>(q[k])), o.hi[k] = std::max(o.hi[k], static_cast<double>(q[k]));
+                }
+            }
+            if (b.count >= 4) rotation_fit(pa, pb, o.R);
+            else o.R[0] = o.R[4] = o.R[8] = 1.0;
+            {   // a rigid move must explain it (not a bad match, not something bending)
+                double worst = 0.0;
+                for (std::size_t i = 0; i + 2 < pa.size(); i += 3) {
+                    for (int r = 0; r < 3; ++r) {
+                        const double e = o.R[r * 3] * pa[i] + o.R[r * 3 + 1] * pa[i + 1] + o.R[r * 3 + 2] * pa[i + 2] - pb[i + r];
+                        worst = std::max(worst, std::fabs(e));
+                    }
+                }
+                // (rain splashes, ripples and other effects change shape as they go: a tenth of the move off is too much)
+                if (worst > 0.01 + precision + 0.1 * most) { --moved; continue; }
+                if (g_list.load(std::memory_order_relaxed) && moved <= 40) {
+                    const double cam = std::hypot(cb[0] - eye[0], cb[1] - eye[1], cb[2] - eye[2]);
+                    float zlo = 1e30f, zhi = -1e30f, xlo = 1e30f, xhi = -1e30f, ylo = 1e30f, yhi = -1e30f;
+                    for (std::uint32_t v = 0; v < b.count; ++v) {
+                        const float *q = &g_places[(b.first + v) * 3u];
+                        xlo = std::min(xlo, q[0]), xhi = std::max(xhi, q[0]), ylo = std::min(ylo, q[1]), yhi = std::max(yhi, q[1]), zlo = std::min(zlo, q[2]), zhi = std::max(zhi, q[2]);
+                    }
+                    std::fprintf(stderr, "[frame gen] moved: key %016llx, %u places, at (%.2f %.2f %.2f) %.1f m away, %.3f m most, %.3f precision, %.3f off rigid, "
+                                 "screen %.0f..%.0f x %.0f..%.0f, depth %.0f..%.0f\n",
+                                 (unsigned long long)b.key, b.count, cb[0], cb[1], cb[2], cam, most, precision, worst, xlo, xhi, ylo, yhi, zlo, zhi);
+                }
+            }
+            // q = R (p - ca) + cb  ->  t = cb - R ca
+            for (int r = 0; r < 3; ++r) o.t[r] = cb[r] - (o.R[r * 3] * ca[0] + o.R[r * 3 + 1] * ca[1] + o.R[r * 3 + 2] * ca[2]);
+            // one object with the last one when it moved alike (a car drawn in many strips)
+            if (!objs.empty()) {
+                Obj &l = objs.back();
+                double dt = 0.0, dr = 0.0;
+                for (int k = 0; k < 3; ++k) dt += std::fabs(l.t[k] - o.t[k]);
+                for (int k = 0; k < 9; ++k) dr += std::fabs(l.R[k] - o.R[k]);
+                if (dt < 0.03 && dr < 0.02) {
+                    for (int k = 0; k < 3; ++k) l.lo[k] = std::min(l.lo[k], o.lo[k]), l.hi[k] = std::max(l.hi[k], o.hi[k]);
+                    continue;
+                }
+            }
+            if (objs.size() < 128) objs.push_back(o);
+        }
+    }
+    for (const Obj &o : objs) {
+        // back to a step before: p = R^T (q - t); as rows for a row vector q: G = [R (3x3 transposed twice), -t R]
+        float rec[24] = {};
+        for (int k = 0; k < 3; ++k) rec[k] = static_cast<float>(o.lo[k]), rec[4 + k] = static_cast<float>(o.hi[k]);
+        // row-vector form: p_j = sum_i q_i R[i][j] - sum_i t_i R[i][j]
+        for (int i = 0; i < 3; ++i)
+            for (int j = 0; j < 3; ++j) rec[8 + i * 4 + j] = static_cast<float>(o.R[i * 3 + j]);
+        for (int j = 0; j < 3; ++j) rec[8 + 12 + j] = static_cast<float>(-(o.t[0] * o.R[0 * 3 + j] + o.t[1] * o.R[1 * 3 + j] + o.t[2] * o.R[2 * 3 + j]));
+        rec[8 + 15] = 1.0f;
+        out.insert(out.end(), rec, rec + 24);
+    }
+    // PS2_FRAME_GEN_OBJECTS_TEST=metres (a check of the whole path): everything not on a character is taken to have come that far
+    // along x since the step before (one object as big as the world), so the in-between pictures show it sliding
+    static const double test_move = [] { const char *v = std::getenv("PS2_FRAME_GEN_OBJECTS_TEST"); return v ? std::atof(v) : 0.0; }();
+    if (test_move != 0.0 && ok) {
+        float rec[24] = {-1e5f, -1e5f, -1e5f, 0, 1e5f, 1e5f, 1e5f, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, static_cast<float>(-test_move), 0, 0, 1};
+        out.insert(out.end(), rec, rec + 24);
+        out[at] = static_cast<float>(objs.size() + 1);
+    } else
+    out[at] = static_cast<float>(objs.size());
+    g_stats[0] = g_batches.size(), g_stats[1] = matched, g_stats[2] = moved, g_stats[3] = objs.size();
+    if (ps2::frame_generation_log())
+        std::fprintf(stderr, "[frame gen] things not matched: %llu new, %llu without a place (behind or at the eye), %llu none near, %llu on a character, %llu sprites or at the edge\n", (unsigned long long)g_why[0],
+                     (unsigned long long)g_why[1], (unsigned long long)g_why[2], (unsigned long long)g_why[3], (unsigned long long)g_why[4]);
+    std::fill(std::begin(g_why), std::end(g_why), 0ull);
+    g_prev_batches.swap(g_batches);
+    g_prev_world.swap(world);
+    g_prev_valid = ok;
+    g_batches.clear();
+    g_places.clear();
+    g_key = ~0ull;
+}
+}
+
+// v0.10.8: a step's mark (on the drawing side, in order with the drawing): its moving things found, then all handed to frame
+// generation
+void interp_step(const float *data, int n) {
+#ifdef PS2_GPU
+    if (n < 16) return;
+    static std::vector<float> objects;
+    objects.clear();
+    motion::on_mark(data, n, objects);
+    gpu::interp_mark(data, n);
+    gpu::interp_objects(objects.data(), static_cast<int>(objects.size()), motion::g_stats);
+#else
+    (void)data, (void)n;
+#endif
+}
+
 [[gnu::always_inline]] static inline void kick(bool draw) {
     State &s = g_state;
     const std::uint32_t prim = static_cast<std::uint32_t>(s.prim) & 7u;
@@ -1419,6 +1795,7 @@ bool step(const State &s, std::uint64_t attr) {
     std::memcpy(&v.t, &tbits, 4);
     v.u = static_cast<std::uint32_t>(s.uv) & 0x3FFFu;
     v.v = static_cast<std::uint32_t>(s.uv >> 16) & 0x3FFFu;
+    if (ui::g_for_frames.load(std::memory_order_relaxed)) [[unlikely]] motion::note(s, v);   // v0.10.8: frame generation's moving things
     kick(draw);
 }
 
@@ -2413,7 +2790,7 @@ Rendered render_pending(const std::function<void(const DisplayRegs &)> &on_prese
             static std::vector<float> m;
             m.resize(std::min<std::uint32_t>(h.arg0, 1u << 20));   // (a big one goes through the heap: its size is in arg0)
             if (!m.empty()) std::memcpy(m.data(), payload, m.size() * 4u);
-            gpu::interp_mark(m.data(), static_cast<int>(m.size()));
+            interp_step(m.data(), static_cast<int>(m.size()));
             break;
         }
 #endif
@@ -2672,7 +3049,7 @@ void frame_step(const float *data, int n) {
 #ifdef PS2_GPU
     if (!ps2::gs::gpu::frame_generation() || n < 16) return;
     if (ps2::gs::queue::active()) ps2::gs::queue::post(ps2::gs::queue::kInterpMark, static_cast<std::uint32_t>(n), 0, data, static_cast<std::uint32_t>(n) * 4u);
-    else ps2::gs::gpu::interp_mark(data, n);
+    else ps2::gs::interp_step(data, n);
 #else
     (void)data, (void)n;
 #endif
@@ -2692,6 +3069,8 @@ int frame_generation() {
 }
 #ifdef PS2_GPU
 void set_fps_limit(int fps) { ps2::gs::gpu::set_fps_limit(fps); }
+void set_frame_generation_objects(bool on) { ps2::gs::gpu::set_frame_generation_objects(on); }
+bool frame_generation_objects() { return ps2::gs::gpu::frame_generation_objects(); }
 int fps_limit() { return ps2::gs::gpu::fps_limit(); }
 void set_paced_threads(bool on) { ps2::gs::gpu::set_paced_threads(on); }
 bool paced_presents() { return ps2::gs::gpu::paced(); }
@@ -2702,8 +3081,14 @@ int frame_generation_view() { return ps2::gs::gpu::frame_generation_view(); }
 void set_frame_generation_log(bool on) { ps2::gs::gpu::set_frame_generation_log(on); }
 bool frame_generation_log() { return ps2::gs::gpu::frame_generation_log(); }
 void dump_presents(const char *base, int count) { ps2::gs::gpu::dump_presents(base ? base : "", count); }
+void set_frame_generation_objects_list(bool on) { ps2::gs::motion::g_list.store(on, std::memory_order_relaxed); }
+bool frame_generation_objects_list() { return ps2::gs::motion::g_list.load(std::memory_order_relaxed); }
 #else
+void set_frame_generation_objects_list(bool) {}
+bool frame_generation_objects_list() { return false; }
 void set_fps_limit(int) {}
+void set_frame_generation_objects(bool) {}
+bool frame_generation_objects() { return false; }
 int fps_limit() { return 60; }
 void set_paced_threads(bool) {}
 bool paced_presents() { return false; }

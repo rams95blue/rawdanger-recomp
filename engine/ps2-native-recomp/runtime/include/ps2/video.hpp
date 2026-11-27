@@ -56,6 +56,12 @@ void dump_presents(const char *base, int count);
 // with the camera of the moment by the clock (present_paced, from the window's loop; set_paced_threads: the window runs the game on
 // its own threads, the only case where it can keep a pace). paced_counts: pictures shown and game pictures taken so far.
 void set_fps_limit(int fps);
+// v0.10.8, Settings > Debug: frame generation moves the things that moved (cars, debris, doors; on by default)
+void set_frame_generation_objects(bool on);
+bool frame_generation_objects();
+// Settings > Debug: each thing found to have moved, one line in the log (where, how far, how far off a rigid move)
+void set_frame_generation_objects_list(bool on);
+bool frame_generation_objects_list();
 int fps_limit();
 void set_paced_threads(bool on);
 bool paced_presents();

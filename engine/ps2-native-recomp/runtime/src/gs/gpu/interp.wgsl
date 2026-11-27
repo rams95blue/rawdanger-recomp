@@ -36,6 +36,28 @@ struct Params {
 // own, and the four rows of the matrix that takes a point on the bone from the step drawn to the moment shown
 @group(0) @binding(4) var<storage, read> bones: array<vec4<f32>>;
 
+// v0.10.8: the things that moved (cars, debris, doors): from vec4 12417, six each: the box's corners in the world (as drawn), then
+// the four rows of the matrix that takes a point of it back to where it was a step before. bones[0].z: how many.
+const kObjects = 12417u;
+fn object_at(p: vec3<f32>) -> i32 {
+    let n = min(u32(bones[0].z), 128u);
+    var found = -1;
+    var smallest = 1e30;
+    for (var o = 0u; o < n; o = o + 1u) {
+        let lo = bones[kObjects + o * 6u].xyz - vec3<f32>(0.05);
+        let hi = bones[kObjects + o * 6u + 1u].xyz + vec3<f32>(0.05);
+        if (all(p >= lo) && all(p <= hi)) {
+            let size = hi - lo;
+            let volume = size.x * size.y * size.z;
+            if (volume < smallest) {
+                smallest = volume;
+                found = i32(o);
+            }
+        }
+    }
+    return found;
+}
+
 // the bone a world point is on (the nearest segment within 35 cm, of a character whose sphere holds it), -1 if none
 fn bone_at(p: vec3<f32>) -> i32 {
     let chars = min(u32(bones[0].x), 64u);
@@ -95,6 +117,7 @@ fn zat(x: i32, y: i32) -> u32 {
 struct Landing {
     ok: bool,
     bone: i32,    // the bone it moved with, -1 none (the debug view)
+    object: i32,  // the thing it moved with, -1 none (the debug view)
     x: i32,       // the top left of the 2 x 2 samples it covers
     y: i32,
     key: u32,
@@ -105,6 +128,7 @@ fn land(x: u32, y: u32) -> Landing {
     var r: Landing;
     r.ok = false;
     r.bone = -1;
+    r.object = -1;
     let w = params.size.x;
     let h = params.size.y;
     let s = f32(params.size.z);
@@ -150,9 +174,11 @@ fn land(x: u32, y: u32) -> Landing {
     let px = gx + params.off.x;
     let py = gy + params.off.y;
     let hw = px * params.inv[0] + py * params.inv[1] + zf * params.inv[2] + params.inv[3];
-    if (abs(hw.w) < 1e-20) {
-        return r;
-    }
+    var q = vec4<f32>(0.0);
+    if (abs(hw.w) < 1e-6 * max(length(hw.xyz), 1e-30)) {
+        // v0.10.8: as far as can be (a depth of 0: the sky, a cleared far plane): a direction, turned with the camera only
+        q = hw.x * params.mf[0] + hw.y * params.mf[1] + hw.z * params.mf[2] + hw.w * params.mf[3];
+    } else {
     var p = hw.xyz / hw.w;
     // v0.10.6: on a character: moved with its bone, turn and all, to the moment shown
     if (u32(bones[0].y) > 0u) {
@@ -178,7 +204,18 @@ fn land(x: u32, y: u32) -> Landing {
         }
     }
     p = p + moved * params.motion.x;
-    let q = p.x * params.mf[0] + p.y * params.mf[1] + p.z * params.mf[2] + params.mf[3];
+    // v0.10.8: not on a character: on a thing that moved, back along its move to the moment shown
+    if (r.bone < 0 && u32(bones[0].z) > 0u) {
+        let o = object_at(p);
+        r.object = o;
+        if (o >= 0) {
+            let at = kObjects + u32(o) * 6u;
+            let back = p.x * bones[at + 2u].xyz + p.y * bones[at + 3u].xyz + p.z * bones[at + 4u].xyz + bones[at + 5u].xyz;
+            p = p + (back - p) * (-params.motion.x);
+        }
+    }
+    q = p.x * params.mf[0] + p.y * params.mf[1] + p.z * params.mf[2] + params.mf[3];
+    }
     if (!(q.w > 1e-6)) {
         return r;
     }
@@ -245,8 +282,9 @@ fn resolve(@builtin(global_invocation_id) gid: vec3<u32>) {
         let g = min(l.key * 2u, 255u);
         colour = g | (g << 8u) | (g << 16u);
     }
-    if (params.motion.w > 0.5 && l.bone >= 0) {   // debug: the pixels moved with a bone, a colour per bone over the picture
-        let hsh = u32(l.bone) * 2654435761u;
+    let tinted = select(l.bone, l.object + 4096, l.object >= 0);
+    if ((params.motion.w > 0.5 && l.bone >= 0) || (params.motion.w < -0.5 && l.object >= 0)) {   // debug: a colour per bone or per thing
+        let hsh = u32(tinted) * 2654435761u;
         let tint = vec3<u32>((hsh >> 8u) & 255u, (hsh >> 16u) & 255u, (hsh >> 24u) & 255u);
         let c = vec3<u32>(colour & 255u, (colour >> 8u) & 255u, (colour >> 16u) & 255u);
         let m = (c + tint * 3u) / 4u;

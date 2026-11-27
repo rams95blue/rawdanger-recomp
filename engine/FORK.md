@@ -179,6 +179,12 @@
   degrees in a bone's local turn goes half the way each step; the spine and chest get breathing standing still, a hunch when
   wet, shivering when cold and a lean into turns, turned in the world after they are built (the head and arms follow).
   Settings > Controls > Livelier hero (keys.ini anim_layers, on); Settings > Debug: the layers x4.
+- **0052-rd-frame-generation-things** (rawdanger-recomp v0.10.8): frame generation moves things that are not characters: each
+  step keeps the vertices of the depth-writing 3D batches of the 640-wide picture (in the world, by the step's matrix), matches each
+  with the same batch a step before, and a rigid move (Horn's fit, a tenth off at most, a game pixel or more on the screen) becomes
+  a thing: its box and the matrix back (up to 128, after the bones in the bones buffer). Characters, depthless effects, screen-facing
+  sprites, corners at the eye and things cut at the picture's edge are left out. Settings > Debug: the switch, the view (a colour per
+  thing), the log of each thing; `PS2_FRAME_GEN_OBJECTS`, `_VIEW`, `_LOG`, `_TEST=<metres>` (the whole path checked by a slide).
 - **0051-rd-paced-pictures** (rawdanger-recomp v0.10.7): more pictures a second than 60 with frame generation: keys.ini
   `fps_limit = 60 | 120 | 144 | 165 | 240 | none` (`PS2_FPS_LIMIT`), Settings > Display > Pictures a second. Above (or without) 60,
   the game's presents only take its picture; the window thread shows pictures made from it at the limit's pace, each with the

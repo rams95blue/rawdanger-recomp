@@ -204,3 +204,31 @@ At 60 nothing changes: one picture per refresh of the console. Otherwise (engine
 Measured here only on a software graphics card (about 12 pictures shown per 3 game pictures a second, the pass being the limit
 there); the pacing, the moments and the pictures were checked with the log and saved pictures. A real graphics card should make the
 pass far faster (not measured yet: the stats row shows it).
+
+## v0.10.8: things that move and are not characters (a motion buffer)
+
+Frame generation moved the camera (v0.10.5) and the characters through their bones (v0.10.6); a car, a piece of debris or a door
+that moved between two steps stayed where the step drew it. Now each step keeps the 3D geometry it drew (the vertices of the
+depth-tested, depth-writing batches of the game's 640-wide picture), brought back into the world with the step's exact matrix. The
+same batch a step before (the same texture and setup, the same number of vertices, the nearest) is compared with it, place by place:
+
+- a batch that moved more than the depth's precision there and at least a game pixel on the screen (once the camera's own move is
+  taken out), and less than 3 m, is a thing that moved;
+- its turn and shift are fitted (Horn's method), and the fit must explain the move to a tenth (rain, splashes, ripples and other
+  effects change shape as they go, and do not pass);
+- batches next to each other that moved alike become one thing (a car drawn in many strips): its box in the world and the matrix
+  that takes it back to where it was a step before.
+
+Up to 128 things go to the GPU each step with the bones. A made picture's pixel that is on no character's bone but inside a thing's box
+is put along that thing's move, to the moment shown (between the two steps, or past the last one in "predict").
+
+Left out, on purpose: the characters (their bones do it); what writes no depth (rain, smoke, glows); sprites set to face the screen
+(one depth for all their corners: lights, flares); anything with a corner at the camera (drawn pressed to the nearest depth: it comes
+back to the camera's place and would follow it); and anything cut at the picture's edge (the game's clipper makes corners there that
+are not points of the thing). So a thing crossing the edge of the screen is not moved until it is all in the picture.
+
+Checked: in the scenes at hand (two of the first chapter's, still and with the camera turning, and three more) nothing is taken for
+a moving thing (0 a step, where the first version found 140 to 430: rain, clipped walls, flares, the sky pressed to the camera). The
+whole path was checked with `PS2_FRAME_GEN_OBJECTS_TEST` (the scene slides in the made pictures, the hero and the HUD stay, the real
+pictures are untouched). None of those scenes has a car or debris moving, so the first real one is still to be seen: Settings > Debug
+has the switch (on / off, to compare), the view (a colour per thing) and the log (each thing, with why the others were not taken).

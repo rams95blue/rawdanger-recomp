@@ -252,7 +252,8 @@ constexpr std::size_t kDebugRow = static_cast<std::size_t>(-2), kMapSelRow = sta
                       kViewRow = static_cast<std::size_t>(-12), kStatsRow = static_cast<std::size_t>(-13), kAnimGainRow = static_cast<std::size_t>(-14),
                       kStepsRow = static_cast<std::size_t>(-15),
                       // v0.10.5: frame generation's test views, its log, and the next pictures saved as shown
-                      kFrameViewRow = static_cast<std::size_t>(-16), kFrameLogRow = static_cast<std::size_t>(-17), kSavePicturesRow = static_cast<std::size_t>(-18);
+                      kFrameViewRow = static_cast<std::size_t>(-16), kFrameLogRow = static_cast<std::size_t>(-17), kSavePicturesRow = static_cast<std::size_t>(-18),
+                      kFrameObjectsRow = static_cast<std::size_t>(-19), kFrameObjectsListRow = static_cast<std::size_t>(-20);
 // rawdanger-recomp (v0.9.2): the hero's two bars. PS2_DEBUG_HERO="TABLE,PLAYER,COUNT,NOW1,MOST1,NOW2,MOST2" (hex: the table of the
 // characters' addresses, the word with the player's number, how many the table has, and two pairs of offsets: a value and its
 // most). Raw Danger: 0x5EAC80, 0x48F3E4, 235; health (+0x368 of +0x36C, 100) and body temperature (+0x370 of +0x374, 30000: it
@@ -1639,9 +1640,12 @@ void menu_paint(bool show_again) {
                 debug_row(kViewRow, "Picture shown", kViews[std::clamp(ps2::debug_view(), 0, 3)]);
                 debug_row(kStatsRow, "Stats on screen (FPS, CPU, GPU, scene)", g_stats_on ? "<  on  >" : "<  off >");
                 {
-                    static const char *const kFrameViews[] = {"<  the picture  >", "<  gaps in magenta  >", "<  depth moved  >", "<  bones (a colour each)  >"};
-                    debug_row(kFrameViewRow, "Frame generation: what the made pictures show", kFrameViews[std::clamp(ps2::frame_generation_view(), 0, 3)]);
+                    static const char *const kFrameViews[] = {"<  the picture  >", "<  gaps in magenta  >", "<  depth moved  >", "<  bones (a colour each)  >",
+                                                              "<  moving things (a colour each)  >"};
+                    debug_row(kFrameViewRow, "Frame generation: what the made pictures show", kFrameViews[std::clamp(ps2::frame_generation_view(), 0, 4)]);
                     debug_row(kFrameLogRow, "Frame generation: each step in the log", ps2::frame_generation_log() ? "<  on  >" : "<  off >");
+                    debug_row(kFrameObjectsRow, "Frame generation: move the things that moved (not characters)", ps2::frame_generation_objects() ? "<  on  >" : "<  off >");
+                    debug_row(kFrameObjectsListRow, "Frame generation: each moved thing in the log", ps2::frame_generation_objects_list() ? "<  on  >" : "<  off >");
                     debug_row(kSavePicturesRow, "Save the next 6 pictures as shown (with SMAA's and frame generation's maps; for reports)", "now");
                 }
                 if (debug_info().set) debug_row(kInfoRow, "Where am I (scene, camera, place, wetness: for reports)", "show");
@@ -2763,10 +2767,21 @@ void menu_command(quickmenu::Command c, int step) {
         if (row < g_recomp_row_section.size() && g_recomp_row_section[row] == kFrameViewRow) {
             static const char *const kNotes[] = {"Made pictures: the picture", "Made pictures: the places nothing landed on, in magenta (filled from the background)",
                                                  "Made pictures: the depth moved instead of the colours (near bright)",
-                                                 "Made pictures: the pixels moved with a character's bone, a colour per bone"};
-            const int k = (ps2::frame_generation_view() + (step < 0 ? 3 : 1)) % 4;
+                                                 "Made pictures: the pixels moved with a character's bone, a colour per bone",
+                                                 "Made pictures: the pixels moved with a thing that moved (car, debris, door), a colour per thing"};
+            const int k = (ps2::frame_generation_view() + (step < 0 ? 4 : 1)) % 5;
             ps2::set_frame_generation_view(k);
             g_recomp_note = kNotes[k];
+            break;
+        }
+        if (row < g_recomp_row_section.size() && g_recomp_row_section[row] == kFrameObjectsListRow) {
+            ps2::set_frame_generation_objects_list(!ps2::frame_generation_objects_list());
+            g_recomp_note = ps2::frame_generation_objects_list() ? "Each thing found to have moved goes in the log (where, how far, how far off a rigid move)" : "Moved things are no longer listed in the log";
+            break;
+        }
+        if (row < g_recomp_row_section.size() && g_recomp_row_section[row] == kFrameObjectsRow) {
+            ps2::set_frame_generation_objects(!ps2::frame_generation_objects());
+            g_recomp_note = ps2::frame_generation_objects() ? "Frame generation moves the things that moved between two steps" : "Frame generation leaves the things that moved where they were drawn (to compare)";
             break;
         }
         if (row < g_recomp_row_section.size() && g_recomp_row_section[row] == kFrameLogRow) {

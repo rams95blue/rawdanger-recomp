@@ -156,9 +156,13 @@ namespace interp {
 // 2 predict (the camera carried on past the last step: no delay, a little off where it turns)
 std::atomic<int> g_mode{[] { const char *v = std::getenv("PS2_FRAME_GEN"); return v ? std::clamp(std::atoi(v), 0, 2) : 0; }()};
 struct Pic { bool valid = false; int buf = 0; float m[16] = {}; float ofx = 0, ofy = 0; std::uint32_t w = 0, h = 0; int limbs = 0; float limb[12][8] = {};
-             std::vector<float> bones; int nbones = 0; };   // v0.10.6: every character's bones (system.cpp all_bones_world, 21 floats each)
-constexpr int kBoneFloats = 21, kMaxChars = 64, kMaxBones = 2048;
-constexpr std::uint32_t kBoneBufFloats = 4 + kMaxChars * 8 + kMaxBones * 24;
+             std::vector<float> bones; int nbones = 0;      // v0.10.6: every character's bones (system.cpp all_bones_world, 21 floats each)
+             std::vector<float> objects; int nobjects = 0; };   // v0.10.8: the things that moved (gs.cpp motion, 24 floats each)
+constexpr int kBoneFloats = 21, kMaxChars = 64, kMaxBones = 2048, kMaxObjects = 128;
+constexpr std::uint32_t kObjectsAt = 4 + kMaxChars * 8 + kMaxBones * 24;   // floats (vec4 12417 in interp.wgsl)
+constexpr std::uint32_t kBoneBufFloats = kObjectsAt + kMaxObjects * 24;
+std::uint64_t g_object_stats[4] = {};   // the last step's batches, matched, moved, objects (the log)
+std::atomic<bool> g_objects_on{[] { const char *v = std::getenv("PS2_FRAME_GEN_OBJECTS"); return !(v && *v == '0'); }()};   // Settings > Debug
 Pic g_cur, g_prev;
 bool g_captured = false;
 int g_pending = 0;
@@ -174,7 +178,7 @@ std::atomic<bool> g_log_on{std::getenv("PS2_FRAME_GEN_LOG") != nullptr};   // Se
 inline bool log_on() { return g_log_on.load(std::memory_order_relaxed); }
 // Settings > Debug: 0 the picture, 1 the places nothing landed on in magenta, 2 the depth moved (bright near); PS2_FRAME_GEN_HOLES /
 // PS2_FRAME_GEN_DEPTH at the start
-std::atomic<int> g_view{std::getenv("PS2_FRAME_GEN_HOLES") ? 1 : std::getenv("PS2_FRAME_GEN_DEPTH") ? 2 : std::getenv("PS2_FRAME_GEN_BONES_VIEW") ? 3 : 0};
+std::atomic<int> g_view{std::getenv("PS2_FRAME_GEN_HOLES") ? 1 : std::getenv("PS2_FRAME_GEN_DEPTH") ? 2 : std::getenv("PS2_FRAME_GEN_BONES_VIEW") ? 3 : std::getenv("PS2_FRAME_GEN_OBJECTS_VIEW") ? 4 : 0};
 }
 // PS2_PRESENT_DUMP / Settings > Debug > Save the next pictures: the presents to write (present())
 std::mutex g_dump_mutex;
@@ -3250,7 +3254,7 @@ void plan_interp(std::uint32_t base, std::uint32_t width, std::uint32_t height, 
     const int view = interp::g_view.load(std::memory_order_relaxed);
     j.p[45] = view == 2 ? 1.0f : 0.0f;   // debug: the depth moved instead of the colours
     j.p[46] = view == 1 ? 1.0f : 0.0f;   // debug: the places nothing landed on, magenta
-    j.p[47] = view == 3 ? 1.0f : 0.0f;   // debug: the pixels moved with a bone, a colour per bone
+    j.p[47] = view == 3 ? 1.0f : view == 4 ? -1.0f : 0.0f;   // debug: the pixels moved with a bone (3) or a thing (4), a colour each
     for (unsigned b = 0; b < nb; ++b) {
         j.p[48 + b * 4 + 0] = boxes[b * 4 + 0] * static_cast<float>(game_w), j.p[48 + b * 4 + 1] = boxes[b * 4 + 1] * static_cast<float>(game_h);
         j.p[48 + b * 4 + 2] = boxes[b * 4 + 2] * static_cast<float>(game_w), j.p[48 + b * 4 + 3] = boxes[b * 4 + 3] * static_cast<float>(game_h);
@@ -3297,7 +3301,7 @@ void plan_interp(std::uint32_t base, std::uint32_t width, std::uint32_t height, 
     // the matrix that takes a point on it from the step drawn to the moment shown: (the drawn bone's matrix)^-1 x (the bone's matrix
     // blended between the two steps), rows, the place in the fourth. A bone with no match in the step before, or that jumped (a new
     // place, a cut), keeps its place.
-    if (cur.nbones > 0) {
+    if (cur.nbones > 0 || cur.nobjects > 0) {
         std::vector<float> &out = j.bones;
         out.assign(4 + kMaxChars * 8, 0.0f);
         out.reserve(out.size() + static_cast<std::size_t>(std::min(cur.nbones, kMaxBones)) * 24);
@@ -3374,6 +3378,13 @@ void plan_interp(std::uint32_t base, std::uint32_t width, std::uint32_t height, 
             c[3] = most + 0.5f;
         }
         out[0] = static_cast<float>(chars), out[1] = static_cast<float>(bones);
+        // v0.10.8: the things that moved: after the bones' room, 24 floats each (the box's corners, the matrix back a step)
+        const int nobj = std::min(cur.nobjects, kMaxObjects);
+        if (nobj > 0) {
+            out.resize(kObjectsAt + static_cast<std::size_t>(nobj) * 24, 0.0f);
+            std::memcpy(&out[kObjectsAt], cur.objects.data(), static_cast<std::size_t>(nobj) * 24 * 4);
+        }
+        out[2] = static_cast<float>(nobj);
     }
     j.on = true, j.buf = cur.buf, j.base = base, j.width = width, j.height = height;
     ++g_generated;
@@ -5465,6 +5476,25 @@ void interp_mark(const float *data, int n) {
     }
 }
 
+// v0.10.8: the things that moved in the step just marked (gs.cpp motion), for its picture
+void interp_objects(const float *data, int n, const std::uint64_t *stats) {
+    using namespace interp;
+    if (stats) std::memcpy(g_object_stats, stats, sizeof g_object_stats);
+    g_cur.objects.clear();
+    g_cur.nobjects = 0;
+    if (n >= 1 && g_cur.valid && g_objects_on.load(std::memory_order_relaxed)) {
+        const int count = std::clamp(static_cast<int>(data[0]), 0, std::min(kMaxObjects, (n - 1) / 24));
+        g_cur.objects.assign(data + 1, data + 1 + count * 24);
+        g_cur.nobjects = count;
+    }
+    if (log_on() && stats)
+        std::fprintf(stderr, "[frame gen] things: %llu batches drawn, %llu matched with the step before, %llu moved, %d objects\n",
+                     static_cast<unsigned long long>(stats[0]), static_cast<unsigned long long>(stats[1]), static_cast<unsigned long long>(stats[2]), g_cur.nobjects);
+}
+
+void set_frame_generation_objects(bool on) { interp::g_objects_on.store(on, std::memory_order_relaxed); }
+bool frame_generation_objects() { return interp::g_objects_on.load(std::memory_order_relaxed); }
+
 void set_frame_generation(int mode) {
     interp::g_mode.store(std::clamp(mode, 0, 2), std::memory_order_relaxed);
     if (!mode) interp::g_cur.valid = interp::g_prev.valid = false;
@@ -5476,7 +5506,7 @@ int fps_limit() { return paced::g_limit.load(std::memory_order_relaxed); }
 void set_paced_threads(bool on) { paced::g_threads.store(on, std::memory_order_relaxed); }
 bool paced() { return paced_on(); }
 void paced_counts(std::uint64_t &made, std::uint64_t &taken) { made = paced::g_made, taken = paced::g_taken; }
-void set_frame_generation_view(int view) { interp::g_view.store(std::clamp(view, 0, 3), std::memory_order_relaxed); }
+void set_frame_generation_view(int view) { interp::g_view.store(std::clamp(view, 0, 4), std::memory_order_relaxed); }
 int frame_generation_view() { return interp::g_view.load(std::memory_order_relaxed); }
 void set_frame_generation_log(bool on) { interp::g_log_on.store(on, std::memory_order_relaxed); }
 bool frame_generation_log() { return interp::g_log_on.load(std::memory_order_relaxed); }

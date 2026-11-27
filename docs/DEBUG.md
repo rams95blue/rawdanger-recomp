@@ -90,14 +90,20 @@ else:
 | Wet look: show the hero's capsules | The parts of the screen the wet look treats, in blue |
 | Head follows camera: a fixed turn | Off, or the head held at -60 / -30 / 30 / 60 degrees |
 | Game steps a second (v0.9.8) | The game's, 20, 30 or 60: a test of the pacing (everything runs faster; docs/FRAMERATE.md) |
-| Frame generation: what the made pictures show (v0.10.5) | The picture; the places nothing landed on, in magenta (normally filled from the background beside them); the depth moved instead of the colours (near bright); or (v0.10.6) the pixels moved with a character's bone, a colour per bone (to check which bone each part follows) |
+| Frame generation: what the made pictures show (v0.10.5) | The picture; the places nothing landed on, in magenta (normally filled from the background beside them); the depth moved instead of the colours (near bright); or (v0.10.6) the pixels moved with a character's bone, a colour per bone (to check which bone each part follows); or (v0.10.8) the pixels moved with a thing that moved (not a character), a colour per thing |
 | Frame generation: each step in the log (v0.10.5) | Each step (depth taken, the hero's limbs, a cut) and each made picture (where in the step, how far the screen's middle moves) in the log |
+| Frame generation: move the things that moved (v0.10.8) | On (default): things that are not characters and moved between two steps (a car, debris, a door) are put where they are at the moment shown; off leaves them where the step drew them, to compare |
+| Frame generation: each moved thing in the log (v0.10.8) | One line per thing found to have moved: its key, places, where it is, how far it moved, the depth's precision there, how far off a rigid move, its box on the screen and depths. With the step log on, each step also says how many batches were drawn, matched, moved and why the others were not matched (new, at the eye, none near, on a character, a sprite or cut at the picture's edge) |
 | Stats on screen: Pictures a second (v0.10.7) | With frame generation above 60: the pictures shown a second and the game's (the frame generation log also prints both each second, and each paced picture's moment in the step) |
 | Save the next 6 pictures as shown (v0.10.5) | The next 6 presents as the window gets them (after SMAA and frame generation, before the enlargement), next to the memory card as `pictures-<date>.N.ppm`, with SMAA's edges and weights, frame generation's depth (`.depth.pgm` / raw `.depth.u32`) and its keys (`.keys.ppm`: gaps red, the HUD blue): attach them to a report |
 
 Environment switches for tests (no menu needed): `PS2_FRAME_GEN=0/1/2` (off / smooth / predict), `PS2_FRAME_GEN_LOG=1`,
 `PS2_FRAME_GEN_HOLES=1`, `PS2_FRAME_GEN_DEPTH=1`, `PS2_FRAME_GEN_AT=<0..1>` (every made picture at that point of the step: 0
 shows each picture with the step before's camera, to compare with it), `PS2_PRESENT_DUMP=<vblank>,<base>[,<count>]`,
-`PS2_WET_LOG=1` (each wet look / AO pass in the log), `PS2_FRAME_GEN_BONES_VIEW=1` (the bones view), `PS2_FPS_LIMIT=<n>` (0 no limit), `PS2_FRAME_GEN_BONES=TABLE,COUNT,MODEL` (hex: where the characters are; Raw Danger's 5EAC80,EB,F0).
+`PS2_WET_LOG=1` (each wet look / AO pass in the log), `PS2_FRAME_GEN_BONES_VIEW=1` (the bones view), `PS2_FPS_LIMIT=<n>` (0 no limit), `PS2_FRAME_GEN_BONES=TABLE,COUNT,MODEL` (hex: where the characters are; Raw Danger's 5EAC80,EB,F0),
+`PS2_FRAME_GEN_OBJECTS=0` (the moved things off), `PS2_FRAME_GEN_OBJECTS_VIEW=1` (the moved things view), `PS2_FRAME_GEN_OBJECTS_LOG=1`
+(each moved thing in the log), `PS2_FRAME_GEN_OBJECTS_TEST=<metres>` (a check of the whole path: everything that is not a character
+is taken to have come that far along x since the step before, so the made pictures show the scene sliding while the hero and the HUD
+stay; the real pictures are unchanged).
 | Developers' debug menu, map select | The disc's own menus (Shift+F7, F7) |
 

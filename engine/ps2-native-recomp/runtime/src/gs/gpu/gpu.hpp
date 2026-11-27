@@ -36,6 +36,9 @@ void game_filter(const std::uint32_t *p, std::uint32_t n);
 // rawdanger-recomp (v0.10.5): frame generation (interp.wgsl)
 void interp_capture(std::uint32_t zbp, std::uint32_t zpsm, std::uint32_t bw, std::uint32_t w, std::uint32_t h, float ofx, float ofy, std::uint32_t draws);
 void interp_mark(const float *data, int n);
+void interp_objects(const float *data, int n, const std::uint64_t *stats);
+void set_frame_generation_objects(bool on);
+bool frame_generation_objects();
 void set_frame_generation(int mode);
 int frame_generation();
 void set_frame_generation_view(int view);
